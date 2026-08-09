@@ -48,12 +48,14 @@ export class Logger {
     this.log("error", message);
   }
 
+  /** 过滤 silent 或低于最小级别的消息，其余交给 write */
   private log(level: LogLevel, message: string): void {
     if (this.silent) return;
     if (LEVEL_ORDER[level] < LEVEL_ORDER[this.level]) return;
     this.write(level, this.format(level, message));
   }
 
+  /** 组装输出行：可选时间戳前缀 + 级别 + 消息 */
   private format(level: LogLevel, message: string): string {
     const ts = this.timestamp ? `[${new Date().toISOString()}] ` : "";
     return `${ts}${level.toUpperCase().padEnd(5)} ${message}`;

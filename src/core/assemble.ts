@@ -2,14 +2,16 @@ import type { AssistantMessage, ContentBlock } from "./message.js";
 import type { StreamEvent } from "./events.js";
 
 /**
- * 事件收集器：消费统一事件流，把 text / thinking / toolcall 增量拼装为 AssistantMessage。
- * 工具调用参数为增量 JSON，收集拼接后解析为对象。
+ * 事件收集器：消费统一事件流，把增量拼装为 AssistantMessage。
+ * 文本与思考各自聚合成一个块；工具调用按 index 分组收集参数片段，
+ * 结束后拼接成 JSON 字符串解析为对象。
  */
 export async function assembleAssistantMessage(
   stream: AsyncIterable<StreamEvent>,
 ): Promise<AssistantMessage> {
   const textParts: string[] = [];
   const thinkingParts: string[] = [];
+  // 按工具调用 index 分组：id / name 来自 start 事件，参数来自 delta 事件
   const toolCalls = new Map<number, { id?: string; name?: string; json: string[] }>();
   let stopReason: string | undefined;
   let error: string | undefined;
@@ -46,6 +48,7 @@ export async function assembleAssistantMessage(
     }
   }
 
+  // 按固定顺序组装内容块：文本 → 思考 → 工具调用（按 index 升序）
   const content: ContentBlock[] = [];
   if (textParts.length > 0) {
     content.push({ type: "text", text: textParts.join("") });
@@ -63,6 +66,7 @@ export async function assembleAssistantMessage(
     });
   }
 
+  // 有停因或错误时记入 meta，供后续观测与续跑
   const meta = stopReason ?? error;
   return {
     role: "assistant",
@@ -71,6 +75,7 @@ export async function assembleAssistantMessage(
   };
 }
 
+/** 工具参数 JSON 字符串解析为对象；非法或缺省时返回空对象 */
 function parseArguments(json: string): Record<string, unknown> {
   if (!json) return {};
   try {

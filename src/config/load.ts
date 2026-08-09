@@ -36,6 +36,7 @@ async function readJsonFile(file: string): Promise<Record<string, unknown> | nul
   try {
     text = await readFile(file, "utf8");
   } catch (err) {
+    // 文件不存在视为没有该级配置源
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
