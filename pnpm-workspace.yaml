@@ -1,0 +1,4 @@
+# pnpm 配置（pnpm 11 的集中配置入口）
+# 允许依赖包运行构建脚本（默认阻止，供应链安全）
+allowBuilds:
+  esbuild: true
