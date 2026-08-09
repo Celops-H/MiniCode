@@ -14,11 +14,11 @@ interface Choice {
   finish_reason?: string;
 }
 
-/** openai-chat-completions 协议：统一格式 ↔ OpenAI 请求体 / SSE 流 */
+/** openai-chat-completions 协议：统一格式 ↔ OpenAI 请求体 / 流式响应 */
 export class OpenAICompletionsProtocol implements Protocol {
   readonly type = "openai-chat-completions" as const;
 
-  /** 统一 Context → OpenAI chat.completions 请求体（不含 model / stream，由 Provider 组装） */
+  /** 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装 */
   buildRequest(context: Context): unknown {
     return {
       messages: context.messages.map(toOpenAIMessage),
@@ -26,7 +26,12 @@ export class OpenAICompletionsProtocol implements Protocol {
     };
   }
 
-  /** OpenAI SSE chunk → 统一事件流 */
+  /**
+   * 解析 OpenAI 流式响应，归一化为统一事件。
+   * OpenAI 每次返回一个增量片段：可能带文本，也可能带某工具调用的参数片段。
+   * 工具调用没有独立的结束标记，这里用 started 记录已开始的调用，
+   * 收到 finish_reason 时统一补发结束事件。
+   */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
     const started = new Set<number>();
     for await (const chunk of stream) {
@@ -38,6 +43,7 @@ export class OpenAICompletionsProtocol implements Protocol {
         yield { type: "text_delta", text: delta.content };
       }
 
+      // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量
       if (Array.isArray(delta?.tool_calls)) {
         for (const tc of delta.tool_calls) {
           if (tc.index === undefined) continue;
@@ -56,6 +62,7 @@ export class OpenAICompletionsProtocol implements Protocol {
         }
       }
 
+      // 流结束：为所有已开始的工具调用补发结束事件
       if (choice.finish_reason) {
         for (const index of started) {
           yield { type: "toolcall_end", index };
@@ -67,6 +74,7 @@ export class OpenAICompletionsProtocol implements Protocol {
   }
 }
 
+/** 取 chunk 中的第一个 choice（OpenAI 流式通常只有一个），无效 chunk 返回 null */
 function firstChoice(chunk: unknown): Choice | null {
   if (typeof chunk !== "object" || chunk === null) return null;
   const choices = (chunk as { choices?: unknown }).choices;
@@ -76,11 +84,13 @@ function firstChoice(chunk: unknown): Choice | null {
   return choice as Choice;
 }
 
+/** 统一消息 → OpenAI 消息；assistant 的文本与工具调用拆成两个字段 */
 function toOpenAIMessage(message: Message): Record<string, unknown> {
   switch (message.role) {
     case "user":
       return { role: "user", content: message.content };
     case "tool_result":
+      // 工具结果用 tool 角色，通过 tool_call_id 关联原调用
       return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
     case "assistant": {
       const textBlocks = message.content
@@ -90,6 +100,7 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
       const thinkingBlocks = message.content
         .filter((b): b is ThinkingContent => b.type === "thinking")
         .map((b) => ({ type: "text", text: `<thinking>${b.thinking}</thinking>` }));
+      // 工具调用转成 tool_calls 数组，参数序列化为 JSON 字符串
       const toolCalls = message.content
         .filter((b): b is ToolCall => b.type === "tool_call")
         .map((b) => ({
@@ -107,6 +118,7 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
   }
 }
 
+/** 工具定义 → OpenAI function 格式（参数为 JSON Schema） */
 function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
   return {
     type: "function",

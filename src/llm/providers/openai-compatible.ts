@@ -4,7 +4,7 @@ import { OpenAICompletionsProtocol } from "../protocol/index.js";
 import type { Context, StreamEvent } from "../../core/index.js";
 import type { Provider, ProviderAuth, ModelInfo } from "../types.js";
 
-/** OpenAI 兼容 client 的最小形状（默认官方 SDK，测试可注入 mock） */
+/** OpenAI 兼容 client 接口（默认官方 SDK，测试可注入 mock） */
 export interface ChatCompletionsClient {
   chat: {
     completions: {
@@ -63,6 +63,7 @@ export class OpenAICompatibleProvider implements Provider {
     yield* this.protocol.parseStream(stream);
   }
 
+  /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
   private getClient(): ChatCompletionsClient {
     if (!this.apiKey) {
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量`);
@@ -72,6 +73,7 @@ export class OpenAICompatibleProvider implements Provider {
   }
 }
 
+/** 默认用官方 OpenAI SDK 创建 client */
 function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
   return new OpenAI({ baseURL: baseUrl, apiKey }) as unknown as ChatCompletionsClient;
 }

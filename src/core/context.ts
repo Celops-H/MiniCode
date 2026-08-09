@@ -1,6 +1,6 @@
 import type { Message } from "./message.js";
 
-/** 工具定义（最小契约）：Context 携带给模型，工具系统在此基础上扩展 */
+/** 工具定义：Context 携带给模型，工具系统在此基础上扩展 */
 export interface ToolDefinition {
   name: string;
   description: string;
