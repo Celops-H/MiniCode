@@ -23,6 +23,8 @@ export interface AgentOptions {
   modelId: string;
   systemPrompt: string;
   tools?: Tool[];
+  /** 初始消息（会话续跑时传入历史），默认为空 */
+  initialMessages?: Message[];
   /** 最大轮数，防止失控 */
   maxTurns?: number;
 }
@@ -44,6 +46,9 @@ export class Agent {
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
+    }
+    if (options.initialMessages) {
+      this.messages.push(...options.initialMessages);
     }
   }
 
