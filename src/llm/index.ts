@@ -1,4 +1,4 @@
-export { OpenAICompletionsProtocol } from "./protocol/index.js";
+export { OpenAICompletionsProtocol, AnthropicMessagesProtocol } from "./protocol/index.js";
 export { Models } from "./models.js";
 export { OpenAICompatibleProvider } from "./providers/index.js";
 export type { ChatCompletionsClient, OpenAICompatibleOptions } from "./providers/index.js";
