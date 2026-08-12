@@ -9,7 +9,7 @@
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
-    "dev": "tsx src/cli/index.ts",
+    "dev": "tsx src/cli/app.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
