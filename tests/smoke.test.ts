@@ -1,19 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { main } from "../src/cli/index.js";
+import { describe, expect, it } from "vitest";
+import { program } from "../src/cli/index.js";
 
 describe("CLI 冒烟测试", () => {
-  let logSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    logSpy.mockRestore();
-  });
-
-  it("main 输出 MiniCode 标识", () => {
-    main();
-    expect(logSpy).toHaveBeenCalledWith("MiniCode CLI");
+  it("定义 new / continue / list 命令", () => {
+    const names = program.commands.map((c) => c.name());
+    expect(names).toEqual(expect.arrayContaining(["new", "continue", "list"]));
   });
 });
