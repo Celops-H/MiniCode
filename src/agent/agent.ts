@@ -2,11 +2,14 @@ import {
   assembleAssistantMessage,
   createContext,
   toolCallsOf,
+  toolResultMessage,
   userMessage,
   type AssistantMessage,
   type Context,
   type Message,
   type StreamEvent,
+  type ToolCall,
+  type ToolResultMessage,
 } from "../core/index.js";
 import { ToolRegistry, type Tool } from "../tools/index.js";
 
@@ -54,8 +57,9 @@ export class Agent {
   }
 
   /**
-   * 主循环：组装上下文 → 流式调用模型 → 拼装回复 → 追加消息。
-   * 透传模型流事件供外部渲染；无工具调用即结束（工具执行在后续阶段接入）。
+   * 主循环：组装上下文 → 流式调用模型 → 拼装回复 → 无工具调用则结束，
+   * 否则串行执行全部工具调用、结果回灌后继续下一轮。
+   * 透传模型流事件供外部渲染。
    */
   async *run(): AsyncGenerator<StreamEvent> {
     for (let turn = 0; turn < this.maxTurns; turn++) {
@@ -68,11 +72,29 @@ export class Agent {
       const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
       this.messages.push(assistant);
 
-      if (toolCallsOf(assistant).length === 0) {
+      const calls = toolCallsOf(assistant);
+      if (calls.length === 0) {
         return; // 无工具调用，对话结束
       }
-      // 工具执行与结果回灌：后续阶段接入
-      return;
+
+      // 串行执行全部工具调用，结果回灌后模型在下一轮看到
+      for (const call of calls) {
+        this.messages.push(await this.executeTool(call));
+      }
+    }
+  }
+
+  /** 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌 */
+  private async executeTool(call: ToolCall): Promise<ToolResultMessage> {
+    const tool = this.registry.get(call.name);
+    if (!tool) {
+      return toolResultMessage(call.id, `未知工具：${call.name}`, true);
+    }
+    try {
+      const output = await tool.execute(call.input);
+      return toolResultMessage(call.id, String(output));
+    } catch (err) {
+      return toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true);
     }
   }
 }
