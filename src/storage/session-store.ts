@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message } from "../core/index.js";
@@ -10,7 +10,11 @@ import { Session, type SessionMeta } from "./session.js";
  * 目录约定：<id>.jsonl（消息）、<id>.meta.json（元数据）。
  */
 export class SessionStore {
-  constructor(private readonly dir: string) {}
+  private readonly dir: string;
+
+  constructor(dir: string) {
+    this.dir = dir;
+  }
 
   private messageFile(id: string): string {
     return path.join(this.dir, `${id}.jsonl`);
@@ -18,6 +22,11 @@ export class SessionStore {
 
   private metaFile(id: string): string {
     return path.join(this.dir, `${id}.meta.json`);
+  }
+
+  /** 确保存储目录存在（写操作前调用） */
+  private async ensureDir(): Promise<void> {
+    await mkdir(this.dir, { recursive: true });
   }
 
   /** 新建会话并落盘元数据 */
@@ -30,6 +39,7 @@ export class SessionStore {
       createdAt: now,
       updatedAt: now,
     };
+    await this.ensureDir();
     await writeFile(this.metaFile(meta.id), JSON.stringify(meta, null, 2), "utf8");
     return new Session(meta);
   }
@@ -46,6 +56,7 @@ export class SessionStore {
   async appendMessage(session: Session, message: Message): Promise<void> {
     session.append(message);
     session.meta.updatedAt = new Date().toISOString();
+    await this.ensureDir();
     await appendJsonl(this.messageFile(session.meta.id), message);
     await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
   }

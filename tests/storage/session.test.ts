@@ -40,6 +40,17 @@ describe("会话持久化与续跑", () => {
     expect(loaded.getMessages()).toEqual([]);
   });
 
+  it("存储目录不存在时自动创建", async () => {
+    // 直接指向一个尚不存在的嵌套目录
+    const base = mkdtempSync(path.join(os.tmpdir(), "minicode-nested-"));
+    const nestedDir = path.join(base, "deep", "nested");
+    const store = new SessionStore(nestedDir);
+    const session = await store.createSession({ model: "mock" });
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.id).toBe(session.meta.id);
+  });
+
   it("追加消息写 JSONL，重载后恢复全部消息", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
