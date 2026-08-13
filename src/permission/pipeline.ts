@@ -40,6 +40,11 @@ export class PermissionPipeline {
 
   constructor(private readonly options: PermissionPipelineOptions) {}
 
+  /**
+   * 对一次工具调用做权限裁决。
+   * @param request 权限请求（工具名 + 参数内容）
+   * @returns 裁决结果（是否放行 + 来源 + 拒绝原因）
+   */
   async check(request: PermissionRequest): Promise<PermissionResult> {
     const { toolName, content } = request;
 
@@ -79,6 +84,12 @@ export class PermissionPipeline {
     return { allowed: false, reason: decision.reason ?? "用户拒绝", source: "approver" };
   }
 
+  /**
+   * 生成会话缓存键（整工具调用或无内容参数用工具名，否则 `Tool(content)`）。
+   * @param toolName 工具名
+   * @param content 工具参数内容，可省略
+   * @returns 缓存键
+   */
   private cacheKey(toolName: string, content?: string): string {
     return content === undefined ? toolName : `${toolName}(${content})`;
   }

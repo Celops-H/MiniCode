@@ -19,10 +19,18 @@ export class Session {
     this.messages = messages;
   }
 
+  /**
+   * 获取会话全部消息。
+   * @returns 消息数组的副本
+   */
   getMessages(): Message[] {
     return [...this.messages];
   }
 
+  /**
+   * 追加一条消息到内存列表。
+   * @param message 待追加的消息
+   */
   append(message: Message): void {
     this.messages.push(message);
   }

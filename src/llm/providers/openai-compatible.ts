@@ -49,10 +49,20 @@ export class OpenAICompatibleProvider implements Provider {
     this.createClient = options.createClient ?? defaultCreateClient;
   }
 
+  /**
+   * 返回该 Provider 声明的模型列表。
+   * @returns 模型信息数组
+   */
   getModels(): ModelInfo[] {
     return this.modelList;
   }
 
+  /**
+   * 流式调用模型：组装请求 → 发到 OpenAI 兼容 API → 归一化为统一事件。
+   * @param modelId 模型 id
+   * @param context 一次模型调用的完整输入
+   * @returns 统一事件流
+   */
   async *stream(modelId: string, context: Context): AsyncIterable<StreamEvent> {
     const request = this.protocol.buildRequest(context);
     const stream = await this.getClient().chat.completions.create({
@@ -73,7 +83,12 @@ export class OpenAICompatibleProvider implements Provider {
   }
 }
 
-/** 默认用官方 OpenAI SDK 创建 client */
+/**
+ * 默认用官方 OpenAI SDK 创建 client。
+ * @param apiKey API key
+ * @param baseUrl 厂商 API 地址
+ * @returns OpenAI 兼容 client
+ */
 function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
   return new OpenAI({ baseURL: baseUrl, apiKey }) as unknown as ChatCompletionsClient;
 }

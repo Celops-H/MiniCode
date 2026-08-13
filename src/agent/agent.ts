@@ -52,11 +52,18 @@ export class Agent {
     }
   }
 
-  /** 追加用户输入，开始新一轮对话 */
+  /**
+   * 追加用户输入，开始新一轮对话。
+   * @param input 用户输入内容
+   */
   start(input: string): void {
     this.messages.push(userMessage(input));
   }
 
+  /**
+   * 获取当前会话全部消息（含历史与新增）。
+   * @returns 消息数组的副本，外部修改不影响内部状态
+   */
   getMessages(): Message[] {
     return [...this.messages];
   }
@@ -89,7 +96,11 @@ export class Agent {
     }
   }
 
-  /** 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌 */
+  /**
+   * 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌。
+   * @param call 工具调用（含工具名、调用 id 与参数）
+   * @returns 工具结果消息
+   */
   private async executeTool(call: ToolCall): Promise<ToolResultMessage> {
     const tool = this.registry.get(call.name);
     if (!tool) {
@@ -104,6 +115,11 @@ export class Agent {
   }
 }
 
+/**
+ * 把数组包装成异步可迭代对象，供需要 AsyncIterable 的接口消费。
+ * @param items 待包装的数组
+ * @returns 异步可迭代对象
+ */
 function toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
   return (async function* () {
     for (const item of items) yield item;

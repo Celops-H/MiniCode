@@ -62,14 +62,33 @@ export interface ToolResultMessage {
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 
+/**
+ * 构造用户消息。
+ * @param content 用户输入内容
+ * @returns 用户消息
+ */
 export function userMessage(content: string): UserMessage {
   return { role: "user", content };
 }
 
+/**
+ * 构造模型回复。
+ * @param content 内容块数组（文本 / 思考 / 工具调用）
+ * @param meta 调用元数据（模型、用量、停因等），可选
+ * @returns 模型回复消息
+ */
 export function assistantMessage(content: ContentBlock[], meta?: AssistantMeta): AssistantMessage {
   return { role: "assistant", content, ...(meta ? { meta } : {}) };
 }
 
+/**
+ * 构造工具结果消息。
+ * @param toolCallId 对应的工具调用 id（配对键）
+ * @param content 工具输出文本
+ * @param isError 是否执行失败，默认 false
+ * @param timestamp 时间戳，默认当前时间
+ * @returns 工具结果消息
+ */
 export function toolResultMessage(
   toolCallId: string,
   content: string,
@@ -79,7 +98,11 @@ export function toolResultMessage(
   return { role: "tool_result", toolCallId, isError, content, timestamp };
 }
 
-/** 从 AssistantMessage 提取工具调用数组（主循环使用） */
+/**
+ * 从 AssistantMessage 提取工具调用数组。
+ * @param message 模型回复消息
+ * @returns 工具调用数组（仅 tool_call 内容块）
+ */
 export function toolCallsOf(message: AssistantMessage): ToolCall[] {
   return message.content.filter((b): b is ToolCall => b.type === "tool_call");
 }

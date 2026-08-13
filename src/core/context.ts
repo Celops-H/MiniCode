@@ -15,6 +15,13 @@ export interface Context {
   tools: ToolDefinition[];
 }
 
+/**
+ * 构造一次模型调用的完整输入（Context）。
+ * @param systemPrompt 系统提示词，告诉模型「你是谁、干什么」
+ * @param messages 对话历史，从早到晚排列
+ * @param tools 可用工具清单，序列化为模型可见定义
+ * @returns Context 对象
+ */
 export function createContext(
   systemPrompt: string,
   messages: Message[] = [],
@@ -23,7 +30,12 @@ export function createContext(
   return { systemPrompt, messages, tools };
 }
 
-/** 追加消息，返回新 Context（不修改原对象） */
+/**
+ * 追加消息，返回新 Context（不修改原对象，不可变更新）。
+ * @param context 原 Context
+ * @param message 待追加的消息
+ * @returns 追加后的新 Context
+ */
 export function appendMessage(context: Context, message: Message): Context {
   return { ...context, messages: [...context.messages, message] };
 }

@@ -32,18 +32,34 @@ export class Logger {
     this.timestamp = options.timestamp ?? false;
   }
 
+  /**
+   * 输出 debug 级日志。
+   * @param message 日志内容
+   */
   debug(message: string): void {
     this.log("debug", message);
   }
 
+  /**
+   * 输出 info 级日志。
+   * @param message 日志内容
+   */
   info(message: string): void {
     this.log("info", message);
   }
 
+  /**
+   * 输出 warn 级日志。
+   * @param message 日志内容
+   */
   warn(message: string): void {
     this.log("warn", message);
   }
 
+  /**
+   * 输出 error 级日志。
+   * @param message 日志内容
+   */
   error(message: string): void {
     this.log("error", message);
   }

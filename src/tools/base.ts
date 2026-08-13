@@ -22,7 +22,12 @@ export interface Tool {
   execute(input: unknown): Promise<string> | string;
 }
 
-/** 校验工具输入；schema 校验失败抛出 */
+/**
+ * 用工具的 zod schema 校验输入并返回解析后的类型化值；校验失败抛出。
+ * @param tool 工具（取 name 与 inputSchema）
+ * @param input 待校验的工具参数
+ * @returns 校验通过的类型化参数
+ */
 export function validateInput<T>(tool: Pick<Tool, "name" | "inputSchema">, input: unknown): T {
   return tool.inputSchema.parse(input) as T;
 }

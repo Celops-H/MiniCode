@@ -20,7 +20,11 @@ const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\/proc\//, reason: "访问 /proc 敏感路径" },
 ];
 
-/** 检测命令是否危险；返回是否危险及原因 */
+/**
+ * 检测命令是否危险（硬编码黑名单 + 正则模式）。
+ * @param command 待检测的命令原文
+ * @returns 检测结果（是否危险 + 危险原因）
+ */
 export function checkDangerousCommand(command: string): DangerousCheckResult {
   const trimmed = command.trimStart();
 
@@ -44,7 +48,12 @@ export function checkDangerousCommand(command: string): DangerousCheckResult {
   return { dangerous: false };
 }
 
-/** 判断命令是否以某个内建命令开头（后跟空白或结尾） */
+/**
+ * 判断命令是否以某个内建命令开头。
+ * @param command 命令原文
+ * @param builtin 内建命令名
+ * @returns 是否以该内建命令开头（后跟空白或结尾）
+ */
 function startsWithBuiltin(command: string, builtin: string): boolean {
   return new RegExp(`^${escapeRegExp(builtin)}(\\s|$)`).test(command);
 }
