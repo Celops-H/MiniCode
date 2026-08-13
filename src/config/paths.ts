@@ -15,6 +15,11 @@ export interface ResolvePathsOptions {
   xdgConfigHome?: string;
 }
 
+/**
+ * 解析全局与项目配置文件路径。
+ * @param opts 路径选项（homedir / cwd / xdgConfigHome 可注入，测试用）
+ * @returns 全局与项目配置文件路径
+ */
 export function resolveConfigPaths(opts: ResolvePathsOptions = {}): ConfigPaths {
   const home = opts.homedir ?? os.homedir();
   const xdg = opts.xdgConfigHome;

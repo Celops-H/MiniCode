@@ -16,8 +16,10 @@ export interface PermissionRule {
 
 /**
  * 从规则字符串解析出规则。
- * 格式：`Tool`（整工具）或 `Tool(content)`（内容级）。
- * `Tool()`、`Tool(*)` 视为整工具规则（pattern 省略）。
+ * 格式：`Tool`（整工具）或 `Tool(content)`（内容级）；`Tool()`、`Tool(*)` 视为整工具规则。
+ * @param input 规则字符串
+ * @param behavior 规则行为（allow / deny / ask）
+ * @returns 解析出的规则
  */
 export function parseRuleString(input: string, behavior: PermissionBehavior): PermissionRule {
   const trimmed = input.trim();
@@ -36,7 +38,13 @@ export function parseRuleString(input: string, behavior: PermissionBehavior): Pe
   return { toolName, pattern, behavior };
 }
 
-/** 规则是否命中某次工具调用；无内容参数时不匹配内容级规则 */
+/**
+ * 判断规则是否命中某次工具调用；无内容参数时不匹配内容级规则。
+ * @param rule 规则
+ * @param toolName 工具名
+ * @param content 工具参数内容（bash 为命令原文），可省略
+ * @returns 是否命中
+ */
 export function ruleMatches(rule: PermissionRule, toolName: string, content?: string): boolean {
   if (rule.toolName !== toolName) return false;
   if (rule.pattern === undefined) return true;
@@ -47,6 +55,10 @@ export function ruleMatches(rule: PermissionRule, toolName: string, content?: st
 /**
  * 对一批规则求裁决：deny 优先，其次 ask，其次 allow，都不命中默认 ask（保守）。
  * deny 优先保证「危险规则的拒绝不会被宽松规则放行」。
+ * @param rules 规则数组
+ * @param toolName 工具名
+ * @param content 工具参数内容，可省略
+ * @returns 裁决结果（allow / deny / ask）
  */
 export function evaluateRules(
   rules: PermissionRule[],
@@ -65,7 +77,12 @@ export function evaluateRules(
   return "ask";
 }
 
-/** 通配匹配：`*` 匹配任意片段，`?` 匹配单个字符，大小写不敏感 */
+/**
+ * 通配匹配：`*` 匹配任意片段，`?` 匹配单个字符，大小写不敏感。
+ * @param pattern 含通配符的模式
+ * @param input 待匹配的输入
+ * @returns 是否匹配
+ */
 export function wildcardMatch(pattern: string, input: string): boolean {
   let regex = "^";
   for (const ch of pattern) {

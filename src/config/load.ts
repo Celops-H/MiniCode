@@ -12,6 +12,8 @@ export interface LoadConfigOptions {
 /**
  * 加载配置：默认值 < 全局配置 < 项目配置 < 环境变量，逐级覆盖合并。
  * 校验失败（非法字段 / 格式错误）直接抛出。
+ * @param opts 加载选项（paths / env 可注入，测试用）
+ * @returns 合并并校验后的配置
  */
 export async function loadConfig(opts: LoadConfigOptions = {}): Promise<Config> {
   const paths = opts.paths ?? resolveConfigPaths();
@@ -30,7 +32,11 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<Config> 
   });
 }
 
-/** 读取并解析 JSON 文件；文件不存在返回 null，解析失败或非对象抛出。 */
+/**
+ * 读取并解析 JSON 文件。
+ * @param file 文件路径
+ * @returns 解析出的对象；文件不存在返回 null，解析失败或非对象抛出
+ */
 async function readJsonFile(file: string): Promise<Record<string, unknown> | null> {
   let text: string;
   try {
@@ -48,7 +54,11 @@ async function readJsonFile(file: string): Promise<Record<string, unknown> | nul
   return data as Record<string, unknown>;
 }
 
-/** 从环境变量提取 MINICODE_* 配置项，下划线转驼峰。 */
+/**
+ * 从环境变量提取 MINICODE_* 配置项，下划线转驼峰。
+ * @param env 环境变量对象
+ * @returns 驼峰键 → 值的映射
+ */
 function pickEnvConfig(env: NodeJS.ProcessEnv): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {

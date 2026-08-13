@@ -11,7 +11,10 @@ export interface InteractOptions {
   write: (text: string) => void;
 }
 
-/** 交互循环：逐行读取输入 → Agent 跑 → 增量输出 → 消息持久化 */
+/**
+ * 交互循环：逐行读取输入 → Agent 跑 → 增量输出 → 消息持久化。
+ * @param options 交互选项（agent / store / session / inputs / write）
+ */
 export async function interact(options: InteractOptions): Promise<void> {
   const { agent, store, session, inputs, write } = options;
   // 已持久化的消息游标（含续跑时注入的历史），每轮只落盘增量

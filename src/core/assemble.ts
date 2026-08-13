@@ -5,6 +5,8 @@ import type { StreamEvent } from "./events.js";
  * 事件收集器：消费统一事件流，把增量拼装为 AssistantMessage。
  * 文本与思考各自聚合成一个块；工具调用按 index 分组收集参数片段，
  * 结束后拼接成 JSON 字符串解析为对象。
+ * @param stream 统一事件流（text / thinking / toolcall 增量与 done / error）
+ * @returns 拼装完成的模型回复消息
  */
 export async function assembleAssistantMessage(
   stream: AsyncIterable<StreamEvent>,
@@ -75,7 +77,11 @@ export async function assembleAssistantMessage(
   };
 }
 
-/** 工具参数 JSON 字符串解析为对象；非法或缺省时返回空对象 */
+/**
+ * 把拼接的 JSON 字符串解析为对象。
+ * @param json 工具参数的 JSON 字符串（增量拼接后的完整串）
+ * @returns 解析出的参数对象；非法或缺省时返回空对象
+ */
 function parseArguments(json: string): Record<string, unknown> {
   if (!json) return {};
   try {

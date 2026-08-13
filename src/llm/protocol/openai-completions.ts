@@ -18,7 +18,11 @@ interface Choice {
 export class OpenAICompletionsProtocol implements Protocol {
   readonly type = "openai-chat-completions" as const;
 
-  /** 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装 */
+  /**
+   * 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装。
+   * @param context 一次模型调用的完整输入
+   * @returns OpenAI chat.completions 请求体（不含 model / stream）
+   */
   buildRequest(context: Context): unknown {
     return {
       messages: context.messages.map(toOpenAIMessage),
@@ -31,6 +35,8 @@ export class OpenAICompletionsProtocol implements Protocol {
    * OpenAI 每次返回一个增量片段：可能带文本，也可能带某工具调用的参数片段。
    * 工具调用没有独立的结束标记，这里用 started 记录已开始的调用，
    * 收到 finish_reason 时统一补发结束事件。
+   * @param stream OpenAI 原始流式 chunk（SSE data 解析后的对象）
+   * @returns 统一事件流
    */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
     const started = new Set<number>();
@@ -74,7 +80,11 @@ export class OpenAICompletionsProtocol implements Protocol {
   }
 }
 
-/** 取 chunk 中的第一个 choice（OpenAI 流式通常只有一个），无效 chunk 返回 null */
+/**
+ * 取 chunk 中的第一个 choice（OpenAI 流式通常只有一个）。
+ * @param chunk 一个流式响应片段
+ * @returns 第一个 choice；无效 chunk 返回 null
+ */
 function firstChoice(chunk: unknown): Choice | null {
   if (typeof chunk !== "object" || chunk === null) return null;
   const choices = (chunk as { choices?: unknown }).choices;
@@ -84,7 +94,11 @@ function firstChoice(chunk: unknown): Choice | null {
   return choice as Choice;
 }
 
-/** 统一消息 → OpenAI 消息；assistant 的文本与工具调用拆成两个字段 */
+/**
+ * 统一消息 → OpenAI 消息；assistant 的文本与工具调用拆成两个字段。
+ * @param message 统一格式消息
+ * @returns OpenAI 消息对象
+ */
 function toOpenAIMessage(message: Message): Record<string, unknown> {
   switch (message.role) {
     case "user":
@@ -118,7 +132,11 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
   }
 }
 
-/** 工具定义 → OpenAI function 格式（参数为 JSON Schema） */
+/**
+ * 工具定义 → OpenAI function 格式。
+ * @param tool 工具定义（含参数 JSON Schema）
+ * @returns OpenAI tools 数组元素
+ */
 function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
   return {
     type: "function",

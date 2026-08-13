@@ -18,7 +18,11 @@ interface AnthropicChunk {
 export class AnthropicMessagesProtocol implements Protocol {
   readonly type = "anthropic-messages" as const;
 
-  /** 统一 Context → Anthropic messages 请求体（不含 model / stream，由 Provider 组装） */
+  /**
+   * 统一 Context → Anthropic messages 请求体；model 与 stream 参数由 Provider 组装。
+   * @param context 一次模型调用的完整输入
+   * @returns Anthropic messages 请求体（不含 model / stream）
+   */
   buildRequest(context: Context): unknown {
     return {
       messages: toAnthropicMessages(context.messages),
@@ -29,6 +33,8 @@ export class AnthropicMessagesProtocol implements Protocol {
   /**
    * 解析 Anthropic 流式响应，归一化为统一事件。
    * tool_use 参数经 input_json_delta 增量到达；content_block 的 index 映射为工具调用序号。
+   * @param stream Anthropic 原始流式事件对象
+   * @returns 统一事件流
    */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
     const toolIndexByBlock = new Map<number, number>();
@@ -90,7 +96,11 @@ export class AnthropicMessagesProtocol implements Protocol {
   }
 }
 
-/** 统一消息 → Anthropic 消息；工具结果归并进 user 消息 */
+/**
+ * 统一消息 → Anthropic 消息；工具结果归并进 user 消息（Anthropic 要求）。
+ * @param messages 统一格式消息数组
+ * @returns Anthropic 消息参数数组
+ */
 function toAnthropicMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
   let pendingToolResults: Array<Record<string, unknown>> = [];
@@ -126,6 +136,11 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
   return out;
 }
 
+/**
+ * 内容块 → Anthropic content block。
+ * @param block 统一格式内容块（text / thinking / tool_call）
+ * @returns Anthropic 内容块对象
+ */
 function toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
   switch (block.type) {
     case "text":
@@ -138,7 +153,11 @@ function toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
   }
 }
 
-/** 工具定义 → Anthropic input_schema 格式 */
+/**
+ * 工具定义 → Anthropic input_schema 格式。
+ * @param tool 工具定义（含参数 JSON Schema）
+ * @returns Anthropic tools 数组元素
+ */
 function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
   return { name: tool.name, description: tool.description, input_schema: tool.inputSchema };
 }

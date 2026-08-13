@@ -24,12 +24,16 @@ export class SessionStore {
     return path.join(this.dir, `${id}.meta.json`);
   }
 
-  /** 确保存储目录存在（写操作前调用） */
+  /** 确保存储目录存在（写操作前调用）。 */
   private async ensureDir(): Promise<void> {
     await mkdir(this.dir, { recursive: true });
   }
 
-  /** 新建会话并落盘元数据 */
+  /**
+   * 新建会话并落盘元数据。
+   * @param options 会话参数（模型 id、可选标题）
+   * @returns 新建的会话
+   */
   async createSession(options: { model: string; title?: string }): Promise<Session> {
     const now = new Date().toISOString();
     const meta: SessionMeta = {
@@ -44,7 +48,11 @@ export class SessionStore {
     return new Session(meta);
   }
 
-  /** 加载会话：读取元数据与全部消息，重建 Session */
+  /**
+   * 加载会话：读取元数据与全部消息，重建 Session。
+   * @param id 会话 id
+   * @returns 重建的会话
+   */
   async loadSession(id: string): Promise<Session> {
     const raw = await readFile(this.metaFile(id), "utf8");
     const meta = JSON.parse(raw) as SessionMeta;
@@ -52,7 +60,11 @@ export class SessionStore {
     return new Session(meta, messages);
   }
 
-  /** 追加一条消息到会话文件与内存，并刷新会话更新时间 */
+  /**
+   * 追加一条消息到会话文件与内存，并刷新会话更新时间。
+   * @param session 目标会话
+   * @param message 待追加的消息
+   */
   async appendMessage(session: Session, message: Message): Promise<void> {
     session.append(message);
     session.meta.updatedAt = new Date().toISOString();
@@ -61,7 +73,10 @@ export class SessionStore {
     await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
   }
 
-  /** 列出全部会话元数据，按更新时间倒序 */
+  /**
+   * 列出全部会话元数据。
+   * @returns 会话元数据数组，按更新时间倒序
+   */
   async listSessions(): Promise<SessionMeta[]> {
     let files: string[];
     try {
