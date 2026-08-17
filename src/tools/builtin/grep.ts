@@ -18,6 +18,7 @@ export const grepTool: Tool = {
   description: "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表",
   inputSchema: schema,
   isReadOnly: true,
+  isConcurrencySafe: () => true,
   requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input) {

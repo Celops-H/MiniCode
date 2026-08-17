@@ -17,6 +17,7 @@ export const readTool: Tool = {
   description: "读取文件内容，返回带行号的文本",
   inputSchema: schema,
   isReadOnly: true,
+  isConcurrencySafe: () => true,
   requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input) {

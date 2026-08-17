@@ -15,6 +15,7 @@ export const globTool: Tool = {
   description: "按 glob 模式查找文件，返回匹配路径列表",
   inputSchema: schema,
   isReadOnly: true,
+  isConcurrencySafe: () => true,
   requiresUserInteraction: false,
   maxResultSizeChars: 10000,
   async execute(input) {
