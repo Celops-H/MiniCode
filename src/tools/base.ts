@@ -1,6 +1,23 @@
 import { z } from "zod";
 
 /**
+ * 上下文修改器：工具执行后可对宿主上下文做的延迟修改。
+ * 并发批内不立即执行，整批结束后按工具声明顺序统一执行，保证并发下上下文演化确定。
+ * 形如无参函数：宿主（主循环）在闭包里持有可变上下文，应用即调用。
+ */
+export type ContextModifier = () => void;
+
+/** 工具执行结果：纯文本，或结构化结果（额外携带上下文修改） */
+export type ExecuteResult =
+  | string
+  | {
+      /** 回灌模型的文本结果 */
+      output: string;
+      /** 该执行产出的上下文修改，并发批内批末统一应用 */
+      contextModifier?: ContextModifier;
+    };
+
+/**
  * 工具基类：工具只声明自身属性，不感知权限规则与执行调度。
  * 各属性由对应子系统消费（Registry 序列化 / Permission 审批 / Executor 执行）。
  */
@@ -18,8 +35,8 @@ export interface Tool {
   readonly maxResultSizeChars: number;
   /** 并发安全判断：按具体输入判断，不确定返回 false（保守） */
   isConcurrencySafe?(input: unknown): boolean;
-  /** 执行工具，返回文本结果 */
-  execute(input: unknown): Promise<string> | string;
+  /** 执行工具，返回文本或结构化结果 */
+  execute(input: unknown): Promise<ExecuteResult> | ExecuteResult;
 }
 
 /**

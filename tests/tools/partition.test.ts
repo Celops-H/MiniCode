@@ -5,6 +5,10 @@ function item(index: number, isConcurrencySafe: boolean) {
   return { index, isConcurrencySafe };
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 describe("partitionByConcurrency（贪心分区）", () => {
   it("全部并发安全 → 合成一批", () => {
     const batches = partitionByConcurrency([
@@ -43,10 +47,6 @@ describe("partitionByConcurrency（贪心分区）", () => {
 });
 
 describe("runBatches（按批执行）", () => {
-  function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   it("批间严格串行，批内并发", async () => {
     const batches = partitionByConcurrency([
       item(0, true),
@@ -107,5 +107,103 @@ describe("runBatches（按批执行）", () => {
     );
     expect(maxConcurrent).toBeLessThanOrEqual(2);
     expect(maxConcurrent).toBe(2);
+  });
+});
+
+describe("contextModifier（批末延迟应用）", () => {
+  /** 记录执行与应用时序，断言延迟与顺序 */
+  function runWithLog(batches: ReturnType<typeof partitionByConcurrency>) {
+    const log: string[] = [];
+    const applyLog = async () => {
+      await runBatches(
+        batches,
+        async (index) => {
+          await delay(3);
+          log.push(`exec${index}`);
+          return { contextModifier: () => log.push(`mod${index}`) };
+        },
+        {
+          onContextModifier: (modifier, index) => {
+            log.push(`apply${index}`);
+            modifier();
+          },
+        },
+      );
+    };
+    return { log, applyLog };
+  }
+
+  it("并发批内所有调用执行完才应用上下文修改", async () => {
+    const batches = partitionByConcurrency([item(0, true), item(1, true)]);
+    const { log, applyLog } = runWithLog(batches);
+    await applyLog();
+
+    // 所有 exec 先于所有 apply（延迟到批末）
+    expect(log.indexOf("apply0")).toBeGreaterThan(log.indexOf("exec1"));
+    // 全部应用执行
+    expect(log.filter((e) => e.startsWith("apply"))).toHaveLength(2);
+  });
+
+  it("并发批的上下文修改按声明顺序应用", async () => {
+    const batches = partitionByConcurrency([
+      item(0, true),
+      item(1, true),
+      item(2, true),
+    ]);
+    const { log, applyLog } = runWithLog(batches);
+    await applyLog();
+
+    expect(log.indexOf("apply0")).toBeLessThan(log.indexOf("apply1"));
+    expect(log.indexOf("apply1")).toBeLessThan(log.indexOf("apply2"));
+    // modifier 本体也按同样顺序执行
+    expect(log.indexOf("mod0")).toBeLessThan(log.indexOf("mod1"));
+    expect(log.indexOf("mod1")).toBeLessThan(log.indexOf("mod2"));
+  });
+
+  it("串行批（不安全调用）的上下文修改同样在批末应用", async () => {
+    const batches = partitionByConcurrency([item(0, false), item(1, false)]);
+    const { log, applyLog } = runWithLog(batches);
+    await applyLog();
+
+    expect(log.filter((e) => e.startsWith("apply"))).toHaveLength(2);
+    expect(log.indexOf("apply0")).toBeLessThan(log.indexOf("apply1"));
+  });
+
+  it("无上下文修改产出时不回调", async () => {
+    const batches = partitionByConcurrency([item(0, true), item(1, true)]);
+    let applied = false;
+    await runBatches(
+      batches,
+      async () => undefined, // 执行成功但不产出修改
+      { onContextModifier: () => { applied = true; } },
+    );
+    expect(applied).toBe(false);
+  });
+
+  it("仅部分调用产出修改时只应用产出的，且保持声明顺序", async () => {
+    const batches = partitionByConcurrency([item(0, true), item(1, true)]);
+    const applied: number[] = [];
+    await runBatches(
+      batches,
+      async (index) => (index === 1 ? { contextModifier: () => applied.push(index) } : undefined),
+      { onContextModifier: (_modifier, index) => applied.push(index) },
+    );
+    expect(applied).toEqual([1]);
+  });
+
+  it("批内执行抛错时中止且不应用上下文修改", async () => {
+    const batches = partitionByConcurrency([item(0, true), item(1, true)]);
+    let applied = 0;
+    await expect(
+      runBatches(
+        batches,
+        async (index) => {
+          if (index === 1) throw new Error("boom");
+          return { contextModifier: () => applied++ };
+        },
+        { onContextModifier: () => { applied++; } },
+      ),
+    ).rejects.toThrow("boom");
+    expect(applied).toBe(0);
   });
 });
