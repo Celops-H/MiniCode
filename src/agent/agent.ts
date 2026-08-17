@@ -11,7 +11,13 @@ import {
   type ToolCall,
   type ToolResultMessage,
 } from "../core/index.js";
-import { ToolRegistry, type Tool } from "../tools/index.js";
+import {
+  partitionByConcurrency,
+  runBatches,
+  ToolRegistry,
+  type ExecuteOutcome,
+  type Tool,
+} from "../tools/index.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -89,28 +95,63 @@ export class Agent {
         return; // 无工具调用，对话结束
       }
 
-      // 串行执行全部工具调用，结果回灌后模型在下一轮看到
-      for (const call of calls) {
-        this.messages.push(await this.executeTool(call));
+      // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
+      const batches = partitionByConcurrency(
+        calls.map((call, index) => ({ index, isConcurrencySafe: this.isConcurrencySafe(call) })),
+      );
+      const results: ToolResultMessage[] = new Array(calls.length);
+      await runBatches(
+        batches,
+        async (index) => {
+          const outcome = await this.executeTool(calls[index]!);
+          results[index] = outcome.message;
+          return outcome;
+        },
+        { onContextModifier: (modifier) => modifier() },
+      );
+      for (const message of results) {
+        this.messages.push(message);
       }
     }
   }
 
   /**
-   * 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌。
-   * @param call 工具调用（含工具名、调用 id 与参数）
-   * @returns 工具结果消息
+   * 按具体输入判断调用是否并发安全：工具无判定、参数解析失败或判定抛错 → 保守 false。
+   * @param call 工具调用
+   * @returns 是否并发安全
    */
-  private async executeTool(call: ToolCall): Promise<ToolResultMessage> {
+  private isConcurrencySafe(call: ToolCall): boolean {
+    const tool = this.registry.get(call.name);
+    if (!tool?.isConcurrencySafe) return false;
+    try {
+      const parsed = tool.inputSchema.safeParse(call.input);
+      if (!parsed.success) return false;
+      return Boolean(tool.isConcurrencySafe(parsed.data));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌。
+   * 返回工具结果消息与执行产出的上下文修改（供批末统一应用）。
+   * @param call 工具调用（含工具名、调用 id 与参数）
+   * @returns 工具结果消息与上下文修改
+   */
+  private async executeTool(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
     const tool = this.registry.get(call.name);
     if (!tool) {
-      return toolResultMessage(call.id, `未知工具：${call.name}`, true);
+      return { message: toolResultMessage(call.id, `未知工具：${call.name}`, true) };
     }
     try {
-      const output = await tool.execute(call.input);
-      return toolResultMessage(call.id, String(output));
+      const result = await tool.execute(call.input);
+      const { output, contextModifier } =
+        typeof result === "string" ? { output: result, contextModifier: undefined } : result;
+      return { message: toolResultMessage(call.id, output), contextModifier };
     } catch (err) {
-      return toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true);
+      return {
+        message: toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true),
+      };
     }
   }
 }
