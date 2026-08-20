@@ -15,6 +15,7 @@ import {
   partitionByConcurrency,
   runBatches,
   ToolRegistry,
+  truncateOutput,
   type ExecuteOutcome,
   type Tool,
 } from "../tools/index.js";
@@ -147,7 +148,11 @@ export class Agent {
       const result = await tool.execute(call.input);
       const { output, contextModifier } =
         typeof result === "string" ? { output: result, contextModifier: undefined } : result;
-      return { message: toolResultMessage(call.id, output), contextModifier };
+      const truncated = truncateOutput(output, tool.maxResultSizeChars);
+      const finalOutput = truncated.truncated
+        ? `${truncated.content}\n[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`
+        : truncated.content;
+      return { message: toolResultMessage(call.id, finalOutput), contextModifier };
     } catch (err) {
       return {
         message: toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true),
