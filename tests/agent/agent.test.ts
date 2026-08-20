@@ -359,4 +359,142 @@ describe("Agent 主循环：模型对话闭环", () => {
       content: "执行超时，已终止",
     });
   });
+
+  it("非法参数回灌可读错误，不执行工具", async () => {
+    let executed = false;
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显文本",
+      inputSchema: z.object({ text: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => {
+        executed = true;
+        return "不应执行";
+      },
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"text":123}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [echoTool],
+    });
+    agent.start("非法参数");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    expect(executed).toBe(false); // 校验失败未进执行
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: expect.stringContaining("参数 text：Invalid input: expected string, received number"),
+    });
+  });
+
+  it("未知工具提示可用工具", async () => {
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显文本",
+      inputSchema: z.object({ text: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "回显",
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "no_such_tool" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [echoTool],
+    });
+    agent.start("未知工具");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: expect.stringContaining("未知工具：no_such_tool"),
+    });
+    expect(result?.content).toContain("可用工具：echo");
+  });
+
+  it("执行抛错回灌错误信息含工具名", async () => {
+    const boomTool: Tool = {
+      name: "boom",
+      description: "执行即抛错",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => {
+        throw new Error("磁盘写入失败");
+      },
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "boom" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [boomTool],
+    });
+    agent.start("执行失败");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: "工具 boom 执行失败：磁盘写入失败",
+    });
+  });
 });
