@@ -273,4 +273,47 @@ describe("Agent 主循环：模型对话闭环", () => {
       content: [{ type: "text", text: "工具已执行" }],
     });
   });
+
+  it("工具输出超过上限时截断并加截断标记", async () => {
+    const bigTool: Tool = {
+      name: "big",
+      description: "返回超长输出",
+      inputSchema: z.object({}),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 10,
+      execute: () => "一二三四五六七八九十十一十二十三十四十五",
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "big" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [bigTool],
+    });
+    agent.start("大输出");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: false,
+      content: expect.stringContaining("[输出已截断：共 20 字符，保留前 10 字符]"),
+    });
+  });
 });
