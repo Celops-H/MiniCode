@@ -146,13 +146,18 @@ export class Agent {
     }
     try {
       const result = await tool.execute(call.input);
-      const { output, contextModifier } =
-        typeof result === "string" ? { output: result, contextModifier: undefined } : result;
+      const { output, contextModifier, isError } =
+        typeof result === "string"
+          ? { output: result, contextModifier: undefined, isError: undefined }
+          : result;
       const truncated = truncateOutput(output, tool.maxResultSizeChars);
       const finalOutput = truncated.truncated
         ? `${truncated.content}\n[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`
         : truncated.content;
-      return { message: toolResultMessage(call.id, finalOutput), contextModifier };
+      return {
+        message: toolResultMessage(call.id, finalOutput, isError),
+        contextModifier,
+      };
     } catch (err) {
       return {
         message: toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true),

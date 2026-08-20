@@ -316,4 +316,47 @@ describe("Agent 主循环：模型对话闭环", () => {
       content: expect.stringContaining("[输出已截断：共 20 字符，保留前 10 字符]"),
     });
   });
+
+  it("工具标记失败（isError）时回灌为错误消息", async () => {
+    const failTool: Tool = {
+      name: "fail",
+      description: "标记失败的工具",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => ({ output: "执行超时，已终止", isError: true }),
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "fail" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [failTool],
+    });
+    agent.start("失败工具");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: "执行超时，已终止",
+    });
+  });
 });

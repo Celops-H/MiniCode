@@ -24,6 +24,16 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 
 /**
+ * 判断 execAsync 抛出的错误是否为超时：Node 在 timeout 后杀进程并置 killed 与 signal。
+ * @param err execAsync 抛出的错误
+ * @returns 是否超时
+ */
+export function isExecTimeoutError(err: unknown): boolean {
+  const e = err as { killed?: boolean; signal?: string };
+  return e?.killed === true && e.signal !== undefined;
+}
+
+/**
  * 判断 bash 命令是否只读安全（可并发执行）。
  * 只认简单命令 + 命令名在白名单；出现重定向、管道、连接符、后台、
  * 子 shell、命令替换、变量赋值前缀等任何可能修改状态的结构，一律非只读（保守）。
@@ -71,7 +81,12 @@ export const bashTool: Tool = {
     } catch (err) {
       const e = err as { message?: string; stdout?: string; stderr?: string };
       const details = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-      return `命令失败：${e.message ?? String(err)}${details ? `\n${details}` : ""}`;
+      const output = `命令失败：${e.message ?? String(err)}${details ? `\n${details}` : ""}`;
+      // 超时标记失败，供模型感知；普通命令失败仍以文本返回让模型调整
+      if (isExecTimeoutError(err)) {
+        return { output: `${output}\n（命令执行超时，已终止）`, isError: true };
+      }
+      return output;
     }
   },
 };
