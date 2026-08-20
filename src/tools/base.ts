@@ -7,7 +7,7 @@ import { z } from "zod";
  */
 export type ContextModifier = () => void;
 
-/** 工具执行结果：纯文本，或结构化结果（额外携带上下文修改） */
+/** 工具执行结果：纯文本，或结构化结果（额外携带上下文修改、失败标记） */
 export type ExecuteResult =
   | string
   | {
@@ -15,6 +15,8 @@ export type ExecuteResult =
       output: string;
       /** 该执行产出的上下文修改，并发批内批末统一应用 */
       contextModifier?: ContextModifier;
+      /** 显式标记该执行失败（如超时），回灌时 isError 置 true */
+      isError?: boolean;
     };
 
 /**

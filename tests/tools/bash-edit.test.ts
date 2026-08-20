@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { bashTool, editTool } from "../../src/tools/index.js";
+import { isExecTimeoutError } from "../../src/tools/builtin/bash.js";
 
 describe("bash 工具", () => {
   it("执行命令并返回输出", async () => {
@@ -14,6 +15,13 @@ describe("bash 工具", () => {
   it("失败命令返回错误信息", async () => {
     const out = await bashTool.execute({ command: "command-not-exist-xyz-123" });
     expect(out).toContain("命令失败");
+  });
+
+  it("识别 execAsync 超时错误（Node 超时杀进程置 killed 与 signal）", () => {
+    expect(isExecTimeoutError({ killed: true, signal: "SIGTERM" })).toBe(true);
+    expect(isExecTimeoutError({ killed: false })).toBe(false);
+    expect(isExecTimeoutError({ code: 127 })).toBe(false);
+    expect(isExecTimeoutError(null)).toBe(false);
   });
 });
 
