@@ -1,5 +1,6 @@
 export { validateInput } from "./base.js";
 export { truncateOutput } from "./truncate.js";
+export { formatInputError } from "./input-error.js";
 export type { TruncateResult } from "./truncate.js";
 export type { Tool, ContextModifier, ExecuteResult } from "./base.js";
 export { ToolRegistry } from "./registry.js";

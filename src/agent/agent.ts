@@ -12,6 +12,7 @@ import {
   type ToolResultMessage,
 } from "../core/index.js";
 import {
+  formatInputError,
   partitionByConcurrency,
   runBatches,
   ToolRegistry,
@@ -142,7 +143,22 @@ export class Agent {
   private async executeTool(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
     const tool = this.registry.get(call.name);
     if (!tool) {
-      return { message: toolResultMessage(call.id, `未知工具：${call.name}`, true) };
+      const available = this.registry
+        .list()
+        .map((t) => t.name)
+        .join("、");
+      return {
+        message: toolResultMessage(
+          call.id,
+          `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`,
+          true,
+        ),
+      };
+    }
+    // 前置参数校验：非法参数格式化为可读错误反馈模型，让其调整后重新调用
+    const parsed = tool.inputSchema.safeParse(call.input);
+    if (!parsed.success) {
+      return { message: toolResultMessage(call.id, formatInputError(call.name, parsed.error), true) };
     }
     try {
       const result = await tool.execute(call.input);
@@ -160,7 +176,11 @@ export class Agent {
       };
     } catch (err) {
       return {
-        message: toolResultMessage(call.id, `工具执行失败：${(err as Error).message ?? String(err)}`, true),
+        message: toolResultMessage(
+          call.id,
+          `工具 ${call.name} 执行失败：${(err as Error).message ?? String(err)}`,
+          true,
+        ),
       };
     }
   }
