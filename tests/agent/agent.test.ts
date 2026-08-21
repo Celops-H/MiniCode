@@ -4,6 +4,7 @@ import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER } from "../../src/context/index.js";
 import { assistantMessage, toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
+import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
@@ -668,5 +669,98 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(recovery!.content).toContain("src/b.ts、src/a.ts");
     expect(recovery!.content).toContain("继续重构");
     expect(recovery!.content).toContain("会话开始：重构项目");
+  });
+
+  it("权限拒绝时不执行工具并回灌错误消息", async () => {
+    let executed = false;
+    const bashTool: Tool = {
+      name: "bash",
+      description: "执行命令",
+      inputSchema: z.object({ command: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => {
+        executed = true;
+        return "命令输出";
+      },
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "bash" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"command":"rm x"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [bashTool],
+      permission: new PermissionPipeline({ rules: [parseRuleString("bash", "deny")] }),
+    });
+    agent.start("执行命令");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    expect(executed).toBe(false); // 被拒未执行
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: "权限拒绝：规则拒绝",
+    });
+  });
+
+  it("权限允许时正常执行工具", async () => {
+    const bashTool: Tool = {
+      name: "bash",
+      description: "执行命令",
+      inputSchema: z.object({ command: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "命令输出",
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "bash" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"command":"ls"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [bashTool],
+      permission: new PermissionPipeline({ rules: [parseRuleString("bash", "allow")] }),
+    });
+    agent.start("执行命令");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: false,
+      content: "命令输出",
+    });
   });
 });
