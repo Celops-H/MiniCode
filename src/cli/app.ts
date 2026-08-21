@@ -2,7 +2,7 @@ import { Command } from "commander";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent } from "../agent/index.js";
-import { loadConfig } from "../config/index.js";
+import { loadConfig, resolveSessionsDir } from "../config/index.js";
 import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools } from "../tools/index.js";
@@ -10,7 +10,6 @@ import { interact } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
 
 const SYSTEM_PROMPT = "你是 MiniCode，一个 AI 编程助手，通过工具帮助用户完成任务。";
-const SESSIONS_DIR = ".sessions";
 
 export const program = new Command();
 program.name("minicode").description("AI 编程 Agent 命令行工具").version("0.0.1");
@@ -34,7 +33,8 @@ program
   .command("list")
   .description("列出会话")
   .action(async () => {
-    const store = new SessionStore(SESSIONS_DIR);
+    const config = await loadConfig();
+    const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
     const sessions = await store.listSessions();
     if (sessions.length === 0) {
       console.log("暂无会话");
@@ -53,7 +53,7 @@ export async function main(): Promise<void> {
 async function startSession(modelId?: string, sessionId?: string): Promise<void> {
   const config = await loadConfig();
   const logger = new Logger({ level: config.logLevel });
-  const store = new SessionStore(SESSIONS_DIR);
+  const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
   const models = buildModelClient(config, modelId);
 
   const session = sessionId
