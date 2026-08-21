@@ -12,7 +12,9 @@ import {
   type ToolResultMessage,
 } from "../core/index.js";
 import {
+  buildRecoveryText,
   estimateTokens,
+  extractRecoveryContext,
   generateSummary,
   needsCompact,
   pruneToolResults,
@@ -158,14 +160,18 @@ export class Agent {
       this.messages = pruned;
       if (!needsCompact(estimateTokens(this.messages), this.compactConfig)) return;
     }
-    // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话
+    // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话，并注入恢复上下文
     try {
+      const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
       const summary = await generateSummary(this.modelClient, this.modelId, this.messages);
       if (summary.trim().length === 0) {
         this.compactDisabled = true;
         return;
       }
       this.messages = replaceWithSummary(summary);
+      if (recovery) {
+        this.messages.push(userMessage(`【恢复上下文】\n${recovery}`));
+      }
     } catch {
       this.compactDisabled = true;
     }

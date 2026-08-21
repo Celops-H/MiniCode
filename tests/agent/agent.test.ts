@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER } from "../../src/context/index.js";
-import { toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
+import { assistantMessage, toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
@@ -611,5 +611,62 @@ describe("Agent 主循环：模型对话闭环", () => {
     const messages = agent.getMessages();
     expect(messages).toHaveLength(3); // 短消息 + 继续 + assistant
     expect(messages[0]).toEqual({ role: "user", content: "短消息" });
+  });
+
+  it("压缩后注入恢复上下文（最近文件/活跃任务/会话起始）", async () => {
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "目标是重构" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const history: Message[] = [
+      userMessage("会话开始：重构项目 ".repeat(20)),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: { path: "src/a.ts" } }]),
+      toolResultMessage("c1", "内容"),
+      assistantMessage([{ type: "tool_call", id: "c2", name: "write", input: { path: "src/b.ts" } }]),
+      toolResultMessage("c2", "已写入"),
+      userMessage("继续重构"),
+    ];
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "回显",
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: history,
+      tools: [echoTool],
+      compactConfig: { contextWindow: 40, maxOutputTokens: 5, safetyMargin: 5, keepRecentToolResults: 1 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+    // 摘要后注入恢复上下文：最近操作文件 + 活跃任务 + 会话起始
+    const recovery = messages.find(
+      (m) => m.role === "user" && m.content.startsWith("【恢复上下文】"),
+    );
+    expect(recovery).toBeDefined();
+    expect(recovery!.content).toContain("src/b.ts、src/a.ts");
+    expect(recovery!.content).toContain("继续重构");
+    expect(recovery!.content).toContain("会话开始：重构项目");
   });
 });
