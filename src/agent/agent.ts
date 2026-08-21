@@ -12,6 +12,13 @@ import {
   type ToolResultMessage,
 } from "../core/index.js";
 import {
+  estimateTokens,
+  generateSummary,
+  needsCompact,
+  pruneToolResults,
+  replaceWithSummary,
+} from "../context/index.js";
+import {
   formatInputError,
   partitionByConcurrency,
   runBatches,
@@ -26,6 +33,18 @@ export interface ModelClient {
   stream(modelId: string, context: Context): AsyncIterable<StreamEvent>;
 }
 
+/** 上下文压缩配置：触发判断的窗口参数与裁剪保留数 */
+export interface CompactConfig {
+  /** 模型上下文窗口（token） */
+  contextWindow: number;
+  /** 保留给模型回复输出的 token */
+  maxOutputTokens: number;
+  /** 安全余量 token */
+  safetyMargin: number;
+  /** 历史裁剪保留最近的工具结果条数 */
+  keepRecentToolResults: number;
+}
+
 export interface AgentOptions {
   modelClient: ModelClient;
   modelId: string;
@@ -35,6 +54,8 @@ export interface AgentOptions {
   initialMessages?: Message[];
   /** 最大轮数，防止失控 */
   maxTurns?: number;
+  /** 上下文压缩配置；不传则不做撞线压缩 */
+  compactConfig?: CompactConfig;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -44,13 +65,17 @@ export class Agent {
   private readonly systemPrompt: string;
   private readonly maxTurns: number;
   private readonly registry: ToolRegistry;
-  private readonly messages: Message[] = [];
+  private readonly compactConfig?: CompactConfig;
+  private messages: Message[] = [];
+  /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
+  private compactDisabled = false;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
     this.modelId = options.modelId;
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 10;
+    this.compactConfig = options.compactConfig;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -83,6 +108,7 @@ export class Agent {
    */
   async *run(): AsyncGenerator<StreamEvent> {
     for (let turn = 0; turn < this.maxTurns; turn++) {
+      await this.maybeCompact();
       const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
       const collected: StreamEvent[] = [];
       for await (const event of this.modelClient.stream(this.modelId, context)) {
@@ -114,6 +140,34 @@ export class Agent {
       for (const message of results) {
         this.messages.push(message);
       }
+    }
+  }
+
+  /**
+   * 撞线压缩检查（DESIGN 9 分层）：先历史裁剪（最便宜），仍超限再 LLM 摘要。
+   * 摘要压缩失败后置位停止后续尝试（DESIGN 9.5 失败保护）。
+   */
+  private async maybeCompact(): Promise<void> {
+    if (!this.compactConfig || this.compactDisabled) return;
+    const tokens = estimateTokens(this.messages);
+    if (!needsCompact(tokens, this.compactConfig)) return;
+
+    // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要
+    const pruned = pruneToolResults(this.messages, this.compactConfig.keepRecentToolResults);
+    if (pruned !== this.messages) {
+      this.messages = pruned;
+      if (!needsCompact(estimateTokens(this.messages), this.compactConfig)) return;
+    }
+    // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话
+    try {
+      const summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+      if (summary.trim().length === 0) {
+        this.compactDisabled = true;
+        return;
+      }
+      this.messages = replaceWithSummary(summary);
+    } catch {
+      this.compactDisabled = true;
     }
   }
 
