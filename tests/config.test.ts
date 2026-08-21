@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, resolveConfigPaths } from "../src/config/index.js";
+import { loadConfig, resolveConfigPaths, resolveSessionsDir } from "../src/config/index.js";
 import type { ConfigPaths } from "../src/config/index.js";
 
 describe("resolveConfigPaths", () => {
@@ -15,6 +15,20 @@ describe("resolveConfigPaths", () => {
   it("XDG_CONFIG_HOME 优先于 homedir", () => {
     const paths = resolveConfigPaths({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg" });
     expect(paths.globalConfigFile).toBe(path.join("/etc/xdg", "minicode", "config.json"));
+  });
+});
+
+describe("resolveSessionsDir", () => {
+  it("默认解析到用户级 ~/.minicode/sessions，不随启动目录变化", () => {
+    expect(resolveSessionsDir({ homedir: "/home/tester" })).toBe(
+      path.join("/home/tester", ".minicode", "sessions"),
+    );
+  });
+
+  it("XDG_CONFIG_HOME 优先于 homedir", () => {
+    expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg" })).toBe(
+      path.join("/etc/xdg", "minicode", "sessions"),
+    );
   });
 });
 
@@ -137,5 +151,18 @@ describe("loadConfig", () => {
         paths: setup({ global: { providers: [{ id: "x", baseUrl: "not-a-url", apiKeyEnv: "X", models: [] }] } }),
       }),
     ).rejects.toThrow();
+  });
+
+  it("全局配置提供会话目录", async () => {
+    const config = await loadConfig({ paths: setup({ global: { sessionsDir: "/custom/sessions" } }) });
+    expect(config.sessionsDir).toBe("/custom/sessions");
+  });
+
+  it("环境变量 MINICODE_SESSIONS_DIR 覆盖会话目录", async () => {
+    const config = await loadConfig({
+      paths: setup({ project: { sessionsDir: "/proj/sessions" } }),
+      env: { MINICODE_SESSIONS_DIR: "/env/sessions" },
+    });
+    expect(config.sessionsDir).toBe("/env/sessions");
   });
 });

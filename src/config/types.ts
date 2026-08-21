@@ -21,6 +21,8 @@ export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 /** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段 */
 export const configSchema = z.object({
   logLevel: z.enum(LOG_LEVELS).default("info"),
+  /** 会话存储目录（用户级固定，环境变量 MINICODE_SESSIONS_DIR 可覆盖）；缺省 ~/.minicode/sessions/ */
+  sessionsDir: z.string().optional(),
   /** 模型 Provider 列表（多厂商）；未配置回退默认单模型 */
   providers: z.array(providerConfigSchema).optional(),
   /** 优先级链：有序模型 id（ModelRouter 输入），id 须在某 provider 的 models 中 */
