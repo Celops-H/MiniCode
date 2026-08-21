@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
+import { PRUNED_MARKER } from "../../src/context/index.js";
+import { toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
@@ -496,5 +498,118 @@ describe("Agent 主循环：模型对话闭环", () => {
       isError: true,
       content: "工具 boom 执行失败：磁盘写入失败",
     });
+  });
+
+  it("撞线时用 LLM 摘要替换旧对话", async () => {
+    // 摘要调用（tools 为空）返回摘要文本；正常调用返回普通文本
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "目标是压缩测试" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const longHistory: Message[] = Array.from({ length: 20 }, (_, i) =>
+      userMessage(`消息${i} `.repeat(50)),
+    );
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "回显",
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: longHistory,
+      tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    // 旧对话被压缩为摘要消息，之后正常对话
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+    expect(messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "正常回复" }],
+    });
+  });
+
+  it("撞线时历史裁剪优先于摘要", async () => {
+    let summaryCalled = false;
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          summaryCalled = true;
+          yield { type: "text_delta", text: "摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const longResults: Message[] = Array.from({ length: 10 }, (_, i) =>
+      toolResultMessage(`c${i}`, "x".repeat(100)),
+    );
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "回显",
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: longResults,
+      tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
+      // 全部裁剪后仅剩裁剪标记，估算低于可用窗口，不触发摘要
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    // 裁剪释放空间后未触发摘要；旧工具输出被替换为裁剪标记
+    expect(summaryCalled).toBe(false);
+    expect(agent.getMessages().some((m) => m.role === "tool_result" && m.content === PRUNED_MARKER)).toBe(true);
+  });
+
+  it("未撞线时不压缩", async () => {
+    const agent = new Agent({
+      modelClient: mockTextClient("正常回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("短消息")],
+      compactConfig: { contextWindow: 10000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    const messages = agent.getMessages();
+    expect(messages).toHaveLength(3); // 短消息 + 继续 + assistant
+    expect(messages[0]).toEqual({ role: "user", content: "短消息" });
   });
 });
