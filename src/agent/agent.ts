@@ -29,6 +29,7 @@ import {
   type ExecuteOutcome,
   type Tool,
 } from "../tools/index.js";
+import type { PermissionPipeline } from "../permission/index.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -58,6 +59,8 @@ export interface AgentOptions {
   maxTurns?: number;
   /** 上下文压缩配置；不传则不做撞线压缩 */
   compactConfig?: CompactConfig;
+  /** 权限管线；不传则工具执行前不做权限检查（DESIGN 8 权限审批） */
+  permission?: PermissionPipeline;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -68,6 +71,7 @@ export class Agent {
   private readonly maxTurns: number;
   private readonly registry: ToolRegistry;
   private readonly compactConfig?: CompactConfig;
+  private readonly permission?: PermissionPipeline;
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
@@ -78,6 +82,7 @@ export class Agent {
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 10;
     this.compactConfig = options.compactConfig;
+    this.permission = options.permission;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -219,6 +224,19 @@ export class Agent {
     const parsed = tool.inputSchema.safeParse(call.input);
     if (!parsed.success) {
       return { message: toolResultMessage(call.id, formatInputError(call.name, parsed.error), true) };
+    }
+    // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
+    if (this.permission) {
+      const rawCommand = call.input.command;
+      const result = await this.permission.check({
+        toolName: call.name,
+        content: typeof rawCommand === "string" ? rawCommand : undefined,
+      });
+      if (!result.allowed) {
+        return {
+          message: toolResultMessage(call.id, `权限拒绝：${result.reason ?? "未授权"}`, true),
+        };
+      }
     }
     try {
       const result = await tool.execute(call.input);
