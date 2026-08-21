@@ -7,7 +7,7 @@ import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools } from "../tools/index.js";
 import { interact } from "./interact.js";
-import { buildModelClient, DEFAULT_MODEL } from "./models.js";
+import { buildModelClient, resolveMainModel } from "./models.js";
 
 const SYSTEM_PROMPT = "你是 MiniCode，一个 AI 编程助手，通过工具帮助用户完成任务。";
 const SESSIONS_DIR = ".sessions";
@@ -54,11 +54,11 @@ async function startSession(modelId?: string, sessionId?: string): Promise<void>
   const config = await loadConfig();
   const logger = new Logger({ level: config.logLevel });
   const store = new SessionStore(SESSIONS_DIR);
-  const models = buildModelClient(modelId);
+  const models = buildModelClient(config, modelId);
 
   const session = sessionId
     ? await store.loadSession(sessionId)
-    : await store.createSession({ model: modelId ?? DEFAULT_MODEL });
+    : await store.createSession({ model: resolveMainModel(config, modelId) });
   if (!sessionId) {
     console.log(`会话已创建：${session.meta.id}`);
   }
