@@ -93,4 +93,49 @@ describe("loadConfig", () => {
     };
     await expect(loadConfig({ paths })).rejects.toThrow();
   });
+
+  it("全局配置提供模型 providers 与优先级链", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: {
+          providers: [
+            {
+              id: "deepseek",
+              baseUrl: "https://api.deepseek.com",
+              apiKeyEnv: "DEEPSEEK_API_KEY",
+              models: [{ id: "deepseek-chat" }, { id: "deepseek-reasoner" }],
+            },
+          ],
+          modelChain: ["deepseek-chat", "deepseek-reasoner"],
+        },
+      }),
+    });
+    expect(config.providers).toEqual([
+      {
+        id: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        apiKeyEnv: "DEEPSEEK_API_KEY",
+        models: [{ id: "deepseek-chat" }, { id: "deepseek-reasoner" }],
+      },
+    ]);
+    expect(config.modelChain).toEqual(["deepseek-chat", "deepseek-reasoner"]);
+  });
+
+  it("项目配置覆盖全局配置的 providers", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: { providers: [{ id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "a-1" }] }] },
+        project: { providers: [{ id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [{ id: "b-1" }] }] },
+      }),
+    });
+    expect(config.providers).toEqual([{ id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [{ id: "b-1" }] }]);
+  });
+
+  it("非法 providers 配置（baseUrl 非 URL）直接报错", async () => {
+    await expect(
+      loadConfig({
+        paths: setup({ global: { providers: [{ id: "x", baseUrl: "not-a-url", apiKeyEnv: "X", models: [] }] } }),
+      }),
+    ).rejects.toThrow();
+  });
 });

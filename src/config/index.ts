@@ -1,5 +1,5 @@
 export { configSchema } from "./types.js";
-export type { Config } from "./types.js";
+export type { Config, ModelConfig, ProviderConfig } from "./types.js";
 export { loadConfig } from "./load.js";
 export type { LoadConfigOptions } from "./load.js";
 export { resolveConfigPaths } from "./paths.js";
