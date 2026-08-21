@@ -15,3 +15,111 @@ export function isSwitchableError(error: unknown): boolean {
   if (status >= 500) return true; // 服务器内部错误
   return false; // 参数、认证、权限、模型不存在等确定性错误
 }
+
+/** 路由配置项（均可选，用默认值） */
+export interface RouterOptions {
+  /** 普通失败短冷却 ms，默认 5000 */
+  cooldownMs?: number;
+  /** 连续失败达阈值后熔断冷却 ms，默认 60000 */
+  circuitBreakerMs?: number;
+  /** 连续失败熔断阈值，默认 3 */
+  maxFailures?: number;
+  /** 恢复确认：熔断恢复后连续成功达阈值才算完全健康，默认 2 */
+  confirmCount?: number;
+}
+
+/** 单模型健康状态（内部） */
+interface ModelHealth {
+  /** 连续失败数 */
+  failures: number;
+  /** 冷却/熔断到期时间戳 ms；0 = 无冷却（完全健康） */
+  cooldownUntil: number;
+  /** 恢复确认连续成功计数 */
+  successStreak: number;
+}
+
+/**
+ * 模型路由状态机（DESIGN 5.2）：维护优先级链上每个模型的健康度。
+ * select 按链序选模型，失败短冷却、连续失败熔断，成功带恢复确认。
+ * 半开探测：冷却到期后 select 放行真实请求试探（DESIGN 5.3：商业 API 无健康检查端点，
+ * 探测即计费，半开用真实请求验证，无额外开销）。
+ */
+export class ModelRouter {
+  private readonly cooldownMs: number;
+  private readonly circuitBreakerMs: number;
+  private readonly maxFailures: number;
+  private readonly confirmCount: number;
+  private readonly health = new Map<string, ModelHealth>();
+
+  constructor(options: RouterOptions = {}) {
+    this.cooldownMs = options.cooldownMs ?? 5_000;
+    this.circuitBreakerMs = options.circuitBreakerMs ?? 60_000;
+    this.maxFailures = options.maxFailures ?? 3;
+    this.confirmCount = options.confirmCount ?? 2;
+  }
+
+  /**
+   * 按优先级链选择模型：返回第一个「可用」模型（无冷却或冷却已到期=半开放行）；
+   * 整条链都不可用时返回链首（全挂兜底：最后一次尝试机会）。
+   * @param chain 优先级链：主模型在前，备选在后
+   * @returns 选中的模型 id；链为空返回 undefined
+   */
+  select(chain: string[]): string | undefined {
+    if (chain.length === 0) return undefined;
+    for (const id of chain) {
+      if (this.isAvailable(id)) return id;
+    }
+    return chain[0]; // 全挂兜底：整链都在冷却，返回链首
+  }
+
+  /**
+   * 记录一次可切换失败：失败数 +1，未达阈值短冷却、达阈值熔断（更长冷却）；
+   * 同时清零恢复确认连击——失败打破连续成功。
+   * @param modelId 模型 id
+   */
+  recordFailure(modelId: string): void {
+    const health = this.getHealth(modelId);
+    health.failures += 1;
+    health.successStreak = 0;
+    health.cooldownUntil =
+      Date.now() + (health.failures >= this.maxFailures ? this.circuitBreakerMs : this.cooldownMs);
+  }
+
+  /**
+   * 记录一次成功：清零失败计数；冷却到期后的连续成功达确认阈值才算完全健康。
+   * @param modelId 模型 id
+   */
+  recordSuccess(modelId: string): void {
+    const health = this.getHealth(modelId);
+    health.failures = 0;
+    health.successStreak += 1;
+    if (health.successStreak >= this.confirmCount) {
+      health.cooldownUntil = 0; // 完全健康：无冷却
+    }
+  }
+
+  /**
+   * 查询模型是否完全健康（无冷却且恢复确认完成）。
+   * @param modelId 模型 id
+   * @returns 是否完全健康
+   */
+  isHealthy(modelId: string): boolean {
+    const health = this.health.get(modelId);
+    return !health || health.cooldownUntil === 0;
+  }
+
+  private getHealth(modelId: string): ModelHealth {
+    let health = this.health.get(modelId);
+    if (!health) {
+      health = { failures: 0, cooldownUntil: 0, successStreak: 0 };
+      this.health.set(modelId, health);
+    }
+    return health;
+  }
+
+  /** 可用 = 无冷却记录，或冷却已到期（半开放行真实请求试探） */
+  private isAvailable(modelId: string): boolean {
+    const health = this.health.get(modelId);
+    return !health || health.cooldownUntil <= Date.now();
+  }
+}
