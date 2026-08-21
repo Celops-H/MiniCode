@@ -1,8 +1,9 @@
 import { Command } from "commander";
+import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent } from "../agent/index.js";
-import { loadConfig, resolveSessionsDir } from "../config/index.js";
+import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools } from "../tools/index.js";
@@ -46,7 +47,16 @@ program
   });
 
 export async function main(): Promise<void> {
+  await loadDotEnv();
   await program.parseAsync(process.argv);
+}
+
+/** 启动时从 cwd/.env 加载环境变量注入 process.env（已有变量不覆盖，见 parseEnvFile），API key 免手动 export */
+async function loadDotEnv(): Promise<void> {
+  const vars = await loadEnvFile(path.join(process.cwd(), ".env"));
+  for (const [key, value] of Object.entries(vars)) {
+    process.env[key] = value;
+  }
 }
 
 /** 新建或继续会话，进入交互循环 */
