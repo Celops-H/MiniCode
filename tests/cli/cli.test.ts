@@ -24,7 +24,7 @@ describe("CLI 模型组装", () => {
   });
 
   it("可覆盖模型 id", () => {
-    const models = buildModelClient("qwen-plus");
+    const models = buildModelClient(undefined, "qwen-plus");
     expect(models.resolve("qwen-plus")).toBeDefined();
   });
 });
