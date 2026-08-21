@@ -15,4 +15,5 @@ export type {
   PermissionApprover,
   PreToolUseHook,
   PermissionPipelineOptions,
+  PermissionMode,
 } from "./pipeline.js";
