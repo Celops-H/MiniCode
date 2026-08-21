@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createContext } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
-import { Models } from "../../src/llm/index.js";
+import { ModelRouter, Models } from "../../src/llm/index.js";
 import type { Provider, ModelInfo } from "../../src/llm/index.js";
 
 function makeProvider(id: string, modelIds: string[], reply: string): Provider {
@@ -16,6 +16,32 @@ function makeProvider(id: string, modelIds: string[], reply: string): Provider {
       ),
     async *stream(modelId) {
       yield { type: "text_delta", text: `${reply}:${modelId}` };
+      yield { type: "done", stopReason: "stop" };
+    },
+  };
+}
+
+/** 制造一个可注入故障行为的 Provider：failWith 抛指定 HTTP 状态，failMid 先产出事件再抛 */
+function makeFaultyProvider(
+  id: string,
+  modelId: string,
+  opts: { failWith?: number; failMid?: boolean; reply?: string } = {},
+): Provider {
+  return {
+    id,
+    name: id,
+    baseUrl: `https://${id}.example.com`,
+    auth: { configured: true },
+    getModels: () => [{ id: modelId, name: modelId, api: "openai-chat-completions", providerId: id }],
+    async *stream() {
+      if (opts.failWith !== undefined) {
+        throw Object.assign(new Error(`${id} 失败`), { status: opts.failWith });
+      }
+      if (opts.failMid) {
+        yield { type: "text_delta", text: "partial" };
+        throw Object.assign(new Error(`${id} 流中断`), { status: 502 });
+      }
+      yield { type: "text_delta", text: `${opts.reply ?? id}:${modelId}` };
       yield { type: "done", stopReason: "stop" };
     },
   };
@@ -65,5 +91,60 @@ describe("Models 集合", () => {
         // 消费流以触发路由错误
       }
     }).rejects.toThrow("未知模型");
+  });
+});
+
+describe("Models 路由（配置 ModelRouter 后）", () => {
+  it("主模型可切换失败时切到备选，并记录主模型失败", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    expect(events).toEqual([
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+    expect(router.isHealthy("main-1")).toBe(false);
+  });
+
+  it("整链全部失败时抛最后的错误", async () => {
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
+    await expect(async () => {
+      for await (const _ of models.stream("main-1", createContext("s"))) {
+        // 消费流以触发路由错误
+      }
+    }).rejects.toThrow("backup 失败");
+  });
+
+  it("不可切换错误直接上抛，不切备选且不计数", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 400 }));
+    models.register(makeFaultyProvider("backup", "backup-1", { failWith: 500 })); // 若被切换会抛 500，证明未切
+    await expect(async () => {
+      for await (const _ of models.stream("main-1", createContext("s"))) {
+        // 消费流以触发路由错误
+      }
+    }).rejects.toThrow("main 失败");
+    expect(router.isHealthy("main-1")).toBe(true); // 400 不计数，主仍健康
+  });
+
+  it("流已开始响应后失败不切换模型（避免混流）", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failMid: true }));
+    models.register(makeFaultyProvider("backup", "backup-1")); // 若切换会成功，证明未切
+    const received: StreamEvent[] = [];
+    await expect(async () => {
+      for await (const e of models.stream("main-1", createContext("s"))) {
+        received.push(e);
+      }
+    }).rejects.toThrow("main 流中断");
+    expect(received).toEqual([{ type: "text_delta", text: "partial" }]); // 保留已产出部分
+    expect(router.isHealthy("main-1")).toBe(true); // 流中断不计数
   });
 });
