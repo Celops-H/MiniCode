@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { startBackgroundTask } from "./bash-background.js";
 
 const execAsync = promisify(exec);
 
@@ -10,6 +11,8 @@ const schema = z.object({
   command: z.string(),
   /** 超时毫秒数，默认 30 秒 */
   timeoutMs: z.number().int().positive().optional(),
+  /** 后台执行：立即返回任务 id，命令放后台跑，用 bash_task 工具查询与终止（DESIGN 7.5） */
+  background: z.boolean().optional(),
 });
 
 /**
@@ -62,15 +65,23 @@ export const bashTool: Tool = {
   isConcurrencySafe(input) {
     const parsed = schema.safeParse(input);
     if (!parsed.success) return false;
+    // 后台长时进程不进并发批（保守非并发）
+    if (parsed.data.background) return false;
     return isReadOnlyBashCommand(parsed.data.command);
   },
   requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input) {
-    const { command, timeoutMs = 30000 } = validateInput<{
+    const { command, timeoutMs = 30000, background } = validateInput<{
       command: string;
       timeoutMs?: number;
+      background?: boolean;
     }>(bashTool, input);
+    // 后台执行：立即返回任务 id，命令放后台跑，不阻塞回合
+    if (background) {
+      const task = startBackgroundTask(command);
+      return `已后台启动（任务 ${task.id}）：${command}\n用 bash_task 工具查询状态或终止`;
+    }
     try {
       const { stdout, stderr } = await execAsync(command, {
         timeout: timeoutMs,
