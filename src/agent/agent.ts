@@ -30,7 +30,7 @@ import {
   type ExecuteOutcome,
   type Tool,
 } from "../tools/index.js";
-import type { PermissionPipeline } from "../permission/index.js";
+import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
 import type { HookBus } from "../hooks/index.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
@@ -253,10 +253,15 @@ const lastUser = [...this.messages].reverse().find(
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
     if (this.permission) {
       const rawCommand = call.input.command;
-      const result = await this.permission.check({
-        toolName: call.name,
-        content: typeof rawCommand === "string" ? rawCommand : undefined,
-      });
+      const result = await this.permission.check(
+        {
+          toolName: call.name,
+          content: typeof rawCommand === "string" ? rawCommand : undefined,
+          input: call.input,
+        },
+        // 接入 PreToolUse Hook 事件（DESIGN 8.1：规则层 ask 时进决策链）
+        this.hooks ? (request) => this.preToolUseVerdict(request) : undefined,
+      );
       if (!result.allowed) {
         return {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${result.reason ?? "未授权"}`, true),
@@ -273,20 +278,51 @@ const lastUser = [...this.messages].reverse().find(
       const finalOutput = truncated.truncated
         ? `${truncated.content}\n[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`
         : truncated.content;
+      // PostToolUse：工具执行完成（含标记失败的结果），供观测
+      await this.hooks?.emit({
+        type: "PostToolUse",
+        toolName: call.name,
+        input: call.input,
+        output: finalOutput,
+        isError: Boolean(isError),
+      });
       return {
         message: toolResultMessage(call.id, call.name, finalOutput, isError),
         contextModifier,
       };
     } catch (err) {
+      const error = (err as Error).message ?? String(err);
+      // PostToolUseFailure：工具执行抛错，供观测
+      await this.hooks?.emit({
+        type: "PostToolUseFailure",
+        toolName: call.name,
+        input: call.input,
+        error,
+      });
       return {
-        message: toolResultMessage(
-          call.id,
-          call.name,
-          `工具 ${call.name} 执行失败：${(err as Error).message ?? String(err)}`,
-          true,
-        ),
+        message: toolResultMessage(call.id, call.name, `工具 ${call.name} 执行失败：${error}`, true),
       };
     }
+  }
+
+  /**
+   * PreToolUse Hook 裁决：触发事件总线，多个 hook 结果聚合为 deny 优先于 ask 优先于 allow
+   * （DESIGN 8.1 第一个反对即停）；无 hook 返回 undefined，继续走用户审批。
+   * @param request 权限请求（含工具名与完整参数）
+   * @returns 裁决；无任何 hook 响应时返回 undefined
+   */
+  private async preToolUseVerdict(
+    request: PermissionRequest,
+  ): Promise<PermissionBehavior | undefined> {
+    const results = await this.hooks?.emit({
+      type: "PreToolUse",
+      toolName: request.toolName,
+      input: request.input ?? {},
+    });
+    if (results?.includes("deny")) return "deny";
+    if (results?.includes("ask")) return "ask";
+    if (results?.includes("allow")) return "allow";
+    return undefined;
   }
 }
 

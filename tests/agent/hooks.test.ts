@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
-import { HookBus } from "../../src/hooks/index.js";
+import { HookBus, type HookVerdict } from "../../src/hooks/index.js";
+import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
+import type { Tool } from "../../src/tools/index.js";
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -10,6 +12,35 @@ function mockTextClient(text: string): ModelClient {
       yield { type: "text_delta", text };
       yield { type: "done", stopReason: "end_turn" };
     },
+  };
+}
+
+/** 模型先请求一次 read 工具，看到结果后总结 */
+function mockReadToolClient(): ModelClient {
+  return {
+    async *stream(_modelId, context) {
+      const hasResult = context.messages.some((m) => m.role === "tool_result");
+      if (!hasResult) {
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", text: "已读" };
+        yield { type: "done", stopReason: "end_turn" };
+      }
+    },
+  };
+}
+
+function makeReadTool(execute: Tool["execute"]): Tool {
+  return {
+    name: "read",
+    description: "读取文件",
+    inputSchema: z.object({}),
+    isReadOnly: true,
+    requiresUserInteraction: false,
+    maxResultSizeChars: 1000,
+    execute,
   };
 }
 
@@ -113,5 +144,160 @@ describe("Agent 接入 Hook 事件", () => {
 
     // 工具调用轮（第一轮）不触发；第二轮模型总结（无工具调用）触发一次
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）", () => {
+  it("PreToolUse 返回 deny 时拒绝执行工具，回灌权限拒绝错误", async () => {
+    let executed = false;
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [] }),
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(executed).toBe(false);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("权限拒绝：Hook 拒绝");
+  });
+
+  it("PreToolUse 返回 allow 时放行，工具正常执行", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "allow");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [] }),
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("文件内容");
+  });
+
+  it("规则层 deny 优先于 Hook allow（DESIGN 8.1 不变量）", async () => {
+    let executed = false;
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "allow");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [parseRuleString("read", "deny")] }),
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(executed).toBe(false);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("权限拒绝：规则拒绝");
+  });
+
+  it("PreToolUse 返回 ask 时进入用户审批", async () => {
+    const approver = vi.fn().mockResolvedValue({ action: "allow" });
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "ask");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [], approver }),
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(approver).toHaveBeenCalledTimes(1);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("文件内容");
+  });
+
+  it("工具执行成功触发 PostToolUse（带输出与成败标记）", async () => {
+    const hooks = new HookBus();
+    const handler = vi.fn();
+    hooks.on("PostToolUse", handler);
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PostToolUse",
+        toolName: "read",
+        output: "文件内容",
+        isError: false,
+      }),
+    );
+  });
+
+  it("工具执行抛错触发 PostToolUseFailure（带错误信息）", async () => {
+    const hooks = new HookBus();
+    const handler = vi.fn();
+    hooks.on("PostToolUseFailure", handler);
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => {
+          throw new Error("磁盘写入失败");
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PostToolUseFailure",
+        toolName: "read",
+        error: "磁盘写入失败",
+      }),
+    );
   });
 });
