@@ -8,6 +8,8 @@ export interface PermissionRequest {
   toolName: string;
   /** 工具参数内容（bash 为命令原文） */
   content?: string;
+  /** 工具调用完整参数（PreToolUse hook 用） */
+  input?: Record<string, unknown>;
 }
 
 export interface PermissionResult {
@@ -51,12 +53,14 @@ export class PermissionPipeline {
 
   constructor(private readonly options: PermissionPipelineOptions) {}
 
-  /**
-   * 对一次工具调用做权限裁决。
-   * @param request 权限请求（工具名 + 参数内容）
-   * @returns 裁决结果（是否放行 + 来源 + 拒绝原因）
-   */
-  async check(request: PermissionRequest): Promise<PermissionResult> {
+/**
+ * 对一次工具调用做权限裁决。
+ * 规则层 deny 优先；仅 ask 时进入决策链（Hook → 用户审批）。
+ * @param request 权限请求（工具名 + 参数）
+ * @param hook 本次调用注入的 PreToolUse 钩子（优先于构造时的 preToolUseHook），Agent 用它接入 Hook 事件
+ * @returns 裁决结果（是否放行 + 来源 + 拒绝原因）
+ */
+async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<PermissionResult> {
     const { toolName, content } = request;
     const mode = this.options.mode ?? "default";
 
@@ -92,9 +96,10 @@ export class PermissionPipeline {
     const cacheKey = this.cacheKey(toolName, content);
     if (this.cache.get(cacheKey)) return { allowed: true, source: "cache" };
 
-    // Hook 插入点（M3 实现）
-    if (this.options.preToolUseHook) {
-      const hookVerdict = await this.options.preToolUseHook(request);
+    // Hook 环节（DESIGN 8.1 决策链）：规则层 ask 时介入，deny 拒绝 / allow 放行 / ask 继续走用户审批
+    const effectiveHook = hook ?? this.options.preToolUseHook;
+    if (effectiveHook) {
+      const hookVerdict = await effectiveHook(request);
       if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
       if (hookVerdict === "allow") return { allowed: true, source: "hook" };
     }
