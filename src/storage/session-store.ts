@@ -2,15 +2,19 @@ import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message } from "../core/index.js";
-import { appendJsonl, readJsonl } from "./jsonl.js";
+import { appendJsonlBatch, readJsonl } from "./jsonl.js";
 import { Session, type SessionMeta } from "./session.js";
 
 /**
  * 会话存储：消息以 JSONL 一行一条落盘（唯一数据源），元数据独立成文件便于索引。
  * 目录约定：<id>.jsonl（消息）、<id>.meta.json（元数据）。
+ * write-behind 攒批：appendMessage 只更新内存，flush() 统一批量落盘，
+ * 避免每条消息逐次 I/O 与重写 meta 文件的写放大。
  */
 export class SessionStore {
   private readonly dir: string;
+  /** 待 flush 落盘的消息（按会话攒批） */
+  private readonly pending = new Map<string, { session: Session; messages: Message[] }>();
 
   constructor(dir: string) {
     this.dir = dir;
@@ -42,6 +46,7 @@ export class SessionStore {
       model: options.model,
       createdAt: now,
       updatedAt: now,
+      formatVersion: 1,
     };
     await this.ensureDir();
     await writeFile(this.metaFile(meta.id), JSON.stringify(meta, null, 2), "utf8");
@@ -55,22 +60,38 @@ export class SessionStore {
    */
   async loadSession(id: string): Promise<Session> {
     const raw = await readFile(this.metaFile(id), "utf8");
-    const meta = JSON.parse(raw) as SessionMeta;
+    const parsed = JSON.parse(raw) as SessionMeta;
+    // 旧会话无 formatVersion 字段，视为版本 1
+    const meta: SessionMeta = { ...parsed, formatVersion: parsed.formatVersion ?? 1 };
     const messages = await readJsonl<Message>(this.messageFile(id));
     return new Session(meta, messages);
   }
 
   /**
-   * 追加一条消息到会话文件与内存，并刷新会话更新时间。
+   * 追加一条消息到会话内存并记入攒批队列；flush() 时批量落盘。
    * @param session 目标会话
    * @param message 待追加的消息
    */
   async appendMessage(session: Session, message: Message): Promise<void> {
     session.append(message);
     session.meta.updatedAt = new Date().toISOString();
+    const entry = this.pending.get(session.meta.id) ?? { session, messages: [] };
+    entry.messages.push(message);
+    this.pending.set(session.meta.id, entry);
+  }
+
+  /**
+   * 强制落盘：把攒批的消息一次 append 写 JSONL，并写回已变更的会话元数据。
+   * 交互关键节点调用（DESIGN 14 flush 屏障），保证崩溃时已完成回合的消息不丢。
+   */
+  async flush(): Promise<void> {
+    if (this.pending.size === 0) return;
     await this.ensureDir();
-    await appendJsonl(this.messageFile(session.meta.id), message);
-    await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
+    for (const [id, { session, messages }] of this.pending) {
+      await appendJsonlBatch(this.messageFile(id), messages);
+      await writeFile(this.metaFile(id), JSON.stringify(session.meta, null, 2), "utf8");
+    }
+    this.pending.clear();
   }
 
   /**
