@@ -10,6 +10,7 @@ import {
   type StreamEvent,
   type ToolCall,
   type ToolResultMessage,
+  type UserMessage,
 } from "../core/index.js";
 import {
   buildRecoveryText,
@@ -30,6 +31,7 @@ import {
   type Tool,
 } from "../tools/index.js";
 import type { PermissionPipeline } from "../permission/index.js";
+import type { HookBus } from "../hooks/index.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -61,6 +63,8 @@ export interface AgentOptions {
   compactConfig?: CompactConfig;
   /** 权限管线；不传则工具执行前不做权限检查（DESIGN 8 权限审批） */
   permission?: PermissionPipeline;
+  /** Hook 事件总线；不传则不发射 Hook 事件（DESIGN 13） */
+  hooks?: HookBus;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -72,9 +76,12 @@ export class Agent {
   private readonly registry: ToolRegistry;
   private readonly compactConfig?: CompactConfig;
   private readonly permission?: PermissionPipeline;
+  private readonly hooks?: HookBus;
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
+  /** SessionStart 已触发的标志：只发射一次 */
+  private sessionStarted = false;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -83,6 +90,7 @@ export class Agent {
     this.maxTurns = options.maxTurns ?? 10;
     this.compactConfig = options.compactConfig;
     this.permission = options.permission;
+    this.hooks = options.hooks;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -114,6 +122,19 @@ export class Agent {
    * 透传模型流事件供外部渲染。
    */
   async *run(): AsyncGenerator<StreamEvent> {
+    // SessionStart：会话启动只发射一次；UserPromptSubmit：处理本轮用户输入前
+    if (!this.sessionStarted) {
+      this.sessionStarted = true;
+      await this.hooks?.emit({ type: "SessionStart" });
+    }
+const lastUser = [...this.messages].reverse().find(
+  (message): message is UserMessage =>
+    message.role === "user" && message.source !== "system",
+);
+    if (lastUser) {
+      await this.hooks?.emit({ type: "UserPromptSubmit", input: lastUser.content });
+    }
+
     for (let turn = 0; turn < this.maxTurns; turn++) {
       await this.maybeCompact();
       const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
@@ -127,7 +148,9 @@ export class Agent {
 
       const calls = toolCallsOf(assistant);
       if (calls.length === 0) {
-        return; // 无工具调用，对话结束
+        // Stop：模型回复无工具调用，本轮对话准备结束
+        await this.hooks?.emit({ type: "Stop" });
+        return;
       }
 
       // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
