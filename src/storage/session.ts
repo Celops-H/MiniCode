@@ -7,6 +7,8 @@ export interface SessionMeta {
   model: string;
   createdAt: string;
   updatedAt: string;
+  /** 消息格式版本号：加载旧会话缺失时视为 1（历史格式兼容） */
+  formatVersion: number;
 }
 
 /** 会话：元数据 + 内存消息列表（JSONL 是持久化副本，此处为运行时镜像） */

@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { assistantMessage, userMessage } from "../../src/core/index.js";
-import { SessionStore } from "../../src/storage/index.js";
+import { SessionStore, type SessionMeta } from "../../src/storage/index.js";
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -71,9 +72,50 @@ describe("会话持久化与续跑", () => {
     const a = await store.createSession({ model: "m" });
     const b = await store.createSession({ model: "m" });
     await store.appendMessage(a, userMessage("较早"));
+    await store.flush(); // updatedAt 延迟落盘，flush 后列表排序才反映最新
 
     const list = await store.listSessions();
     expect(list.map((m) => m.id)).toEqual([a.meta.id, b.meta.id]);
+  });
+
+  it("meta 延迟写：append 只改内存，flush 落盘", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await new Promise((r) => setTimeout(r, 5)); // 保证 append 的 updatedAt 与创建时不同毫秒
+    await store.appendMessage(session, userMessage("你好"));
+
+    const onDiskBefore = JSON.parse(
+      await readFile(path.join(dir, `${session.meta.id}.meta.json`), "utf8"),
+    ) as SessionMeta;
+    expect(onDiskBefore.updatedAt).not.toBe(session.meta.updatedAt); // 未 flush，盘上仍是创建时时间
+
+    await store.flush();
+    const onDiskAfter = JSON.parse(
+      await readFile(path.join(dir, `${session.meta.id}.meta.json`), "utf8"),
+    ) as SessionMeta;
+    expect(onDiskAfter.updatedAt).toBe(session.meta.updatedAt); // flush 后落盘
+  });
+
+  it("会话元数据带格式版本号，旧会话缺失时视为 1", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    expect(session.meta.formatVersion).toBe(1);
+
+    // 模拟旧格式会话：meta 文件无 formatVersion，加载后补 1
+    const legacyMeta = {
+      id: "legacy",
+      title: "旧会话",
+      model: "mock",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    await writeFile(
+      path.join(dir, "legacy.meta.json"),
+      JSON.stringify(legacyMeta, null, 2),
+      "utf8",
+    );
+    const loaded = await store.loadSession("legacy");
+    expect(loaded.meta.formatVersion).toBe(1);
   });
 
   it("续跑：加载会话历史，Agent 继续对话", async () => {
