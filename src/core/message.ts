@@ -51,10 +51,12 @@ export interface AssistantMessage {
   meta?: AssistantMeta;
 }
 
-/** 工具结果：toolCallId 配对键 + isError 成败标记 */
+/** 工具结果：toolCallId 配对键 + toolName 来源工具 + isError 成败标记 */
 export interface ToolResultMessage {
   role: "tool_result";
   toolCallId: string;
+  /** 来源工具名，溯源/渲染无需反查 assistant 的工具调用 */
+  toolName: string;
   isError: boolean;
   content: string;
   timestamp: string;
@@ -84,6 +86,7 @@ export function assistantMessage(content: ContentBlock[], meta?: AssistantMeta):
 /**
  * 构造工具结果消息。
  * @param toolCallId 对应的工具调用 id（配对键）
+ * @param toolName 来源工具名
  * @param content 工具输出文本
  * @param isError 是否执行失败，默认 false
  * @param timestamp 时间戳，默认当前时间
@@ -91,11 +94,12 @@ export function assistantMessage(content: ContentBlock[], meta?: AssistantMeta):
  */
 export function toolResultMessage(
   toolCallId: string,
+  toolName: string,
   content: string,
   isError = false,
   timestamp = new Date().toISOString(),
 ): ToolResultMessage {
-  return { role: "tool_result", toolCallId, isError, content, timestamp };
+  return { role: "tool_result", toolCallId, toolName, isError, content, timestamp };
 }
 
 /**

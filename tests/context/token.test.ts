@@ -18,6 +18,7 @@ describe("estimateTokens（token 估算）", () => {
       {
         role: "tool_result",
         toolCallId: "c1",
+        toolName: "read",
         isError: false,
         content: "a".repeat(100),
         timestamp: "t",

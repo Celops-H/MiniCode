@@ -24,7 +24,7 @@ describe("buildRequest：消息与工具转换", () => {
           { type: "text", text: "我查一下" },
           { type: "tool_call", id: "call_1", name: "glob", input: { pattern: "*.ts" } },
         ]),
-        toolResultMessage("call_1", "a.ts"),
+        toolResultMessage("call_1", "glob", "a.ts"),
       ],
     );
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };

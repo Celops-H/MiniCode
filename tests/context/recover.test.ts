@@ -10,11 +10,11 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
   it("提取最近操作文件（read/write/edit 的 path，去重）", () => {
     const messages: Message[] = [
       assistantMessage([toolCall("c1", "read", { path: "a.ts" })]),
-      toolResultMessage("c1", "内容"),
+      toolResultMessage("c1", "read", "内容"),
       assistantMessage([toolCall("c2", "write", { path: "b.ts" })]),
-      toolResultMessage("c2", "已写入"),
+      toolResultMessage("c2", "write", "已写入"),
       assistantMessage([toolCall("c3", "read", { path: "a.ts" })], { model: "mock" }),
-      toolResultMessage("c3", "内容"),
+      toolResultMessage("c3", "read", "内容"),
     ];
     // 逆序去重：a.ts（c3）→ b.ts（c2），a.ts 重复跳过
     expect(extractRecoveryContext(messages).files).toEqual(["a.ts", "b.ts"]);
@@ -45,7 +45,7 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
   it("无用户消息时 sessionStart 为空", () => {
     const messages: Message[] = [
       assistantMessage([{ type: "text", text: "hi" }]),
-      toolResultMessage("c1", "结果"),
+      toolResultMessage("c1", "read", "结果"),
     ];
     const context = extractRecoveryContext(messages);
     expect(context.sessionStart).toBeUndefined();
