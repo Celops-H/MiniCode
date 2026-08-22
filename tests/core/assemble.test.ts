@@ -17,6 +17,7 @@ describe("事件收集器", () => {
     );
     expect(msg).toEqual({
       role: "assistant",
+      id: expect.any(String),
       content: [{ type: "text", text: "你好" }],
       meta: { stopReason: "stop" },
     });
@@ -87,7 +88,7 @@ describe("事件收集器", () => {
 
   it("无工具调用结束（end_turn）不带 stopReason 时也正常", async () => {
     const msg = await assembleAssistantMessage(events());
-    expect(msg).toEqual({ role: "assistant", content: [] });
+    expect(msg).toEqual({ role: "assistant", id: expect.any(String), content: [] });
   });
 
   it("error 事件转为 meta 标记", async () => {

@@ -13,6 +13,7 @@ export type {
   TextContent,
   ThinkingContent,
   ToolCall,
+  MessageSource,
   UserMessage,
   AssistantMessage,
   AssistantMeta,

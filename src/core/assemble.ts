@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AssistantMessage, ContentBlock } from "./message.js";
 import type { StreamEvent } from "./events.js";
 
@@ -72,6 +73,7 @@ export async function assembleAssistantMessage(
   const meta = stopReason ?? error;
   return {
     role: "assistant",
+    id: randomUUID(),
     content,
     ...(meta ? { meta: { stopReason: stopReason ?? `error: ${error}` } } : {}),
   };
