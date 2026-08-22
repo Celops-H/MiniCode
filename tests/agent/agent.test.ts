@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER } from "../../src/context/index.js";
-import { assistantMessage, toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
+import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
@@ -543,6 +543,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     // 旧对话被压缩为摘要消息，之后正常对话
     expect(messages[0]).toMatchObject({
       role: "user",
+      source: "system",
       content: expect.stringContaining("【会话摘要】"),
     });
     expect(messages.at(-1)).toMatchObject({
@@ -659,13 +660,16 @@ describe("Agent 主循环：模型对话闭环", () => {
     const messages = agent.getMessages();
     expect(messages[0]).toMatchObject({
       role: "user",
+      source: "system",
       content: expect.stringContaining("【会话摘要】"),
     });
     // 摘要后注入恢复上下文：最近操作文件 + 活跃任务 + 会话起始
     const recovery = messages.find(
-      (m) => m.role === "user" && m.content.startsWith("【恢复上下文】"),
+      (m): m is UserMessage => m.role === "user" && m.content.startsWith("【恢复上下文】"),
     );
     expect(recovery).toBeDefined();
+    // 恢复上下文同为系统注入，标记 source: "system"
+    expect(recovery!.source).toBe("system");
     expect(recovery!.content).toContain("src/b.ts、src/a.ts");
     expect(recovery!.content).toContain("继续重构");
     expect(recovery!.content).toContain("会话开始：重构项目");
