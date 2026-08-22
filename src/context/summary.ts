@@ -57,9 +57,10 @@ export async function generateSummary(
 
 /**
  * 把旧对话替换为摘要消息（压缩结果）。
+ * 摘要由系统生成而非用户输入，标记 source: "system"。
  * @param summary 摘要文本
  * @returns 替换后的消息数组（单条摘要用户消息）
  */
 export function replaceWithSummary(summary: string): Message[] {
-  return [userMessage(`【会话摘要】\n${summary}`)];
+  return [userMessage(`【会话摘要】\n${summary}`, "system")];
 }

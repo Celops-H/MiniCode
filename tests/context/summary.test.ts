@@ -68,10 +68,15 @@ describe("generateSummary（生成摘要）", () => {
 });
 
 describe("replaceWithSummary（摘要替换）", () => {
-  it("替换为单条摘要用户消息", () => {
+  it("替换为单条摘要用户消息并标记系统来源", () => {
     const replaced = replaceWithSummary("目标是重构");
     expect(replaced).toEqual([
-      { role: "user", id: expect.any(String), content: "【会话摘要】\n目标是重构" },
+      {
+        role: "user",
+        id: expect.any(String),
+        content: "【会话摘要】\n目标是重构",
+        source: "system",
+      },
     ]);
   });
 });

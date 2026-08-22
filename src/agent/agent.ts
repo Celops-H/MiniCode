@@ -175,7 +175,8 @@ export class Agent {
       }
       this.messages = replaceWithSummary(summary);
       if (recovery) {
-        this.messages.push(userMessage(`【恢复上下文】\n${recovery}`));
+        // 恢复上下文由系统注入而非用户输入，标记 source: "system"
+        this.messages.push(userMessage(`【恢复上下文】\n${recovery}`, "system"));
       }
     } catch {
       this.compactDisabled = true;
