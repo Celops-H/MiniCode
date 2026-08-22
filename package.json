@@ -4,6 +4,9 @@
   "description": "AI 编程 Agent 命令行工具",
   "private": true,
   "type": "module",
+  "bin": {
+    "minicode": "dist/cli/app.js"
+  },
   "engines": {
     "node": ">=22"
   },

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from "commander";
 import path from "node:path";
 import readline from "node:readline";
