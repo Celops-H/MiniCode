@@ -8,7 +8,7 @@ describe("estimateTokens（token 估算）", () => {
   });
 
   it("用户消息按字符数 × 系数估算", () => {
-    const messages: Message[] = [{ role: "user", content: "你好世界" }];
+    const messages: Message[] = [{ role: "user", id: "u1", content: "你好世界" }];
     // 4 字符 × 0.3 = 1.2 → ceil 2
     expect(estimateTokens(messages)).toBe(2);
   });
@@ -17,6 +17,7 @@ describe("estimateTokens（token 估算）", () => {
     const messages: Message[] = [
       {
         role: "tool_result",
+        id: "tr1",
         toolCallId: "c1",
         toolName: "read",
         isError: false,
@@ -31,6 +32,7 @@ describe("estimateTokens（token 估算）", () => {
     const messages: Message[] = [
       {
         role: "assistant",
+        id: "a1",
         content: [
           { type: "text", text: "hello" },
           { type: "thinking", thinking: "思考" },

@@ -3,6 +3,8 @@
  * 三种消息 + 内容块（Text / Thinking / ToolCall）。
  */
 
+import { randomUUID } from "node:crypto";
+
 export type ContentBlock = TextContent | ThinkingContent | ToolCall;
 
 export interface TextContent {
@@ -38,15 +40,24 @@ export interface AssistantMeta {
   stopReason?: string;
 }
 
+/** 消息来源：human 真实用户输入；system 系统注入（摘要/恢复上下文等合成消息） */
+export type MessageSource = "human" | "system";
+
 /** 用户输入 */
 export interface UserMessage {
   role: "user";
+  /** 稳定 id：压缩裁剪旧消息、会话重放、排查定位时精确指认消息 */
+  id: string;
   content: string;
+  /** 消息来源，缺省 human；系统注入的合成消息标 "system"，让模型区分背景信息与用户指令 */
+  source?: MessageSource;
 }
 
 /** 模型回复：内容块数组 + 调用元数据 */
 export interface AssistantMessage {
   role: "assistant";
+  /** 稳定 id：压缩裁剪旧消息、会话重放、排查定位时精确指认消息 */
+  id: string;
   content: ContentBlock[];
   meta?: AssistantMeta;
 }
@@ -54,6 +65,8 @@ export interface AssistantMessage {
 /** 工具结果：toolCallId 配对键 + toolName 来源工具 + isError 成败标记 */
 export interface ToolResultMessage {
   role: "tool_result";
+  /** 稳定 id：压缩裁剪旧消息、会话重放、排查定位时精确指认消息 */
+  id: string;
   toolCallId: string;
   /** 来源工具名，溯源/渲染无需反查 assistant 的工具调用 */
   toolName: string;
@@ -67,20 +80,31 @@ export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 /**
  * 构造用户消息。
  * @param content 用户输入内容
+ * @param source 消息来源，系统注入的合成消息标 "system"，缺省 human
+ * @param id 稳定 id，缺省随机生成
  * @returns 用户消息
  */
-export function userMessage(content: string): UserMessage {
-  return { role: "user", content };
+export function userMessage(
+  content: string,
+  source?: MessageSource,
+  id: string = randomUUID(),
+): UserMessage {
+  return { role: "user", id, content, ...(source ? { source } : {}) };
 }
 
 /**
  * 构造模型回复。
  * @param content 内容块数组（文本 / 思考 / 工具调用）
  * @param meta 调用元数据（模型、用量、停因等），可选
+ * @param id 稳定 id，缺省随机生成
  * @returns 模型回复消息
  */
-export function assistantMessage(content: ContentBlock[], meta?: AssistantMeta): AssistantMessage {
-  return { role: "assistant", content, ...(meta ? { meta } : {}) };
+export function assistantMessage(
+  content: ContentBlock[],
+  meta?: AssistantMeta,
+  id: string = randomUUID(),
+): AssistantMessage {
+  return { role: "assistant", id, content, ...(meta ? { meta } : {}) };
 }
 
 /**
@@ -90,6 +114,7 @@ export function assistantMessage(content: ContentBlock[], meta?: AssistantMeta):
  * @param content 工具输出文本
  * @param isError 是否执行失败，默认 false
  * @param timestamp 时间戳，默认当前时间
+ * @param id 稳定 id，缺省随机生成
  * @returns 工具结果消息
  */
 export function toolResultMessage(
@@ -98,8 +123,9 @@ export function toolResultMessage(
   content: string,
   isError = false,
   timestamp = new Date().toISOString(),
+  id: string = randomUUID(),
 ): ToolResultMessage {
-  return { role: "tool_result", toolCallId, toolName, isError, content, timestamp };
+  return { role: "tool_result", id, toolCallId, toolName, isError, content, timestamp };
 }
 
 /**

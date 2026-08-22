@@ -59,7 +59,7 @@ describe("会话持久化与续跑", () => {
 
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages()).toHaveLength(2);
-    expect(loaded.getMessages()[0]).toEqual({ role: "user", content: "你好" });
+    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好" });
     expect(loaded.getMessages()[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "嗨" }],
@@ -96,8 +96,8 @@ describe("会话持久化与续跑", () => {
 
     const messages = agent.getMessages();
     expect(messages).toHaveLength(3);
-    expect(messages[0]).toEqual({ role: "user", content: "第一问" }); // 历史
-    expect(messages[1]).toEqual({ role: "user", content: "第二问" });
+    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "第一问" }); // 历史
+    expect(messages[1]).toEqual({ role: "user", id: expect.any(String), content: "第二问" });
     expect(messages[2]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "这是历史之后的回复" }],

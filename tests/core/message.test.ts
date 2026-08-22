@@ -8,27 +8,38 @@ import {
 import type { ContentBlock, ToolCall } from "../../src/core/index.js";
 
 describe("消息构造", () => {
-  it("userMessage 构造用户输入", () => {
-    expect(userMessage("你好")).toEqual({ role: "user", content: "你好" });
+  it("userMessage 构造用户输入（默认来源 human）", () => {
+    expect(userMessage("你好")).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+  });
+
+  it("userMessage 可标记系统来源并传固定 id", () => {
+    expect(userMessage("【摘要】", "system", "u1")).toEqual({
+      role: "user",
+      id: "u1",
+      content: "【摘要】",
+      source: "system",
+    });
   });
 
   it("assistantMessage 构造模型回复（含元数据）", () => {
     const content: ContentBlock[] = [{ type: "text", text: "hi" }];
     expect(assistantMessage(content, { model: "deepseek", stopReason: "end_turn" })).toEqual({
       role: "assistant",
+      id: expect.any(String),
       content,
       meta: { model: "deepseek", stopReason: "end_turn" },
     });
   });
 
   it("assistantMessage 无元数据时不带 meta 字段", () => {
-    expect(assistantMessage([])).toEqual({ role: "assistant", content: [] });
+    expect(assistantMessage([])).toEqual({ role: "assistant", id: expect.any(String), content: [] });
   });
 
   it("toolResultMessage 构造工具结果（默认非错误）", () => {
     const msg = toolResultMessage("call_1", "read", "ok", false, "2026-08-10T00:00:00.000Z");
     expect(msg).toEqual({
       role: "tool_result",
+      id: expect.any(String),
       toolCallId: "call_1",
       toolName: "read",
       isError: false,
