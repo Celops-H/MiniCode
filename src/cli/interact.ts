@@ -12,7 +12,8 @@ export interface InteractOptions {
 }
 
 /**
- * 交互循环：逐行读取输入 → Agent 跑 → 增量输出 → 消息持久化。
+ * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
+ * 展示工具结果 → 消息持久化。
  * @param options 交互选项（agent / store / session / inputs / write）
  */
 export async function interact(options: InteractOptions): Promise<void> {
@@ -24,12 +25,33 @@ export async function interact(options: InteractOptions): Promise<void> {
     if (!input) continue;
     if (input === "/exit") break; // 退出交互
     agent.start(input);
+    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记
     for await (const event of agent.run()) {
-      if (event.type === "text_delta") write(event.text);
+      switch (event.type) {
+        case "text_delta":
+          write(event.text);
+          break;
+        case "thinking_delta":
+          write(event.thinking);
+          break;
+        case "toolcall_start":
+          write(`\n[工具] ${event.name ?? "调用"} …`);
+          break;
+        case "toolcall_end":
+          write("\n");
+          break;
+        case "error":
+          write(`\n[错误] ${event.message}`);
+          break;
+      }
     }
     write("\n");
+    // 工具结果是回灌消息（非事件），本轮结束后展示并持久化
     const newMessages = agent.getMessages().slice(processed);
     for (const message of newMessages) {
+      if (message.role === "tool_result") {
+        write(`\n[工具结果] ${message.content}\n`);
+      }
       await store.appendMessage(session, message);
     }
     processed = agent.getMessages().length;
