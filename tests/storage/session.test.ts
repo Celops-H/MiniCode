@@ -52,11 +52,12 @@ describe("会话持久化与续跑", () => {
     expect(loaded.meta.id).toBe(session.meta.id);
   });
 
-  it("追加消息写 JSONL，重载后恢复全部消息", async () => {
+  it("追加消息攒批后 flush 写 JSONL，重载后恢复全部消息", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
     await store.appendMessage(session, userMessage("你好"));
     await store.appendMessage(session, assistantMessage([{ type: "text", text: "嗨" }]));
+    await store.flush();
 
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages()).toHaveLength(2);
@@ -122,6 +123,7 @@ describe("会话持久化与续跑", () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
     await store.appendMessage(session, userMessage("第一问"));
+    await store.flush();
 
     // 从持久化历史重建会话
     const loaded = await store.loadSession(session.meta.id);

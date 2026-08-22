@@ -100,6 +100,7 @@ describe("M1 端到端冒烟", () => {
     for (const m of agent.getMessages()) {
       await store.appendMessage(session, m);
     }
+    await store.flush();
 
     // 续跑：从持久化历史重建
     const loaded = await store.loadSession(session.meta.id);

@@ -46,7 +46,7 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
     }
     write("\n");
-    // 工具结果是回灌消息（非事件），本轮结束后展示并持久化
+    // 工具结果是回灌消息（非事件），本轮结束后展示并入队
     const newMessages = agent.getMessages().slice(processed);
     for (const message of newMessages) {
       if (message.role === "tool_result") {
@@ -54,6 +54,8 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
       await store.appendMessage(session, message);
     }
+    // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
+    await store.flush();
     processed = agent.getMessages().length;
   }
 }
