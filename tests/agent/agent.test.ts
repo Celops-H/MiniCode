@@ -566,7 +566,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       },
     };
     const longResults: Message[] = Array.from({ length: 10 }, (_, i) =>
-      toolResultMessage(`c${i}`, "x".repeat(100)),
+      toolResultMessage(`c${i}`, "read", "x".repeat(100)),
     );
     const echoTool: Tool = {
       name: "echo",
@@ -629,9 +629,9 @@ describe("Agent 主循环：模型对话闭环", () => {
     const history: Message[] = [
       userMessage("会话开始：重构项目 ".repeat(20)),
       assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: { path: "src/a.ts" } }]),
-      toolResultMessage("c1", "内容"),
+      toolResultMessage("c1", "read", "内容"),
       assistantMessage([{ type: "tool_call", id: "c2", name: "write", input: { path: "src/b.ts" } }]),
-      toolResultMessage("c2", "已写入"),
+      toolResultMessage("c2", "write", "已写入"),
       userMessage("继续重构"),
     ];
     const echoTool: Tool = {

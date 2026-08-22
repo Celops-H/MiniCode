@@ -3,7 +3,7 @@ import { PRUNED_MARKER, pruneToolResults } from "../../src/context/index.js";
 import { toolResultMessage, userMessage } from "../../src/core/index.js";
 
 function result(id: string, content: string) {
-  return toolResultMessage(`call_${id}`, content);
+  return toolResultMessage(`call_${id}`, "read", content);
 }
 
 describe("pruneToolResults（历史裁剪）", () => {

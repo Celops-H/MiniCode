@@ -215,6 +215,7 @@ export class Agent {
       return {
         message: toolResultMessage(
           call.id,
+          call.name,
           `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`,
           true,
         ),
@@ -223,7 +224,7 @@ export class Agent {
     // 前置参数校验：非法参数格式化为可读错误反馈模型，让其调整后重新调用
     const parsed = tool.inputSchema.safeParse(call.input);
     if (!parsed.success) {
-      return { message: toolResultMessage(call.id, formatInputError(call.name, parsed.error), true) };
+      return { message: toolResultMessage(call.id, call.name, formatInputError(call.name, parsed.error), true) };
     }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
     if (this.permission) {
@@ -234,7 +235,7 @@ export class Agent {
       });
       if (!result.allowed) {
         return {
-          message: toolResultMessage(call.id, `权限拒绝：${result.reason ?? "未授权"}`, true),
+          message: toolResultMessage(call.id, call.name, `权限拒绝：${result.reason ?? "未授权"}`, true),
         };
       }
     }
@@ -249,13 +250,14 @@ export class Agent {
         ? `${truncated.content}\n[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`
         : truncated.content;
       return {
-        message: toolResultMessage(call.id, finalOutput, isError),
+        message: toolResultMessage(call.id, call.name, finalOutput, isError),
         contextModifier,
       };
     } catch (err) {
       return {
         message: toolResultMessage(
           call.id,
+          call.name,
           `工具 ${call.name} 执行失败：${(err as Error).message ?? String(err)}`,
           true,
         ),
