@@ -64,6 +64,30 @@ describe("Agent 接入 Hook 事件", () => {
     expect(handler).toHaveBeenCalledWith({ type: "UserPromptSubmit", input: "你好" });
   });
 
+  it("多轮输入：每次 run 各触发一次 UserPromptSubmit", async () => {
+    const hooks = new HookBus();
+    const handler = vi.fn();
+    hooks.on("UserPromptSubmit", handler);
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+    });
+    agent.start("第一个问题");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+    agent.start("第二个问题");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenNthCalledWith(1, { type: "UserPromptSubmit", input: "第一个问题" });
+    expect(handler).toHaveBeenNthCalledWith(2, { type: "UserPromptSubmit", input: "第二个问题" });
+  });
+
   it("SessionStart 在首次 run 触发且只触发一次", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();

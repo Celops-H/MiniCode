@@ -92,6 +92,10 @@ export class Agent {
   private compactDisabled = false;
   /** SessionStart 已触发的标志：只发射一次 */
   private sessionStarted = false;
+  /** 已执行的 turn 数（与 maxTurns 比较，防失控） */
+  private turnCount = 0;
+  /** Stop 已触发：run 结束；多 Agent 场景下收件箱来消息可唤醒续跑（DESIGN 11.2） */
+  private stopped = false;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -122,6 +126,9 @@ export class Agent {
    * @param input 用户输入内容
    */
   start(input: string): void {
+    // 新一轮用户输入到来：重置 Stop 与 turnCount，允许再次跑 turn（DESIGN 11.2 单次续跑上限）
+    this.stopped = false;
+    this.turnCount = 0;
     this.messages.push(userMessage(input));
   }
 
@@ -133,60 +140,81 @@ export class Agent {
     return [...this.messages];
   }
 
-  /**
-   * 主循环：组装上下文 → 流式调用模型 → 拼装回复 → 无工具调用则结束，
-   * 否则串行执行全部工具调用、结果回灌后继续下一轮。
-   * 透传模型流事件供外部渲染。
+/**
+   * 主循环：逐个 turn 执行直到结束（Stop 或达到 maxTurns），透传模型流事件供外部渲染。
+   * 底层由 runTurn 驱动，保留多 Agent 协作所需的 turn 粒度（DESIGN 11.2）。
    */
   async *run(): AsyncGenerator<StreamEvent> {
-    // SessionStart：会话启动只发射一次；UserPromptSubmit：处理本轮用户输入前
+    // 会话级 Hook 收拢在 run（驱动入口）：
+    // SessionStart 整个 agent 生命周期只发一次；UserPromptSubmit 每次 run 处理用户输入前发一次
     if (!this.sessionStarted) {
       this.sessionStarted = true;
       await this.hooks?.emit({ type: "SessionStart" });
     }
-const lastUser = [...this.messages].reverse().find(
-  (message): message is UserMessage =>
-    message.role === "user" && message.source !== "system",
-);
+    const lastUser = [...this.messages].reverse().find(
+      (message): message is UserMessage =>
+        message.role === "user" && message.source !== "system",
+    );
     if (lastUser) {
       await this.hooks?.emit({ type: "UserPromptSubmit", input: lastUser.content });
     }
-
-    for (let turn = 0; turn < this.maxTurns; turn++) {
-      await this.maybeCompact();
-      const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
-      const collected: StreamEvent[] = [];
-      for await (const event of this.modelClient.stream(this.modelId, context)) {
-        collected.push(event);
+    while (true) {
+      let yielded = false;
+      for await (const event of this.runTurn()) {
+        yielded = true;
         yield event;
       }
-      const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
-      this.messages.push(assistant);
+      // runTurn 不产出事件（已结束或无可执行 turn）→ 会话结束
+      if (!yielded) return;
+    }
+  }
 
-      const calls = toolCallsOf(assistant);
-      if (calls.length === 0) {
-        // Stop：模型回复无工具调用，本轮对话准备结束
-        await this.hooks?.emit({ type: "Stop" });
-        return;
-      }
+  /**
+   * 执行单个 turn（多 Agent 协作的 turn 级调度单元，DESIGN 11.2）。
+   * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
+   * 无工具调用则置 Stop 结束，否则执行工具调用并回灌结果。
+   * 结束（Stop / 达到 maxTurns）后不再产生事件；收件箱消息可在后续注入唤醒续跑。
+   * 会话级 Hook（SessionStart / UserPromptSubmit）由 run 触发，本方法保持纯粹。
+   */
+  async *runTurn(): AsyncGenerator<StreamEvent> {
+    if (this.stopped) return;
+    if (this.turnCount >= this.maxTurns) return;
 
-      // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
-      const batches = partitionByConcurrency(
-        calls.map((call, index) => ({ index, isConcurrencySafe: this.isConcurrencySafe(call) })),
-      );
-      const results: ToolResultMessage[] = new Array(calls.length);
-      await runBatches(
-        batches,
-        async (index) => {
-          const outcome = await this.executeTool(calls[index]!);
-          results[index] = outcome.message;
-          return outcome;
-        },
-        { onContextModifier: (modifier) => modifier() },
-      );
-      for (const message of results) {
-        this.messages.push(message);
-      }
+    await this.maybeCompact();
+    const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
+    const collected: StreamEvent[] = [];
+    for await (const event of this.modelClient.stream(this.modelId, context)) {
+      collected.push(event);
+      yield event;
+    }
+    const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
+    this.messages.push(assistant);
+    this.turnCount++;
+
+    const calls = toolCallsOf(assistant);
+    if (calls.length === 0) {
+      // Stop：模型回复无工具调用，本轮对话准备结束
+      this.stopped = true;
+      await this.hooks?.emit({ type: "Stop" });
+      return;
+    }
+
+    // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
+    const batches = partitionByConcurrency(
+      calls.map((call, index) => ({ index, isConcurrencySafe: this.isConcurrencySafe(call) })),
+    );
+    const results: ToolResultMessage[] = new Array(calls.length);
+    await runBatches(
+      batches,
+      async (index) => {
+        const outcome = await this.executeTool(calls[index]!);
+        results[index] = outcome.message;
+        return outcome;
+      },
+      { onContextModifier: (modifier) => modifier() },
+    );
+    for (const message of results) {
+      this.messages.push(message);
     }
   }
 

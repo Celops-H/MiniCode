@@ -68,6 +68,75 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
+  it("start 重置 turnCount：每轮用户输入独立受 maxTurns 限制", async () => {
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      maxTurns: 1,
+    });
+    agent.start("第一个问题");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+    const events: StreamEvent[] = [];
+    agent.start("第二个问题");
+    for await (const e of agent.run()) events.push(e);
+
+    // 修复回归：turnCount 不重置会累计到 maxTurns，第二轮输入静默无响应
+    expect(events.length).toBeGreaterThan(0);
+    expect(agent.getMessages()).toHaveLength(4);
+  });
+
+  it("runTurn 按 turn 粒度执行：工具调用一轮暂停，再调用继续，Stop 后无事件", async () => {
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显文本",
+      inputSchema: z.object({ text: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: (input) => `回显：${(input as { text: string }).text}`,
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasToolResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasToolResult) {
+            yield { type: "toolcall_start", index: 0, id: "call_1", name: "echo" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"text":"hi"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "工具已执行" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [echoTool],
+    });
+    agent.start("说 hi");
+
+    // 第一轮：模型请求工具，执行后回灌；事件含工具调用
+    const turn1: StreamEvent[] = [];
+    for await (const e of agent.runTurn()) turn1.push(e);
+    expect(turn1.some((e) => e.type === "toolcall_start")).toBe(true);
+    expect(agent.getMessages()).toHaveLength(3); // user + assistant(tool_call) + tool_result
+
+    // 第二轮：模型看到结果后文本结束（Stop）
+    const turn2: StreamEvent[] = [];
+    for await (const e of agent.runTurn()) turn2.push(e);
+    expect(turn2.some((e) => e.type === "text_delta")).toBe(true);
+    expect(agent.getMessages()).toHaveLength(4);
+
+    // Stop 之后：不再产生任何事件
+    const turn3: StreamEvent[] = [];
+    for await (const e of agent.runTurn()) turn3.push(e);
+    expect(turn3).toHaveLength(0);
+  });
+
   it("未知工具调用回灌为错误消息，模型据此继续", async () => {
     const agent = new Agent({
       modelClient: {
