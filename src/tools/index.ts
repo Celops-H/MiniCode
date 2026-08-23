@@ -6,6 +6,7 @@ export type { Tool, ContextModifier, ExecuteResult } from "./base.js";
 export { ToolRegistry } from "./registry.js";
 export { createFileTools, createBuiltinTools } from "./builtin/index.js";
 export { bashTool } from "./builtin/bash.js";
+export { bashTaskTool } from "./builtin/bash-task.js";
 export {
   startBackgroundTask,
   getBackgroundTask,
