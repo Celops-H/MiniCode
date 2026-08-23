@@ -10,7 +10,6 @@ import {
   type StreamEvent,
   type ToolCall,
   type ToolResultMessage,
-  type UserMessage,
 } from "../core/index.js";
 import {
   buildRecoveryText,
@@ -98,8 +97,6 @@ export class Agent {
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
-  /** SessionStart 已触发的标志：只发射一次 */
-  private sessionStarted = false;
   /** 已执行的 turn 数（与 maxTurns 比较，防失控） */
   private turnCount = 0;
   /** Stop 已触发：run 结束；多 Agent 场景下收件箱来消息可唤醒续跑（DESIGN 11.2） */
@@ -165,23 +162,11 @@ export class Agent {
   }
 
 /**
-   * 主循环：逐个 turn 执行直到结束（Stop 或达到 maxTurns），透传模型流事件供外部渲染。
-   * 底层由 runTurn 驱动，保留多 Agent 协作所需的 turn 粒度（DESIGN 11.2）。
+   * 会话驱动入口（宿主调用，DESIGN 13）：推进 turn 直到会话结束。
+   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主发射——
+   * SessionStart 在会话开始（创建后首次驱动前）一次，UserPromptSubmit 在每次用户输入后一次。
    */
   async *run(): AsyncGenerator<StreamEvent> {
-    // 会话级 Hook 收拢在 run（驱动入口）：
-    // SessionStart 整个 agent 生命周期只发一次；UserPromptSubmit 每次 run 处理用户输入前发一次
-    if (!this.sessionStarted) {
-      this.sessionStarted = true;
-      await this.hooks?.emit({ type: "SessionStart" });
-    }
-    const lastUser = [...this.messages].reverse().find(
-      (message): message is UserMessage =>
-        message.role === "user" && message.source !== "system",
-    );
-    if (lastUser) {
-      await this.hooks?.emit({ type: "UserPromptSubmit", input: lastUser.content });
-    }
     yield* this.resume();
   }
 
@@ -225,7 +210,7 @@ export class Agent {
    * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
    * 无工具调用则置 Stop 结束，否则执行工具调用并回灌结果。
    * 结束（Stop / 达到 maxTurns）后不再产生事件；收件箱消息可在后续注入唤醒续跑。
-   * 会话级 Hook（SessionStart / UserPromptSubmit）由 run 触发，本方法保持纯粹。
+   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主发射，本方法保持纯粹。
    */
   async *runTurn(): AsyncGenerator<StreamEvent> {
     if (this.stopped) return;

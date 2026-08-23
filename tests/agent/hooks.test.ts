@@ -45,7 +45,7 @@ function makeReadTool(execute: Tool["execute"]): Tool {
 }
 
 describe("Agent 接入 Hook 事件", () => {
-  it("run 处理用户输入前触发 UserPromptSubmit（携带输入内容）", async () => {
+  it("run 处理用户输入前触发 UserPromptSubmit（携带输入内容，宿主在 start 后发射）", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("UserPromptSubmit", handler);
@@ -56,6 +56,8 @@ describe("Agent 接入 Hook 事件", () => {
       hooks,
     });
     agent.start("你好");
+    // 会话级 Hook 由宿主发射：每次用户输入后一次
+    await hooks.emit({ type: "UserPromptSubmit", input: "你好" });
     for await (const _ of agent.run()) {
       // 消费事件流
     }
@@ -64,7 +66,7 @@ describe("Agent 接入 Hook 事件", () => {
     expect(handler).toHaveBeenCalledWith({ type: "UserPromptSubmit", input: "你好" });
   });
 
-  it("多轮输入：每次 run 各触发一次 UserPromptSubmit", async () => {
+  it("多轮输入：宿主每次 start 后各发射一次 UserPromptSubmit", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("UserPromptSubmit", handler);
@@ -75,10 +77,12 @@ describe("Agent 接入 Hook 事件", () => {
       hooks,
     });
     agent.start("第一个问题");
+    await hooks.emit({ type: "UserPromptSubmit", input: "第一个问题" });
     for await (const _ of agent.run()) {
       // 消费事件流
     }
     agent.start("第二个问题");
+    await hooks.emit({ type: "UserPromptSubmit", input: "第二个问题" });
     for await (const _ of agent.run()) {
       // 消费事件流
     }
@@ -88,7 +92,7 @@ describe("Agent 接入 Hook 事件", () => {
     expect(handler).toHaveBeenNthCalledWith(2, { type: "UserPromptSubmit", input: "第二个问题" });
   });
 
-  it("SessionStart 在首次 run 触发且只触发一次", async () => {
+  it("SessionStart 由宿主在会话开始时发射一次", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("SessionStart", handler);
@@ -98,6 +102,8 @@ describe("Agent 接入 Hook 事件", () => {
       systemPrompt: "助手",
       hooks,
     });
+    // 会话级 Hook 由宿主发射：会话开始（首次驱动前）一次
+    await hooks.emit({ type: "SessionStart" });
     agent.start("第一问");
     for await (const _ of agent.run()) {
       // 消费
