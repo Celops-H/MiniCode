@@ -23,6 +23,7 @@ export { readTool } from "./builtin/read.js";
 export { writeTool } from "./builtin/write.js";
 export { createTodoTool } from "./builtin/todo.js";
 export { createSubagentTool, SUBAGENT_SYSTEM_PROMPT } from "./builtin/subagent.js";
+export { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "./builtin/collab.js";
 export { partitionByConcurrency, runBatches } from "./partition.js";
 export type {
   ConcurrencyItem,

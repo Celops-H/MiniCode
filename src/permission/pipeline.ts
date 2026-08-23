@@ -117,6 +117,35 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
   }
 
   /**
+   * 免审批工具检查（DESIGN 7.1 skipsPermission）：跳过规则层/会话缓存/用户审批，
+   * 但保留 plan 模式只读约束与 PreToolUse hook 拦截——低影响工具（如 agent 消息投递）
+   * 不打扰用户审批，仍可被 plan 模式约束与 hook 观测/拦截。
+   * @param request 权限请求（工具名 + 参数）
+   * @param hook 本次调用注入的 PreToolUse 钩子（优先于构造时的 preToolUseHook）
+   * @returns 裁决结果
+   */
+  async checkSkipsPermission(
+    request: PermissionRequest,
+    hook?: PreToolUseHook,
+  ): Promise<PermissionResult> {
+    const mode = this.options.mode ?? "default";
+    // plan 模式：只放行只读工具集合，其余拒绝（与正常审批一致）
+    if (mode === "plan") {
+      if (this.options.readOnlyTools?.has(request.toolName)) {
+        return { allowed: true, source: "mode" };
+      }
+      return { allowed: false, reason: `plan 模式只读：${request.toolName} 不可用`, source: "mode" };
+    }
+    // PreToolUse hook：可 deny 拦截（allow/ask 不升级用户审批，免审批语义）
+    const effectiveHook = hook ?? this.options.preToolUseHook;
+    if (effectiveHook) {
+      const hookVerdict = await effectiveHook(request);
+      if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
+    }
+    return { allowed: true, source: "rule" };
+  }
+
+  /**
    * 生成会话缓存键（整工具调用或无内容参数用工具名，否则 `Tool(content)`）。
    * @param toolName 工具名
    * @param content 工具参数内容，可省略

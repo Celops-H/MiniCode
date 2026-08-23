@@ -36,6 +36,9 @@ import type { HookBus } from "../hooks/index.js";
 import { FileState, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
+import { AgentPath } from "./agent-path.js";
+import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "../tools/index.js";
+import type { Team } from "./team.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -75,6 +78,8 @@ export interface AgentOptions {
   subagentMaxTurns?: number;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
+  /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
+  team?: Team;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -90,6 +95,10 @@ export class Agent {
   private readonly subagentMaxTurns: number;
   /** 本 agent 的文件状态快照（DESIGN 7.6）：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
   private readonly fileState = new FileState();
+  /** 归属的团队（多 Agent 协作，DESIGN 11.1）；不传则本 agent 独立运行、不展示协作工具 */
+  private readonly team?: Team;
+  /** 本 agent 在团队中的层级路径（DESIGN 11.1）；注册进团队时由 Team 设置 */
+  agentPath?: AgentPath;
   /** 工具输出超限的落盘目录（DESIGN 9.1 ①） */
   private readonly outputDir: string;
   /** agent 邮箱（DESIGN 11.3）：其他 agent 投递的消息队列，注入上下文供模型读取 */
@@ -114,6 +123,7 @@ export class Agent {
     this.hooks = options.hooks;
     this.subagentMaxTurns = options.subagentMaxTurns ?? 10;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
+    this.team = options.team;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -124,9 +134,43 @@ export class Agent {
         createSubagentTool({ runSubagent: (prompt) => this.runSubagent(prompt) }),
       );
     }
+    // 多 agent 环境：注册协作工具（DESIGN 11.4，仅团队内可见）
+    if (this.team) {
+      for (const tool of createCollaborationTools({
+        team: this.team,
+        getAgentPath: () => this.agentPath,
+        createChildAgent: (agentName, path) => this.createChildAgent(agentName, path),
+        sendMessage: (target, mail) => this.team!.sendMessage(target, mail),
+      })) {
+        this.registry.register(tool);
+      }
+    }
     if (options.initialMessages) {
       this.messages.push(...options.initialMessages);
     }
+  }
+
+  /**
+   * 创建协作子 agent（DESIGN 11.6 fork_turns=none）：全新上下文 + 运行时继承
+   * （模型 / 权限 / Hook / 团队 / 落盘目录），工具 = 父工具集过滤协作工具 + 协作工具。
+   * @param agentName 子 agent 名（路径末段，已由 reserveSpawn 校验）
+   * @param path 子 agent 在团队中的路径
+   * @returns 子 agent 实例（路径已设置，待 commitSpawn 登记）
+   */
+  private createChildAgent(agentName: string, path: AgentPath): Agent {
+    const child = new Agent({
+      modelClient: this.modelClient,
+      modelId: this.modelId,
+      systemPrompt: COLLAB_SUBAGENT_PROMPT,
+      tools: this.registry.list().filter((tool) => !COLLAB_TOOL_NAMES.has(tool.name)),
+      permission: this.permission,
+      hooks: this.hooks,
+      team: this.team,
+      maxTurns: this.maxTurns,
+      outputDir: this.outputDir,
+    });
+    child.agentPath = path;
+    return child;
   }
 
   /**
@@ -338,17 +382,21 @@ export class Agent {
       return { message: toolResultMessage(call.id, call.name, formatInputError(call.name, parsed.error), true) };
     }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
+    // 免审批工具（skipsPermission，如 agent 消息投递）走轻量检查：
+    // 跳过规则/缓存/用户审批，保留 plan 只读约束与 PreToolUse hook 拦截（DESIGN 7.1）
     if (this.permission) {
       const rawCommand = call.input.command;
-      const result = await this.permission.check(
-        {
-          toolName: call.name,
-          content: typeof rawCommand === "string" ? rawCommand : undefined,
-          input: call.input,
-        },
-        // 接入 PreToolUse Hook 事件（DESIGN 8.1：规则层 ask 时进决策链）
-        this.hooks ? (request) => this.preToolUseVerdict(request) : undefined,
-      );
+      const request: PermissionRequest = {
+        toolName: call.name,
+        content: typeof rawCommand === "string" ? rawCommand : undefined,
+        input: call.input,
+      };
+      const hook = this.hooks
+        ? (r: PermissionRequest) => this.preToolUseVerdict(r)
+        : undefined;
+      const result = tool.skipsPermission
+        ? await this.permission.checkSkipsPermission(request, hook)
+        : await this.permission.check(request, hook);
       if (!result.allowed) {
         return {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${result.reason ?? "未授权"}`, true),

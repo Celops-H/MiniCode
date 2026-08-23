@@ -44,6 +44,7 @@ export class Team {
   /** 注册根 agent（协调者，路径固定 `/root`，不占 spawn 计数） */
   registerRoot(agent: Agent): void {
     const root = AgentPath.root();
+    agent.agentPath = root;
     this.members.set(root.toString(), { agent, path: root, depth: 0 });
   }
 
@@ -69,11 +70,12 @@ export class Team {
     return child;
   }
 
-  /** 提交已预留的 spawn：填入 agent 实例（计数已在预留时占用） */
+  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用） */
   commitSpawn(path: AgentPath, agent: Agent): void {
     const member = this.members.get(path.toString());
     if (!member) return;
     member.agent = agent;
+    agent.agentPath = path;
   }
 
   /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏） */
