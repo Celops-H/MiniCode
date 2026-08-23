@@ -30,7 +30,8 @@ export const grepTool: Tool = {
     const regex = new RegExp(pattern);
     const cwd = dir ?? process.cwd();
     const results: string[] = [];
-    for (const file of await listTextFiles(cwd)) {
+    const { files, truncated } = await listTextFiles(cwd);
+    for (const file of files) {
       if (fileGlob && !matchesGlob(path.basename(file), fileGlob)) continue;
       let content: string;
       try {
@@ -46,22 +47,33 @@ export const grepTool: Tool = {
         }
       }
     }
-    return results.length > 0 ? results.join("\n") : "未找到匹配内容";
+    // 深度超限时明确标记结果不完整，避免模型误判「搜索完整、无匹配」
+    const suffix = truncated ? "\n[深度超限，结果不完整]" : "";
+    return results.length > 0
+      ? results.join("\n") + suffix
+      : truncated
+        ? "未找到匹配内容（深度超限，结果不完整）"
+        : "未找到匹配内容";
   },
 };
 
-/** 递归收集文本文件，跳过 node_modules 与 .git，限制深度 */
-async function listTextFiles(dir: string, depth = 0): Promise<string[]> {
-  if (depth > 12) return [];
-  const result: string[] = [];
+/** 递归收集文本文件，跳过 node_modules 与 .git，限制深度；深度超限时 truncated 置位 */
+async function listTextFiles(
+  dir: string,
+  depth = 0,
+): Promise<{ files: string[]; truncated: boolean }> {
+  if (depth > 12) return { files: [], truncated: true };
+  const result: { files: string[]; truncated: boolean } = { files: [], truncated: false };
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.name === "node_modules" || entry.name === ".git") continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      result.push(...(await listTextFiles(full, depth + 1)));
+      const sub = await listTextFiles(full, depth + 1);
+      result.files.push(...sub.files);
+      result.truncated = result.truncated || sub.truncated;
     } else if (entry.isFile()) {
-      result.push(full);
+      result.files.push(full);
     }
   }
   return result;

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -80,5 +80,16 @@ describe("文件类内置工具", () => {
     writeFileSync(path.join(dir, "a.txt"), "内容");
     const out = await tool("grep").execute({ pattern: "不存在", path: dir });
     expect(out).toBe("未找到匹配内容");
+  });
+
+  it("grep 深度超限时标记结果不完整", async () => {
+    const dir = setup();
+    // 构造 13 层嵌套目录（超过 12 层上限）使搜索截断
+    let deep = dir;
+    for (let i = 0; i < 13; i++) deep = path.join(deep, "d");
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(path.join(deep, "deep.txt"), "深处匹配");
+    const out = await tool("grep").execute({ pattern: "深处", path: dir });
+    expect(out).toContain("深度超限");
   });
 });
