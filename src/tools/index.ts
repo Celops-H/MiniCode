@@ -1,5 +1,7 @@
 export { validateInput } from "./base.js";
 export { truncateOutput } from "./truncate.js";
+export { spillOutput } from "./overflow.js";
+export type { SpillResult } from "./overflow.js";
 export { formatInputError } from "./input-error.js";
 export type { TruncateResult } from "./truncate.js";
 export type { Tool, ContextModifier, ExecuteResult } from "./base.js";

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
@@ -346,7 +349,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
-  it("工具输出超过上限时截断并加截断标记", async () => {
+  it("工具输出超过上限时落盘完整内容并回灌路径提示", async () => {
     const bigTool: Tool = {
       name: "big",
       description: "返回超长输出",
@@ -356,37 +359,50 @@ describe("Agent 主循环：模型对话闭环", () => {
       maxResultSizeChars: 10,
       execute: () => "一二三四五六七八九十十一十二十三十四十五",
     };
-    const agent = new Agent({
-      modelClient: {
-        async *stream(_modelId, context) {
-          const hasResult = context.messages.some((m) => m.role === "tool_result");
-          if (!hasResult) {
-            yield { type: "toolcall_start", index: 0, id: "c1", name: "big" };
-            yield { type: "toolcall_end", index: 0 };
-            yield { type: "done", stopReason: "tool_calls" };
-          } else {
-            yield { type: "text_delta", text: "完成" };
-            yield { type: "done", stopReason: "end_turn" };
-          }
+    const outDir = mkdtempSync(path.join(tmpdir(), "minicode-out-"));
+    try {
+      const agent = new Agent({
+        modelClient: {
+          async *stream(_modelId, context) {
+            const hasResult = context.messages.some((m) => m.role === "tool_result");
+            if (!hasResult) {
+              yield { type: "toolcall_start", index: 0, id: "c1", name: "big" };
+              yield { type: "toolcall_end", index: 0 };
+              yield { type: "done", stopReason: "tool_calls" };
+            } else {
+              yield { type: "text_delta", text: "完成" };
+              yield { type: "done", stopReason: "end_turn" };
+            }
+          },
         },
-      },
-      modelId: "mock",
-      systemPrompt: "助手",
-      tools: [bigTool],
-    });
-    agent.start("大输出");
-    for await (const _ of agent.run()) {
-      // 消费事件流
-    }
+        modelId: "mock",
+        systemPrompt: "助手",
+        tools: [bigTool],
+        outputDir: outDir,
+      });
+      agent.start("大输出");
+      for await (const _ of agent.run()) {
+        // 消费事件流
+      }
 
-    const messages = agent.getMessages();
-    const result = messages.find((m) => m.role === "tool_result");
-    expect(result).toMatchObject({
-      role: "tool_result",
-      toolCallId: "c1",
-      isError: false,
-      content: expect.stringContaining("[输出已截断：共 20 字符，保留前 10 字符]"),
-    });
+      const messages = agent.getMessages();
+      const result = messages.find((m) => m.role === "tool_result");
+      expect(result).toMatchObject({
+        role: "tool_result",
+        toolCallId: "c1",
+        isError: false,
+        content: expect.stringContaining("[输出已截断：共 20 字符，完整内容已保存到"),
+      });
+      const outputFile = result && typeof result.content === "string"
+        ? result.content.match(/已保存到 (\S+)，可用 Read/)?.[1]
+        : undefined;
+      expect(outputFile).toBeDefined();
+      // 落盘文件内容与原始输出完全一致（无损读回）
+      const saved = await import("node:fs/promises").then((fs) => fs.readFile(outputFile!, "utf8"));
+      expect(saved).toBe("一二三四五六七八九十十一十二十三十四十五");
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
   });
 
   it("工具标记失败（isError）时回灌为错误消息", async () => {

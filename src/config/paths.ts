@@ -43,3 +43,16 @@ export function resolveSessionsDir(opts: ResolvePathsOptions = {}): string {
   const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
   return path.join(globalDir, "sessions");
 }
+
+/**
+ * 解析工具输出落盘目录：默认用户级 `~/.minicode/outputs/`（与全局配置同目录族），
+ * 大工具输出超限时完整内容写到这里，消息里留路径供 Read 读回（DESIGN 9.1 ①）。
+ * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
+ * @returns 输出落盘目录
+ */
+export function resolveOutputsDir(opts: ResolvePathsOptions = {}): string {
+  const home = opts.homedir ?? os.homedir();
+  const xdg = opts.xdgConfigHome;
+  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
+  return path.join(globalDir, "outputs");
+}

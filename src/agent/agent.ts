@@ -26,15 +26,16 @@ import {
   formatInputError,
   partitionByConcurrency,
   runBatches,
+  spillOutput,
   SUBAGENT_SYSTEM_PROMPT,
   ToolRegistry,
-  truncateOutput,
   type ExecuteOutcome,
   type Tool,
 } from "../tools/index.js";
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
 import type { HookBus } from "../hooks/index.js";
 import { FileState, withFileState } from "../tools/file-state.js";
+import { resolveOutputsDir } from "../config/paths.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -72,6 +73,8 @@ export interface AgentOptions {
   subagent?: boolean;
   /** 子代理步数上限，缺省 10（防失控） */
   subagentMaxTurns?: number;
+  /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
+  outputDir?: string;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -87,6 +90,8 @@ export class Agent {
   private readonly subagentMaxTurns: number;
   /** 本 agent 的文件状态快照（DESIGN 7.6）：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
   private readonly fileState = new FileState();
+  /** 工具输出超限的落盘目录（DESIGN 9.1 ①） */
+  private readonly outputDir: string;
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
@@ -106,6 +111,7 @@ export class Agent {
     this.permission = options.permission;
     this.hooks = options.hooks;
     this.subagentMaxTurns = options.subagentMaxTurns ?? 10;
+    this.outputDir = options.outputDir ?? resolveOutputsDir();
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -319,10 +325,8 @@ export class Agent {
         typeof result === "string"
           ? { output: result, contextModifier: undefined, isError: undefined }
           : result;
-      const truncated = truncateOutput(output, tool.maxResultSizeChars);
-      const finalOutput = truncated.truncated
-        ? `${truncated.content}\n[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`
-        : truncated.content;
+      const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
+      const finalOutput = truncated.content;
       // PostToolUse：工具执行完成（含标记失败的结果），供观测
       await this.hooks?.emit({
         type: "PostToolUse",
