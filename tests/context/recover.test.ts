@@ -51,6 +51,18 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
     expect(context.sessionStart).toBeUndefined();
     expect(context.recentRequests).toEqual([]);
   });
+
+  it("系统注入消息（摘要/恢复上下文）不计入用户请求与会话起始", () => {
+    const messages: Message[] = [
+      userMessage("【会话摘要】旧对话总结", "system"),
+      userMessage("【恢复上下文】最近文件 a.ts", "system"),
+      userMessage("真实的用户请求"),
+      assistantMessage([{ type: "text", text: "好" }]),
+    ];
+    const context = extractRecoveryContext(messages);
+    expect(context.recentRequests).toEqual(["真实的用户请求"]);
+    expect(context.sessionStart).toBe("真实的用户请求");
+  });
 });
 
 describe("buildRecoveryText（恢复文本）", () => {

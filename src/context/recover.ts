@@ -1,4 +1,4 @@
-import type { Message } from "../core/index.js";
+import type { Message, UserMessage } from "../core/index.js";
 
 /** 文件操作工具：从 input.path 提取最近操作的文件 */
 const FILE_TOOLS = new Set(["read", "write", "edit"]);
@@ -49,15 +49,18 @@ export function extractRecoveryContext(
     }
   }
 
-  // 活跃任务：最近的用户请求
+  // 活跃任务：最近的用户请求（排除摘要/恢复上下文等系统注入消息，避免连续压缩自我放大）
   const recentRequests: string[] = [];
   for (let i = messages.length - 1; i >= 0 && recentRequests.length < maxRequests; i--) {
     const message = messages[i]!; // 循环边界保证 i 不越界
-    if (message.role === "user") recentRequests.push(message.content);
+    if (message.role === "user" && message.source !== "system") recentRequests.push(message.content);
   }
 
-  // 会话起始上下文：首条用户消息
-  const firstUser = messages.find((message) => message.role === "user");
+  // 会话起始上下文：首条真实用户消息（排除系统注入的摘要）
+  const firstUser = messages.find(
+    (message): message is UserMessage =>
+      message.role === "user" && message.source !== "system",
+  );
   const sessionStart = firstUser?.content;
 
   return { files, recentRequests, sessionStart };
