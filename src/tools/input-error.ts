@@ -4,7 +4,6 @@ import { z } from "zod";
  * 把工具参数校验错误（ZodError）格式化为模型可读的错误文本。
  * 缺失参数翻译为「缺失」，未识别字段列出具体字段名，其余保留 zod 的
  * 期望/收到说明（如 Expected string, received number），供模型调整后重新调用。
- * 参考 claude-code formatZodValidationError 的分类思路。
  * @param toolName 工具名
  * @param error zod 校验错误
  * @returns 可读错误文本

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 /**
- * 解析 .env 文本为键值对象（对齐 dotenv 常见格式，简化实现）：
+ * 解析 .env 文本为键值对象（标准 .env 格式的简化实现）：
  * `KEY=VALUE` 行；`#` 开头的注释与空行忽略；支持可选 `export ` 前缀；
  * 值可带单双引号（剥离）；已有环境变量优先（不覆盖）。
  * @param text .env 文件内容

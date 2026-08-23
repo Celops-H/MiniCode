@@ -1,7 +1,6 @@
 /**
  * 权限规则层：allow / deny / ask 三态规则。
  * 规则是前置过滤器——主循环在工具执行前用规则做第一道裁决。
- * 参考实现已调研（opencode 的 Rule{action,resource,effect}、claude-code 的三桶规则）。
  */
 
 export type PermissionBehavior = "allow" | "deny" | "ask";

@@ -87,7 +87,7 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
     const explicitAsk = this.options.rules.some(
       (rule) => rule.behavior === "ask" && ruleMatches(rule, toolName, content),
     );
-    // bypass 模式：跳过「默认询问」，显式 ask 规则仍生效（参考 cc：显式规则优先于 bypass）
+    // bypass 模式：跳过「默认询问」，显式 ask 规则仍生效（显式规则优先于 bypass，安全保守）
     if (mode === "bypassPermissions" && !explicitAsk) {
       return { allowed: true, source: "mode" };
     }

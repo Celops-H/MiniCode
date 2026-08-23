@@ -43,7 +43,7 @@ export function startBackgroundTask(command: string): BackgroundTask {
     startedAt: Date.now(),
   };
   // Unix 用 detached 让子进程独立成进程组，便于按进程树终止；
-  // Windows 的 detached 会断开 stdio 导致收不到输出，改用 taskkill /T 按树杀（与 pi 一致）
+  // Windows 的 detached 会断开 stdio 导致收不到输出，改用 taskkill /T 按树杀
   const child = spawn(command, { shell: true, detached: process.platform !== "win32" });
   child.stdout?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
   child.stderr?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
