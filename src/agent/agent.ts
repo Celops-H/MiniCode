@@ -36,6 +36,7 @@ import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "
 import type { HookBus } from "../hooks/index.js";
 import { FileState, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
+import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -92,6 +93,8 @@ export class Agent {
   private readonly fileState = new FileState();
   /** 工具输出超限的落盘目录（DESIGN 9.1 ①） */
   private readonly outputDir: string;
+  /** agent 邮箱（DESIGN 11.3）：其他 agent 投递的消息队列，注入上下文供模型读取 */
+  private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
@@ -101,6 +104,8 @@ export class Agent {
   private turnCount = 0;
   /** Stop 已触发：run 结束；多 Agent 场景下收件箱来消息可唤醒续跑（DESIGN 11.2） */
   private stopped = false;
+  /** 是否有活跃的续跑循环（防重复驱动：忙时投递只入队，活跃循环自行消费，DESIGN 11.2） */
+  private active = false;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -146,6 +151,19 @@ export class Agent {
     return [...this.messages];
   }
 
+  /**
+   * 投递消息到本 agent 邮箱（DESIGN 11.3，供 Team 调度投递）。
+   * @param mail 消息（类型、发送方、内容、是否唤醒）
+   */
+  deliver(mail: MailMessage): void {
+    this.mailbox.enqueue(mail);
+  }
+
+  /** 收件箱是否有未消费消息（调度器 runnable 判定，DESIGN 11.2） */
+  hasPendingMail(): boolean {
+    return this.mailbox.hasPending();
+  }
+
 /**
    * 主循环：逐个 turn 执行直到结束（Stop 或达到 maxTurns），透传模型流事件供外部渲染。
    * 底层由 runTurn 驱动，保留多 Agent 协作所需的 turn 粒度（DESIGN 11.2）。
@@ -164,15 +182,42 @@ export class Agent {
     if (lastUser) {
       await this.hooks?.emit({ type: "UserPromptSubmit", input: lastUser.content });
     }
-    while (true) {
-      let yielded = false;
-      for await (const event of this.runTurn()) {
-        yielded = true;
-        yield event;
+    yield* this.resume();
+  }
+
+  /**
+   * 续跑循环（DESIGN 11.2，供调度器唤醒驱动）：与 run 相同的 turn 推进，但不触发
+   * 会话级 Hook（SessionStart / UserPromptSubmit 只属于用户驱动）。
+   * 每轮跑完后：收件箱非空（含排队消息）→ 重置续跑预算继续，下一轮 runTurn 消费注入；
+   * 收件箱空且终态（模型已回复无工具调用或续跑预算耗尽）→ 结束。
+   * 空闲（loop 结束）后的唤醒只由 triggerTurn 消息经 Team 驱动发起。
+   * 防重入：已有活跃续跑循环时直接返回（忙时投递只入队，活跃循环在每轮结束自行消费）。
+   */
+  async *resume(): AsyncGenerator<StreamEvent> {
+    if (this.active) return;
+    this.active = true;
+    try {
+      while (true) {
+        for await (const event of this.runTurn()) {
+          yield event;
+        }
+        // 收件箱非空（含排队消息）→ 继续 loop：下一轮 runTurn 消费注入（DESIGN 11.2 排队消息不永远滞留）
+        if (this.mailbox.hasPending()) {
+          this.stopped = false;
+          this.turnCount = 0;
+          continue;
+        }
+        // 收件箱空且终态（本轮模型回复无工具调用，或续跑预算耗尽）→ 会话结束
+        if (this.stopped || this.turnCount >= this.maxTurns) return;
       }
-      // runTurn 不产出事件（已结束或无可执行 turn）→ 会话结束
-      if (!yielded) return;
+    } finally {
+      this.active = false;
     }
+  }
+
+  /** 是否有活跃的续跑循环（调度器判断是否重复驱动） */
+  isActive(): boolean {
+    return this.active;
   }
 
   /**
@@ -187,6 +232,12 @@ export class Agent {
     if (this.turnCount >= this.maxTurns) return;
 
     await this.maybeCompact();
+    // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本，DESIGN 11.3）
+    if (this.mailbox.hasPending()) {
+      for (const mail of this.mailbox.drain()) {
+        this.messages.push(userMessage(formatMailMessage(mail), "system"));
+      }
+    }
     const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
     const collected: StreamEvent[] = [];
     for await (const event of this.modelClient.stream(this.modelId, context)) {

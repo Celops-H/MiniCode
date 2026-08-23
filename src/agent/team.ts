@@ -5,6 +5,7 @@
  */
 import { AgentPath } from "./agent-path.js";
 import type { Agent } from "./agent.js";
+import type { MailMessage } from "./mailbox.js";
 
 export interface TeamMember {
   /** agent 实例；预留未提交时为 undefined */
@@ -31,6 +32,8 @@ export class Team {
   private readonly maxConcurrent: number;
   private spawnCount = 0;
   private activeExecutions = 0;
+  /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒，DESIGN 11.2） */
+  private readonly pendingDrives = new Set<Agent>();
 
   constructor(options: TeamOptions = {}) {
     this.maxAgents = options.maxAgents ?? Infinity;
@@ -88,6 +91,67 @@ export class Team {
   /** 列出全部活跃子 agent（不含 root） */
   listAgents(): TeamMember[] {
     return [...this.members.values()].filter((member) => !member.path.isRoot());
+  }
+
+  /**
+   * 投递消息到目标 agent 邮箱（DESIGN 11.3）。
+   * 唤醒型消息（triggerTurn）投递后立即后台驱动目标续跑，不阻塞投递方
+   * （对齐投递 → 通知 → 目标续跑语义；并发满时留待下次投递驱动）。
+   * @param target 目标 agent 路径
+   * @param mail 待投递消息
+   * @returns 目标不存在时返回错误文本，成功返回 undefined
+   */
+  async sendMessage(target: AgentPath, mail: MailMessage): Promise<string | undefined> {
+    const member = this.members.get(target.toString());
+    if (!member?.agent) return `目标 agent ${target} 不存在`;
+    member.agent.deliver(mail);
+    if (mail.triggerTurn) {
+      void this.driveAgent(member.agent);
+    }
+    return undefined;
+  }
+
+  /** 后台驱动单个 agent 续跑：并发槽位内消费其 resume()（DESIGN 11.2 唤醒已结束 agent） */
+  private async driveAgent(agent: Agent): Promise<void> {
+    // 忙（已有活跃续跑循环）：不重复驱动，活跃循环会在每轮结束自行消费收件箱消息
+    if (agent.isActive()) return;
+    const release = this.acquireExecution();
+    if (typeof release === "string") {
+      // 并发满：进待驱动队列，槽位释放时重试（防丢唤醒）
+      this.pendingDrives.add(agent);
+      return;
+    }
+    await this.consumeDriving(agent, release);
+  }
+
+  /** 消费单个 agent 的续跑循环；结束后释放槽位并重试待驱动队列 */
+  private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
+    try {
+      for await (const _ of agent.resume()) {
+        // 消费事件流（驱动推进）
+      }
+    } catch {
+      // 模型流等错误不外泄为未处理 rejection（Node 默认会崩进程）；
+      // 工具执行错误已由 executeTool 捕获回灌，这里只兜底驱动路径
+    } finally {
+      release();
+      this.retryPendingDrives();
+    }
+  }
+
+  /** 槽位释放后重试待驱动队列：逐个获取槽位并后台驱动；槽位仍满则留给下次释放 */
+  private retryPendingDrives(): void {
+    for (const agent of [...this.pendingDrives]) {
+      if (agent.isActive()) {
+        // 已被活跃循环接管（如期间收到用户输入），无需再驱动
+        this.pendingDrives.delete(agent);
+        continue;
+      }
+      const release = this.acquireExecution();
+      if (typeof release === "string") return;
+      this.pendingDrives.delete(agent);
+      void this.consumeDriving(agent, release);
+    }
   }
 
   /**
