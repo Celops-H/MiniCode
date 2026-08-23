@@ -34,6 +34,7 @@ import {
 } from "../tools/index.js";
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
 import type { HookBus } from "../hooks/index.js";
+import { FileState, withFileState } from "../tools/file-state.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
@@ -84,6 +85,8 @@ export class Agent {
   private readonly permission?: PermissionPipeline;
   private readonly hooks?: HookBus;
   private readonly subagentMaxTurns: number;
+  /** 本 agent 的文件状态快照（DESIGN 7.6）：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
+  private readonly fileState = new FileState();
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
@@ -283,7 +286,7 @@ const lastUser = [...this.messages].reverse().find(
       }
     }
     try {
-      const result = await tool.execute(call.input);
+      const result = await withFileState(this.fileState, () => tool.execute(call.input));
       const { output, contextModifier, isError } =
         typeof result === "string"
           ? { output: result, contextModifier: undefined, isError: undefined }

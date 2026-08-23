@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { currentFileState, hashContent } from "../file-state.js";
 
 const schema = z.object({
   path: z.string(),
@@ -27,6 +28,16 @@ export const readTool: Tool = {
       limit?: number;
     }>(readTool, input);
     const content = await readFile(path, "utf8");
+    // 记录版本令牌（DESIGN 7.6）：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
+    const fileState = currentFileState();
+    if (fileState) {
+      const disk = await stat(path);
+      fileState.setVersion(path, {
+        mtimeMs: disk.mtimeMs,
+        size: disk.size,
+        contentHash: limit === undefined ? hashContent(content) : undefined,
+      });
+    }
     const lines = content.split("\n");
     const end = limit !== undefined ? offset + limit : lines.length;
     const selected = lines.slice(offset, end);

@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { currentFileState } from "../file-state.js";
 
 const schema = z.object({
   path: z.string(),
@@ -24,19 +25,28 @@ export const editTool: Tool = {
       oldString: string;
       newString: string;
     }>(editTool, input);
+    const fileState = currentFileState();
+    const edit = async () => {
+      // CAS 校验：磁盘 vs 本 agent 快照，冲突拒绝（DESIGN 7.6）
+      const stale = fileState ? await fileState.assertWritable(path) : null;
+      if (stale) return stale;
 
-    const content = await readFile(path, "utf8");
-    const firstIndex = content.indexOf(oldString);
-    if (firstIndex === -1) {
-      return `未找到待替换的文本`;
-    }
-    const count = content.split(oldString).length - 1;
-    if (count > 1) {
-      return `待替换文本出现 ${count} 次，须唯一匹配`;
-    }
+      const content = await readFile(path, "utf8");
+      const firstIndex = content.indexOf(oldString);
+      if (firstIndex === -1) {
+        return `未找到待替换的文本`;
+      }
+      const count = content.split(oldString).length - 1;
+      if (count > 1) {
+        return `待替换文本出现 ${count} 次，须唯一匹配`;
+      }
 
-    const updated = content.slice(0, firstIndex) + newString + content.slice(firstIndex + oldString.length);
-    await writeFile(path, updated, "utf8");
-    return `已替换 1 处`;
+      const updated = content.slice(0, firstIndex) + newString + content.slice(firstIndex + oldString.length);
+      await writeFile(path, updated, "utf8");
+      await fileState?.refreshVersion(path, updated);
+      return `已替换 1 处`;
+    };
+    // per-path 锁关 TOCTOU：校验 + 读 + 替换 + 写入 + 刷新快照一气呵成
+    return fileState ? fileState.withFileLock(path, edit) : edit();
   },
 };
