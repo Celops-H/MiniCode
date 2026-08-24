@@ -195,7 +195,7 @@ export function createSessionAgent(options: {
   if (!options.agents) {
     return { agent: new Agent(options) };
   }
-  const team = new Team({ onRootEvent: options.onRootEvent });
+  const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks });
   const agent = new Agent({
     ...options,
     systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}`,

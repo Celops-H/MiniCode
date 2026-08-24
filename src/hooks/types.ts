@@ -1,4 +1,4 @@
-/** Hook 事件类型（DESIGN 13.1 核心事件；子代理事件待 M3.2 接入） */
+/** Hook 事件类型（DESIGN 13.1 核心事件 + A 组子 agent 生命周期事件） */
 export const HOOK_EVENT_TYPES = [
   "UserPromptSubmit",
   "PreToolUse",
@@ -7,6 +7,9 @@ export const HOOK_EVENT_TYPES = [
   "Stop",
   "SessionStart",
   "SessionEnd",
+  "AgentSpawned",
+  "AgentCompleted",
+  "AgentInterrupted",
 ] as const;
 export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];
 
@@ -15,6 +18,7 @@ export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];
  * PreToolUse 用于拦截裁决，其余用于观测。
  * 工具事件带 toolCallId（工具回合配对键，DESIGN 7.2）——「调用中 → 成功/失败」可按调用配对，
  * 并发批内可区分；带 agentPath（发起调用的 agent，多 Agent 下可按路径归属「谁在干活」，A 组定稿）。
+ * 子 agent 事件（A 组定稿）带 agent 路径（DESIGN 11 线程树），TUI/观测可按路径归属活动。
  */
 export type HookEvent =
   | { type: "UserPromptSubmit"; input: string }
@@ -44,7 +48,10 @@ export type HookEvent =
     }
   | { type: "Stop" }
   | { type: "SessionStart" }
-  | { type: "SessionEnd" };
+  | { type: "SessionEnd" }
+  | { type: "AgentSpawned"; path: string; parentPath: string }
+  | { type: "AgentCompleted"; path: string; parentPath: string; conclusion: string; mergeResult?: string }
+  | { type: "AgentInterrupted"; path: string; parentPath: string };
 
 /** PreToolUse 拦截结果：deny 拒绝 / allow 放行 / ask 询问；多个 hook 同时返回时，deny 优先于 ask，ask 优先于 allow */
 export type HookVerdict = "allow" | "deny" | "ask";

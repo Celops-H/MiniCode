@@ -6,6 +6,7 @@
 import { AgentPath } from "./agent-path.js";
 import type { Agent } from "./agent.js";
 import type { StreamEvent } from "../core/index.js";
+import type { HookBus } from "../hooks/index.js";
 import type { MailMessage } from "./mailbox.js";
 import { abortWorktree, completeWorktree, createWorktree, resolveGitRoot, type WorktreeInfo } from "./worktree.js";
 
@@ -31,6 +32,8 @@ export interface TeamOptions {
   worktrees?: boolean;
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论用，review 修复） */
   onRootEvent?: (event: StreamEvent) => void;
+  /** Hook 总线（子 agent 生命周期事件发射通道，A 组定稿）；缺省不发射 */
+  hooks?: HookBus;
 }
 
 export class Team {
@@ -40,6 +43,7 @@ export class Team {
   private readonly maxConcurrent: number;
   private readonly worktrees: boolean;
   private readonly onRootEvent: ((event: StreamEvent) => void) | undefined;
+  private readonly hooks: HookBus | undefined;
   private spawnCount = 0;
   private activeExecutions = 0;
   /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒，DESIGN 11.2） */
@@ -51,6 +55,7 @@ export class Team {
     this.maxConcurrent = options.maxConcurrent ?? 4;
     this.worktrees = options.worktrees ?? false;
     this.onRootEvent = options.onRootEvent;
+    this.hooks = options.hooks;
   }
 
   /**
@@ -136,12 +141,22 @@ export class Team {
     return child;
   }
 
-  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用） */
+  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）；发射派生事件（A 组定稿） */
   commitSpawn(path: AgentPath, agent: Agent): void {
     const member = this.members.get(path.toString());
     if (!member) return;
     member.agent = agent;
     agent.agentPath = path;
+    if (member.parentPath) {
+      // 观测事件发射失败不影响 spawn 流程（review 修复：unhandled rejection 会崩进程）
+      void this.hooks
+        ?.emit({
+          type: "AgentSpawned",
+          path: path.toString(),
+          parentPath: member.parentPath.toString(),
+        })
+        .catch(() => {});
+    }
   }
 
   /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏）；有 worktree 时一并清理 */
@@ -229,12 +244,18 @@ export class Team {
   private async notifyCompletion(agent: Agent): Promise<void> {
     const path = agent.agentPath;
     if (!path) return;
-    const parentPath = this.members.get(path.toString())?.parentPath;
+    const member = this.members.get(path.toString());
+    const parentPath = member?.parentPath;
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
     if (agent.isInterrupted()) {
       // 被中断：显式动作，调用方已知，不投中途文本当结论。
       // 不清理 worktree——后续 followup 可复活续用（DESIGN 11.2），目录/分支/注册均保留
+      await this.safeEmit({
+        type: "AgentInterrupted",
+        path: path.toString(),
+        parentPath: parentPath.toString(),
+      });
       return;
     }
     // 自然完成：合并 worktree 分支进主分支（DESIGN 4.2），合并结果附在结论前提示父
@@ -242,12 +263,28 @@ export class Team {
     const content = mergeMessage
       ? `${mergeMessage}。\n${agent.conclusionText()}`
       : agent.conclusionText();
+    await this.safeEmit({
+      type: "AgentCompleted",
+      path: path.toString(),
+      parentPath: parentPath.toString(),
+      conclusion: content,
+      mergeResult: mergeMessage,
+    });
     await this.sendMessage(parentPath, {
       type: "FINAL_ANSWER",
       from: path,
       content,
       triggerTurn: true,
     });
+  }
+
+  /** 观测事件安全发射：handler 抛错不影响结论回灌与驱动流程（review 修复：未处理 rejection 会崩进程） */
+  private async safeEmit(event: Parameters<HookBus["emit"]>[0]): Promise<void> {
+    try {
+      await this.hooks?.emit(event);
+    } catch {
+      // 观测事件失败静默忽略（与 onRootEvent 的渲染回调防护一致）
+    }
   }
 
   /** 槽位释放后重试待驱动队列：逐个获取槽位并后台驱动；槽位仍满则留给下次释放 */

@@ -740,6 +740,91 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(forwarded).toContain("汇总结论");
   });
 
+  it("子 agent 生命周期事件（A 组定稿）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
+    const events: string[] = [];
+    const hooks = new HookBus();
+    hooks.on("AgentSpawned", (e) => {
+      events.push(`spawn:${e.path}`);
+    });
+    hooks.on("AgentCompleted", (e) => {
+      events.push(`complete:${e.path}`);
+    });
+    hooks.on("AgentInterrupted", (e) => {
+      events.push(`interrupt:${e.path}`);
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({
+      modelClient: toolThenTextClient("x", {}),
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.registerRoot(root);
+
+    // worker 正常完成
+    const worker = new Agent({
+      modelClient: toolThenTextClient("x", {}),
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    team.commitSpawn(path, worker);
+    await team.sendMessage(path, { type: "NEW_TASK", from: AgentPath.root(), content: "干活", triggerTurn: true });
+    await sleep(200);
+    expect(events).toContain("spawn:/root/worker");
+    expect(events.some((e) => e.startsWith("complete:/root/worker"))).toBe(true);
+    // 完成事件负载：结论内容与回灌一致（无 worktree 时无 mergeResult）
+    const completed = (await root.getMessages()).find((m) => m.role === "user" && m.source === "system");
+    expect(String(completed?.content)).toContain("完成");
+
+    // 被中断的 agent：发 AgentInterrupted（而非 Completed）
+    const slowWorker = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "r1", name: "read" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "总结" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+      tools: [
+        {
+          name: "read",
+          description: "慢读",
+          inputSchema: z.object({}),
+          isReadOnly: true,
+          requiresUserInteraction: false,
+          maxResultSizeChars: 100,
+          execute: async () => {
+            await sleep(100);
+            return "内容";
+          },
+        },
+      ],
+    });
+    const slowPath = team.reserveSpawn(AgentPath.root(), "slow") as AgentPath;
+    team.commitSpawn(slowPath, slowWorker);
+    await team.sendMessage(slowPath, { type: "NEW_TASK", from: AgentPath.root(), content: "读", triggerTurn: true });
+    await sleep(30);
+    slowWorker.interrupt();
+    await sleep(150);
+    expect(events).toContain("spawn:/root/slow");
+    expect(events).toContain("interrupt:/root/slow");
+    expect(events.some((e) => e.startsWith("complete:/root/slow"))).toBe(false);
+  });
+
   it("wait_agent：不能等待自己", async () => {
     const team = new Team();
     const root = new Agent({

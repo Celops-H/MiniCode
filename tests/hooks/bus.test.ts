@@ -33,7 +33,7 @@ describe("HookBus 事件总线", () => {
     bus.on("PreToolUse", () => {
       order.push("second");
     });
-    await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} });
+    await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {}, agentPath: "/root" });
 
     expect(order).toEqual(["first", "second"]);
   });
@@ -42,7 +42,7 @@ describe("HookBus 事件总线", () => {
     const bus = new HookBus();
     bus.on("PreToolUse", (): HookVerdict => "ask");
     bus.on("PreToolUse", (): HookVerdict => "deny");
-    const results = await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} });
+    const results = await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {}, agentPath: "/root" });
 
     expect(results).toEqual(["ask", "deny"]);
   });
@@ -79,8 +79,8 @@ describe("HookBus 事件总线", () => {
     bus.on("PreToolUse", (event) => {
       received.push(event);
     });
-    await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: { path: "a.ts" } });
+    await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: { path: "a.ts" }, agentPath: "/root" });
 
-    expect(received[0]).toMatchObject({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: { path: "a.ts" } });
+    expect(received[0]).toMatchObject({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: { path: "a.ts" }, agentPath: "/root" });
   });
 });
