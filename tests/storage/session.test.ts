@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -95,6 +95,25 @@ describe("会话持久化与续跑", () => {
       await readFile(path.join(dir, `${session.meta.id}.meta.json`), "utf8"),
     ) as SessionMeta;
     expect(onDiskAfter.updatedAt).toBe(session.meta.updatedAt); // flush 后落盘
+  });
+
+  it("flush 幂等：meta 写失败后重试不重复追加消息", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("你好"));
+
+    // 用同名目录占位 meta 文件，使 writeFile(meta) 失败
+    const metaPath = path.join(dir, `${session.meta.id}.meta.json`);
+    rmSync(metaPath);
+    mkdirSync(metaPath);
+    await expect(store.flush()).rejects.toThrow();
+
+    // 消息已落盘且已从 pending 移除；重试 flush 不再重复追加
+    await store.flush();
+    const lines = (await readFile(path.join(dir, `${session.meta.id}.jsonl`), "utf8"))
+      .split("\n")
+      .filter(Boolean);
+    expect(lines).toHaveLength(1);
   });
 
   it("会话元数据带格式版本号，旧会话缺失时视为 1", async () => {

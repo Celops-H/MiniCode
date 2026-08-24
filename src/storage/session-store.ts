@@ -87,11 +87,13 @@ export class SessionStore {
   async flush(): Promise<void> {
     if (this.pending.size === 0) return;
     await this.ensureDir();
-    for (const [id, { session, messages }] of this.pending) {
+    // 逐个会话：消息落盘成功后立即从 pending 移除（幂等），
+    // 即使后续 meta 写失败，重试 flush 也不会把已落盘消息重复追加到 JSONL
+    for (const [id, { session, messages }] of [...this.pending]) {
       await appendJsonlBatch(this.messageFile(id), messages);
+      this.pending.delete(id);
       await writeFile(this.metaFile(id), JSON.stringify(session.meta, null, 2), "utf8");
     }
-    this.pending.clear();
   }
 
   /**
