@@ -26,4 +26,22 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
     const out = await bashTool.execute({ command: "echo hello" }, { signal: new AbortController().signal });
     expect(out).toContain("hello");
   });
+
+  it("stdout 与 stderr 合并返回", async () => {
+    const out = await bashTool.execute({ command: 'node -e "console.log(\'OUT\'); console.error(\'ERR\')"' });
+    expect(String(out)).toContain("OUT");
+    expect(String(out)).toContain("ERR");
+  });
+
+  it("非零退出：保持旧语义——纯文本返回不标 isError", async () => {
+    const out = await bashTool.execute({ command: 'node -e "process.exit(2)"' });
+    expect(typeof out).toBe("string");
+    expect(out).toContain("命令失败");
+  });
+
+  it("超时：到点杀进程并标记失败", async () => {
+    const out = await bashTool.execute({ command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 200 });
+    expect(out).toMatchObject({ isError: true });
+    expect(String(JSON.stringify(out))).toContain("执行超时");
+  });
 });

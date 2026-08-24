@@ -9,7 +9,11 @@ import {
 
 /** 摘要能力：由宿主（agent）注入模型流，把旧对话压成结构化摘要 */
 export interface Summarizer {
-  stream(modelId: string, context: Context): AsyncIterable<StreamEvent>;
+  stream(
+    modelId: string,
+    context: Context,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterable<StreamEvent>;
 }
 
 /** 摘要调用的系统提示词：忠实压缩，不增不删 */
@@ -46,9 +50,10 @@ export async function generateSummary(
   modelId: string,
   messages: Message[],
   instructions?: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const context = createContext(SUMMARY_SYSTEM_PROMPT, [...messages, buildSummaryRequest(instructions)], []);
-  const assistant = await assembleAssistantMessage(client.stream(modelId, context));
+  const assistant = await assembleAssistantMessage(client.stream(modelId, context, { signal }));
   return assistant.content
     .filter((block): block is { type: "text"; text: string } => block.type === "text")
     .map((block) => block.text)

@@ -223,4 +223,64 @@ describe("Agent 主循环：turn 内真打断", () => {
     });
     expect(agent.isInterrupted()).toBe(false);
   });
+
+  it("并发批工具中断：批内全部调用收敛为失败结果、配对闭合", async () => {
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let startedCount = 0;
+    const hungTool: Tool = {
+      name: "bash",
+      description: "模拟长命令",
+      inputSchema: z.object({ command: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 5000,
+      // 两个调用判定并发安全，进同一并发批（批内并行执行）
+      isConcurrencySafe: () => true,
+      execute(_input, options) {
+        startedCount++;
+        if (startedCount === 2) markStarted!();
+        return new Promise((resolve) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => resolve({ output: "(命令已被用户打断)", isError: true }),
+            { once: true },
+          );
+        });
+      },
+    };
+    const client: ModelClient = {
+      async *stream() {
+        for (const [index, id, command] of [
+          [0, "call_1", "a"],
+          [1, "call_2", "b"],
+        ] as const) {
+          yield { type: "toolcall_start", index, id, name: "bash" };
+          yield { type: "toolcall_delta", index, partialJson: `{"command":"${command}"}` };
+          yield { type: "toolcall_end", index };
+        }
+        yield { type: "done", stopReason: "tool_use" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [hungTool],
+    });
+    agent.start("并发批中断");
+    const runPromise = run(agent);
+    await started; // 批内两个调用都已开始执行
+    agent.interrupt();
+    await runPromise;
+
+    const messages = agent.getMessages();
+    const results = messages.filter((m) => m.role === "tool_result");
+    // 两个调用都有结果回灌（配对闭合）：执行中被 abort 的结果 + 未及启动的前置检查拦下
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ toolCallId: "call_1", isError: true });
+    expect(results[1]).toMatchObject({ toolCallId: "call_2", isError: true });
+  });
 });

@@ -106,7 +106,13 @@ export const bashTool: Tool = {
  */
 function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): Promise<ExecuteResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, { shell: true, cwd: currentCwd() }); // cwd 与后台任务一致（Worktree 不绕过）
+    // detached 让 shell 自成进程组（Unix）：killProcessTree 按负 pid 杀整棵进程树；
+    // Windows 的 detached 会断开 stdio，且其 taskkill /T 本身按树杀，故只在 Unix 开启（与 bash-background 一致）
+    const child = spawn(command, {
+      shell: true,
+      cwd: currentCwd(),
+      detached: process.platform !== "win32",
+    });
     let output = "";
     let timedOut = false;
     let aborted = false;
@@ -120,13 +126,18 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       kill();
     };
     signal?.addEventListener("abort", onAbort, { once: true });
+    // 已中止的信号（interrupt 落在 spawn 前微任务窗口）：立即强杀，不等监听事件
+    if (signal?.aborted) onAbort();
     const timer = setTimeout(() => {
       timedOut = true;
       kill();
     }, timeoutMs);
 
     const collect = (chunk: Buffer): void => {
-      if (output.length >= MAX_BASH_OUTPUT_CHARS) return;
+      if (output.length >= MAX_BASH_OUTPUT_CHARS) {
+        if (!output.endsWith("[输出已截断]")) output += "\n[输出已截断]";
+        return;
+      }
       output += chunk.toString();
     };
     child.stdout?.on("data", collect);

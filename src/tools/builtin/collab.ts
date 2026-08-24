@@ -207,13 +207,13 @@ function waitAgentTool(deps: CollabDeps): Tool {
   };
 }
 
-/** 中断目标 agent（turn 间）：当前 turn 结束后停止；后续 followup 仍可复活 */
+/** 中断目标 agent（turn 内）：立即中止当前模型流/工具执行；后续 followup 仍可复活 */
 function interruptAgentTool(deps: CollabDeps): Tool {
   return {
     name: "interrupt_agent",
     description:
-      "中断目标 agent：停止其当前任务（当前 turn 结束后生效）；收件箱已有排队消息时新任务会继续处理，" +
-      "后续 followup_task 可让它复活",
+      "中断目标 agent：立即停止其当前任务（正在进行的模型生成/工具执行会中止，已产出保留）；" +
+      "收件箱已有排队消息时新任务会继续处理，后续 followup_task 可让它复活",
     inputSchema: z.object({
       target: z.string(),
     }),

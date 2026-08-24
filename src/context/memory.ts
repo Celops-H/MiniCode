@@ -56,12 +56,15 @@ export function buildMemoryUpdateRequest(options: MemoryUpdateRequest): Message[
  * @returns 更新后的记忆文本（可能为空串：模型未返回文本）
  */
 export async function updateMemory(
-  client: { stream(modelId: string, context: Context): AsyncIterable<StreamEvent> },
+  client: {
+    stream(modelId: string, context: Context, options?: { signal?: AbortSignal }): AsyncIterable<StreamEvent>;
+  },
   modelId: string,
   options: MemoryUpdateRequest,
+  signal?: AbortSignal,
 ): Promise<string> {
   const context = createContext(MEMORY_SYSTEM_PROMPT, buildMemoryUpdateRequest(options), []);
-  const assistant = await assembleAssistantMessage(client.stream(modelId, context));
+  const assistant = await assembleAssistantMessage(client.stream(modelId, context, { signal }));
   return assistant.content
     .filter((block): block is { type: "text"; text: string } => block.type === "text")
     .map((block) => block.text)

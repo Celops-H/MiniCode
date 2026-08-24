@@ -435,10 +435,15 @@ export class Agent {
    */
   private async maybeUpdateMemory(): Promise<void> {
     try {
-      const updated = await updateMemory(this.modelClient, this.modelId, {
-        currentMemory: this.memory,
-        recentMessages: this.messages,
-      });
+      const updated = await updateMemory(
+        this.modelClient,
+        this.modelId,
+        {
+          currentMemory: this.memory,
+          recentMessages: this.messages,
+        },
+        this.interruptController.signal,
+      );
       if (updated.trim().length > 0) {
         this.memory = updated.trim().slice(0, MAX_MEMORY_CHARS);
         this.memoryCovered = this.messages.length; // 当前全部消息已入记忆
@@ -518,9 +523,16 @@ export class Agent {
             this.modelId,
             delta.length > 0 ? delta : this.messages,
             `已有会话摘要：\n${previous}\n请基于旧摘要增量更新：旧摘要中未变化的内容不要重复展开，只合并新增部分`,
+            this.interruptController.signal,
           );
         } else {
-          summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+          summary = await generateSummary(
+            this.modelClient,
+            this.modelId,
+            this.messages,
+            undefined,
+            this.interruptController.signal,
+          );
         }
       }
       if (summary.trim().length === 0) {
@@ -536,6 +548,8 @@ export class Agent {
       this.historyRewritten = true; // 已落盘历史被摘要替换
       return true;
     } catch {
+      // 中断导致的取消失效不算压缩失败——不在取消后误禁压缩（下次正常轮仍可撞线压缩）
+      if (this.interruptController.signal.aborted) return false;
       this.compactDisabled = true;
       return false;
     }
