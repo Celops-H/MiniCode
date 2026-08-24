@@ -121,17 +121,21 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
   // 会话开始（DESIGN 13.3：会话级事件由宿主发射）
   await hooks?.emit({ type: "SessionStart" });
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  await interact({
-    agent,
-    store,
-    session,
-    inputs: rl,
-    write,
-    hooks,
-  });
+  try {
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: rl,
+      write,
+      hooks,
+    });
+  } finally {
+    // 会话结束（DESIGN 13.3：会话级事件由宿主发射）；
+    // try/finally 兜底：interact 内抛错（如模型流错误）也要发射 SessionEnd，观测事件不缺失
+    await hooks?.emit({ type: "SessionEnd" });
+  }
   rl.close();
-  // 会话结束（DESIGN 13.3：会话级事件由宿主发射）
-  await hooks?.emit({ type: "SessionEnd" });
 }
 
 /**
