@@ -6,3 +6,5 @@ export type { Summarizer } from "./summary.js";
 export { extractRecoveryContext, buildRecoveryText, RECOVERY_MARKER } from "./recover.js";
 export type { RecoveryContext, RecoveryContextOptions } from "./recover.js";
 export { isContextTooLongError, parseContextTooLongGap, peelToolGroups } from "./retry.js";
+export { MEMORY_SYSTEM_PROMPT, MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest, updateMemory } from "./memory.js";
+export type { MemoryUpdateRequest } from "./memory.js";

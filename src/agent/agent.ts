@@ -24,6 +24,7 @@ import {
   RECOVERY_MARKER,
   replaceWithSummary,
   SUMMARY_MARKER,
+  updateMemory,
 } from "../context/index.js";
 import {
   formatInputError,
@@ -63,6 +64,9 @@ export interface CompactConfig {
 /** 超窗应急剥组的最大重试次数（DESIGN 9.6：剥组与重试有上限，超限报错） */
 const MAX_CONTEXT_RETRY = 3;
 
+/** 会话记忆文本上限（DESIGN 9.7：防无限膨胀，超出截断） */
+const MAX_MEMORY_CHARS = 4000;
+
 export interface AgentOptions {
   modelClient: ModelClient;
   modelId: string;
@@ -86,6 +90,8 @@ export interface AgentOptions {
    * 工具副作用不可逆，执行前崩溃时历史在盘上可恢复续跑
    */
   checkpoint?: (messages: Message[]) => Promise<void> | void;
+  /** 启用会话记忆（DESIGN 9.7）：每轮结束后模型增量维护记忆，压缩时用记忆替代现场摘要省模型调用 */
+  memory?: boolean;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
   team?: Team;
 }
@@ -110,6 +116,12 @@ export class Agent {
   private readonly outputDir: string;
   /** checkpoint 回调（DESIGN 14）：工具执行前宿主落盘用 */
   private readonly checkpoint?: (messages: Message[]) => Promise<void> | void;
+  /** 会话记忆是否启用（DESIGN 9.7） */
+  private readonly memoryEnabled: boolean;
+  /** 会话记忆文本（模型持续维护的关键信息，压缩时替代现场摘要） */
+  private memory = "";
+  /** 记忆已覆盖的消息数（上次记忆更新时）：压缩时其后的消息为「在途」，保留原文不丢 */
+  private memoryCovered = 0;
   /** agent 邮箱（DESIGN 11.3）：其他 agent 投递的消息队列，注入上下文供模型读取 */
   private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
@@ -137,6 +149,7 @@ export class Agent {
     this.outputDir = options.outputDir ?? resolveOutputsDir();
     this.team = options.team;
     this.checkpoint = options.checkpoint;
+    this.memoryEnabled = options.memory ?? false;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -335,6 +348,10 @@ export class Agent {
       // Stop：模型回复无工具调用，本轮对话准备结束
       this.stopped = true;
       await this.hooks?.emit({ type: "Stop" });
+      // 会话记忆（DESIGN 9.7）：每轮结束后增量维护记忆，压缩时用记忆替代现场摘要省模型调用
+      if (this.memoryEnabled) {
+        await this.maybeUpdateMemory();
+      }
       return;
     }
 
@@ -358,6 +375,25 @@ export class Agent {
     );
     for (const message of results) {
       this.messages.push(message);
+    }
+  }
+
+  /**
+   * 增量维护会话记忆（DESIGN 9.7）：用模型把当前记忆 + 最近对话合入更新后的记忆。
+   * 失败静默（记忆不更新，不影响主流程）；记忆文本限制长度防无限膨胀。
+   */
+  private async maybeUpdateMemory(): Promise<void> {
+    try {
+      const updated = await updateMemory(this.modelClient, this.modelId, {
+        currentMemory: this.memory,
+        recentMessages: this.messages,
+      });
+      if (updated.trim().length > 0) {
+        this.memory = updated.trim().slice(0, MAX_MEMORY_CHARS);
+        this.memoryCovered = this.messages.length; // 当前全部消息已入记忆
+      }
+    } catch {
+      // 记忆更新失败不影响对话主流程
     }
   }
 
@@ -392,46 +428,56 @@ export class Agent {
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
       if (!needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
     }
-    // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话，并注入恢复上下文
+    // ② 压缩：有会话记忆时用记忆替代现场摘要（DESIGN 9.7，省压缩时模型调用）；
+    // 否则增量合并（已有旧摘要）或全量总结
     try {
       const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
-      // 增量合并（DESIGN 9.7）：已有旧摘要时只总结摘要后的增量（附旧摘要供合并），
-      // 模型不必重读全量历史，省 token 且多次压缩信息不丢
-      const summaryIndex = this.messages.findIndex(
-        (m) =>
-          m.role === "user" &&
-          m.source === "system" &&
-          typeof m.content === "string" &&
-          m.content.startsWith(SUMMARY_MARKER),
-      );
       let summary: string;
-      if (summaryIndex >= 0) {
-        const previous = this.messages[summaryIndex]!.content as string;
-        // 跳过紧随摘要的恢复上下文（内容源自压缩前全量历史，已被旧摘要覆盖，不算增量）；
-        // 其余 source:"system" 消息（如邮箱注入）是真实增量，保留
-        let deltaStart = summaryIndex + 1;
-        if (
-          deltaStart < this.messages.length &&
-          typeof this.messages[deltaStart]!.content === "string" &&
-          (this.messages[deltaStart]!.content as string).startsWith(RECOVERY_MARKER)
-        ) {
-          deltaStart++;
-        }
-        const delta = this.messages.slice(deltaStart);
-        summary = await generateSummary(
-          this.modelClient,
-          this.modelId,
-          delta.length > 0 ? delta : this.messages,
-          `已有会话摘要：\n${previous}\n请基于旧摘要增量更新：旧摘要中未变化的内容不要重复展开，只合并新增部分`,
-        );
+      let inFlight: Message[] = [];
+      if (this.memoryEnabled && this.memory.trim().length > 0) {
+        // 记忆替代现场摘要（DESIGN 9.7，省压缩时模型调用）；但记忆只覆盖到上次 Stop，
+        // 其后的在途消息（本次输入与工具回合）保留原文，不能静默丢弃
+        summary = this.memory;
+        inFlight = this.messages.slice(this.memoryCovered);
       } else {
-        summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+        // 增量合并（DESIGN 9.7）：已有旧摘要时只总结摘要后的增量（附旧摘要供合并），
+        // 模型不必重读全量历史，省 token 且多次压缩信息不丢
+        const summaryIndex = this.messages.findIndex(
+          (m) =>
+            m.role === "user" &&
+            m.source === "system" &&
+            typeof m.content === "string" &&
+            m.content.startsWith(SUMMARY_MARKER),
+        );
+        if (summaryIndex >= 0) {
+          const previous = this.messages[summaryIndex]!.content as string;
+          // 跳过紧随摘要的恢复上下文（内容源自压缩前全量历史，已被旧摘要覆盖，不算增量）；
+          // 其余 source:"system" 消息（如邮箱注入）是真实增量，保留
+          let deltaStart = summaryIndex + 1;
+          if (
+            deltaStart < this.messages.length &&
+            typeof this.messages[deltaStart]!.content === "string" &&
+            (this.messages[deltaStart]!.content as string).startsWith(RECOVERY_MARKER)
+          ) {
+            deltaStart++;
+          }
+          const delta = this.messages.slice(deltaStart);
+          summary = await generateSummary(
+            this.modelClient,
+            this.modelId,
+            delta.length > 0 ? delta : this.messages,
+            `已有会话摘要：\n${previous}\n请基于旧摘要增量更新：旧摘要中未变化的内容不要重复展开，只合并新增部分`,
+          );
+        } else {
+          summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+        }
       }
       if (summary.trim().length === 0) {
         this.compactDisabled = true;
         return false;
       }
       this.messages = replaceWithSummary(summary);
+      this.messages.push(...inFlight); // 记忆分支：在途消息保留原文；其他分支为空
       if (recovery) {
         // 恢复上下文由系统注入而非用户输入，标记 source: "system"
         this.messages.push(userMessage(`${RECOVERY_MARKER}\n${recovery}`, "system"));
