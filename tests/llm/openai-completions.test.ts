@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assembleAssistantMessage,
   assistantMessage,
   createContext,
   toolResultMessage,
@@ -209,5 +210,77 @@ describe("parseStream：SSE → 统一事件", () => {
       { type: "toolcall_end", index: 0 },
       { type: "error", message: expect.stringContaining("未收到 finish_reason") },
     ]);
+  });
+
+  it("推理模型的 reasoning_content 归一化为 thinking_delta", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { reasoning_content: "先分析", index: 0 } }] },
+        { choices: [{ delta: { reasoning_content: "再推理", content: "答案" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "先分析" },
+      { type: "thinking_delta", thinking: "再推理" },
+      { type: "text_delta", text: "答案" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("工具调用首 chunk 无 id：先发 start（无 id），id 后补时重复 start 携带补全值（消费端取最后值）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, function: { arguments: '{"path":' } }],
+              },
+              index: 0,
+            },
+          ],
+        },
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "read", arguments: '"a.ts"}' } }] }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: undefined, name: undefined },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '"a.ts"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("组装后 id 取后补值（assemble 增量更新，不退化 call_N 兜底）", async () => {
+    const context = createContext("s");
+    const assistant = await assembleAssistantMessage(
+      protocol.parseStream(
+        chunkGen(
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [{ index: 0, function: { arguments: '{"path":' } }],
+                },
+                index: 0,
+              },
+            ],
+          },
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "read", arguments: '"a.ts"}' } }] }, index: 0 }] },
+          { choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+        ),
+      ),
+    );
+    expect(assistant.content[0]).toMatchObject({ type: "tool_call", id: "call_1", name: "read" });
   });
 });

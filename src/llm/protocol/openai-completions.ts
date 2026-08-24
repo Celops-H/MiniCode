@@ -5,10 +5,14 @@ import type { Protocol } from "../types.js";
 interface Choice {
   delta?: {
     content?: string;
+    /** 推理模型思考增量（DeepSeek 等）→ 归一化为 thinking_delta */
+    reasoning_content?: string;
+    reasoning?: string;
+    reasoning_text?: string;
     tool_calls?: Array<{
       index?: number;
       id?: string;
-      function?: { name?: string; arguments?: string };
+      function?: { name?: string; arguments?: string } | null;
     }>;
   };
   finish_reason?: string;
@@ -40,28 +44,54 @@ export class OpenAICompletionsProtocol implements Protocol {
    */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
     const started = new Set<number>();
+    // 已发射 start 携带的 id/name（id/name 后补时重复发 start 携带补全值，消费端取最后值）
+    const emitted = new Map<number, { id?: string; name?: string }>();
     try {
       for await (const chunk of stream) {
         const choice = firstChoice(chunk);
         if (!choice) continue;
 
         const delta = choice.delta;
+        // 思考增量：多家厂商字段别名（reasoning_content / reasoning / reasoning_text），
+        // 取首个非空（同一 chunk 多字段同内容的厂商只发一次，防重复输出）
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text;
+        if (reasoning) {
+          yield { type: "thinking_delta", thinking: reasoning };
+        }
         if (delta?.content) {
           yield { type: "text_delta", text: delta.content };
         }
 
-        // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量
+        // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量。
+        // 首 chunk 可能无 id（部分厂商先发参数后补 id）：无 id 也发 start（id 可选），
+        // 不能只靠 id 判定——否则该调用只有 delta、结束时漏发 end。
+        // id/name 后补时重复发 start（assemble 增量更新，契约见 core/events.ts）
         if (Array.isArray(delta?.tool_calls)) {
           for (const tc of delta.tool_calls) {
             if (tc.index === undefined) continue;
-            if (tc.id && !started.has(tc.index)) {
+            if (!started.has(tc.index)) {
               yield {
                 type: "toolcall_start",
                 index: tc.index,
                 id: tc.id,
-                name: tc.function?.name,
+                name: tc.function?.name ?? undefined,
               };
               started.add(tc.index);
+              emitted.set(tc.index, { id: tc.id, name: tc.function?.name ?? undefined });
+            } else {
+              const sent = emitted.get(tc.index)!;
+              const updatedId = tc.id !== undefined && sent.id === undefined ? tc.id : undefined;
+              const updatedName = tc.function?.name && sent.name === undefined ? tc.function.name : undefined;
+              if (updatedId !== undefined || updatedName !== undefined) {
+                yield {
+                  type: "toolcall_start",
+                  index: tc.index,
+                  id: updatedId ?? sent.id,
+                  name: updatedName ?? sent.name,
+                };
+                if (updatedId !== undefined) sent.id = updatedId;
+                if (updatedName !== undefined) sent.name = updatedName;
+              }
             }
             if (tc.function?.arguments) {
               yield { type: "toolcall_delta", index: tc.index, partialJson: tc.function.arguments };
