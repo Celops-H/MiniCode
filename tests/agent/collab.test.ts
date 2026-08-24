@@ -21,6 +21,11 @@ function collabTool(team: Team, name: string, agentPath?: () => AgentPath | unde
   });
   return tools.find((t) => t.name === name)!;
 }
+
+/** 毫秒睡眠（等待后台驱动 / 模拟耗时工具） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 /** 按调用轮次切换行为的 mock：先调一次工具，拿到结果后总结 */
 function toolThenTextClient(toolName: string, input: Record<string, unknown>, text = "完成"): ModelClient {
   return {
@@ -408,8 +413,6 @@ describe("协作工具集（多 agent 环境）", () => {
     const hookResult = hookAgent.getMessages().find((m) => m.role === "tool_result");
     expect(String(hookResult?.content)).toContain("权限拒绝");
   });
-<<<<<<< HEAD
-=======
 
   it("watcher：子 agent 跑完自动把结论 FINAL_ANSWER 回灌父 agent", async () => {
     const team = new Team();
@@ -637,8 +640,7 @@ describe("协作工具集（多 agent 环境）", () => {
     for await (const _ of root.run()) {
       // 消费
     }
-    const waitTool = collabTool(team, "wait_agent");
+const waitTool = collabTool(team, "wait_agent");
     expect(await waitTool.execute({ target: "/root" })).toContain("不能等待自己");
   });
->>>>>>> 260b9ff (refactor: 移除仅测试使用的 getTools 出口——协作工具守卫测试直接构造工具，工具集断言改模型行为驱动（agent/ + tests/）)
 });

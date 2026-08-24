@@ -112,6 +112,8 @@ export class Agent {
   private stopped = false;
   /** 是否有活跃的续跑循环（防重复驱动：忙时投递只入队，活跃循环自行消费，DESIGN 11.2） */
   private active = false;
+  /** 是否被中断（interrupt 请求过：停止当前任务，未产出结论，DESIGN 11.4） */
+  private interrupted = false;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -247,6 +249,25 @@ export class Agent {
   /** 是否有活跃的续跑循环（调度器判断是否重复驱动） */
   isActive(): boolean {
     return this.active;
+  }
+
+  /** 是否被中断（interrupt 置位，通知完成判定用） */
+  isInterrupted(): boolean {
+    return this.interrupted;
+  }
+
+  /**
+   * 请求中断（turn 间，DESIGN 11.4）：置 stopped，当前 turn 结束后停止续跑；
+   * 收件箱有排队消息时中断不生效（消息视为新任务继续处理）；后续唤醒消息可复活。
+   */
+  interrupt(): void {
+    this.stopped = true;
+    this.interrupted = true;
+  }
+
+  /** 最后一条 assistant 结论文本（completion watcher 回灌父 agent 用，DESIGN 11.5） */
+  conclusionText(): string {
+    return lastAssistantText(this.messages);
   }
 
   /**

@@ -126,7 +126,7 @@ export class Team {
     await this.consumeDriving(agent, release);
   }
 
-  /** 消费单个 agent 的续跑循环；结束后释放槽位并重试待驱动队列 */
+  /** 消费单个 agent 的续跑循环；结束后释放槽位、重试待驱动队列并回灌结论（watcher） */
   private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
     try {
       for await (const _ of agent.resume()) {
@@ -139,6 +139,27 @@ export class Team {
       release();
       this.retryPendingDrives();
     }
+    await this.notifyCompletion(agent);
+  }
+
+  /**
+   * completion watcher（DESIGN 11.5）：子 agent 达到终态（resume 结束）时，
+   * 把其结论以 FINAL_ANSWER 回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源。
+   * wait_agent 只挂起不消费结论，避免重复投递。
+   */
+  private async notifyCompletion(agent: Agent): Promise<void> {
+    const path = agent.agentPath;
+    if (!path) return;
+    const parentPath = this.members.get(path.toString())?.parentPath;
+    if (!parentPath) return; // root 无父，无需回灌
+    if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
+    if (agent.isInterrupted()) return; // 被中断：显式动作，调用方已知，不投中途文本当结论
+    await this.sendMessage(parentPath, {
+      type: "FINAL_ANSWER",
+      from: path,
+      content: agent.conclusionText(),
+      triggerTurn: true,
+    });
   }
 
   /** 槽位释放后重试待驱动队列：逐个获取槽位并后台驱动；槽位仍满则留给下次释放 */

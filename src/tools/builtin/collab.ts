@@ -17,6 +17,8 @@ export const COLLAB_TOOL_NAMES = new Set([
   "send_message",
   "followup_task",
   "list_agents",
+  "wait_agent",
+  "interrupt_agent",
 ]);
 
 /** 团队工作 agent 系统提示词（DESIGN 11.6 fork_turns=none：全新上下文，无父历史） */
@@ -36,7 +38,14 @@ export interface CollabDeps {
 
 /** 多 Agent 协作工具集合 */
 export function createCollaborationTools(deps: CollabDeps): Tool[] {
-  return [spawnAgentTool(deps), sendMessageTool(deps), followupTaskTool(deps), listAgentsTool(deps)];
+  return [
+    spawnAgentTool(deps),
+    sendMessageTool(deps),
+    followupTaskTool(deps),
+    listAgentsTool(deps),
+    waitAgentTool(deps),
+    interruptAgentTool(deps),
+  ];
 }
 
 /** 派生子 agent 并下达初始任务（NEW_TASK 唤醒目标），走正常审批链 */
@@ -160,4 +169,71 @@ function listAgentsTool(deps: CollabDeps): Tool {
 function resolveTarget(deps: CollabDeps, target: string): AgentPath | string {
   const current = deps.getAgentPath() ?? AgentPath.root();
   return current.resolve(target);
+}
+
+/** 挂起等待目标 agent 完成当前任务（空闲），只返回摘要不消费结论；结论由 watcher 回灌（DESIGN 11.5） */
+function waitAgentTool(deps: CollabDeps): Tool {
+  return {
+    name: "wait_agent",
+    description:
+      "挂起等待目标 agent 完成当前任务（空闲且收件箱无消息），或超时返回；" +
+      "目标结论由完成通知自动回灌，本工具只返回等待结果",
+    inputSchema: z.object({
+      target: z.string(),
+      timeoutMs: z.number().optional(),
+    }),
+    isReadOnly: false,
+    requiresUserInteraction: false,
+    maxResultSizeChars: 500,
+    execute: async (input) => {
+      const { target, timeoutMs } = input as { target: string; timeoutMs?: number };
+      const targetPath = resolveTarget(deps, target);
+      if (typeof targetPath === "string") return targetPath;
+      if (targetPath.toString() === (deps.getAgentPath() ?? AgentPath.root()).toString()) {
+        return "不能等待自己";
+      }
+      const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
+      if (!targetAgent) return `目标 agent ${targetPath} 不存在`;
+      const deadline = Date.now() + (timeoutMs ?? 30_000);
+      while (targetAgent.isActive() || targetAgent.hasPendingMail()) {
+        if (Date.now() >= deadline) return `等待 ${targetPath} 超时`;
+        await sleep(50);
+      }
+      return `${targetPath} 已完成当前任务`;
+    },
+  };
+}
+
+/** 中断目标 agent（turn 间）：当前 turn 结束后停止；后续 followup 仍可复活 */
+function interruptAgentTool(deps: CollabDeps): Tool {
+  return {
+    name: "interrupt_agent",
+    description:
+      "中断目标 agent：停止其当前任务（当前 turn 结束后生效）；收件箱已有排队消息时新任务会继续处理，" +
+      "后续 followup_task 可让它复活",
+    inputSchema: z.object({
+      target: z.string(),
+    }),
+    isReadOnly: false,
+    requiresUserInteraction: false,
+    maxResultSizeChars: 500,
+    execute: async (input) => {
+      const { target } = input as { target: string };
+      const targetPath = resolveTarget(deps, target);
+      if (typeof targetPath === "string") return targetPath;
+      if (targetPath.isRoot()) return "root 不能被中断";
+      if (targetPath.toString() === (deps.getAgentPath() ?? AgentPath.root()).toString()) {
+        return "不能中断自己；返回结果让父 agent 处理即可";
+      }
+      const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
+      if (!targetAgent) return `目标 agent ${targetPath} 不存在`;
+      targetAgent.interrupt();
+      return `已请求中断 ${targetPath}`;
+    },
+  };
+}
+
+/** 毫秒睡眠（wait_agent 轮询用） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
