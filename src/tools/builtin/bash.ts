@@ -1,12 +1,12 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { z } from "zod";
-import { validateInput } from "../base.js";
-import type { Tool } from "../base.js";
+import { validateInput, type ExecuteContext } from "../base.js";
+import type { ExecuteResult, Tool } from "../base.js";
 import { currentCwd } from "../file-state.js";
-import { startBackgroundTask } from "./bash-background.js";
+import { killProcessTree, startBackgroundTask } from "./bash-background.js";
 
-const execAsync = promisify(exec);
+/** 输出累积上限，与 exec 的 maxBuffer 对齐：超过即丢弃后续输出，防内存膨胀 */
+const MAX_BASH_OUTPUT_CHARS = 4 * 1024 * 1024;
 
 const schema = z.object({
   command: z.string(),
@@ -28,9 +28,9 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 
 /**
- * 判断 execAsync 抛出的错误是否为超时：Node 在 timeout 后杀进程并置 killed 与 signal。
- * @param err execAsync 抛出的错误
- * @returns 是否超时
+ * 判断命令是否因超时/中止被强杀：Node 杀进程后错误对象置 killed 与 signal。
+ * @param err 命令执行错误
+ * @returns 是否被强杀（超时或中断）
  */
 export function isExecTimeoutError(err: unknown): boolean {
   const e = err as { killed?: boolean; signal?: string };
@@ -80,7 +80,7 @@ export const bashTool: Tool = {
   },
   requiresUserInteraction: false,
   maxResultSizeChars: 30000,
-  async execute(input) {
+  async execute(input, options?: ExecuteContext) {
     const { command, timeoutMs = 30000, background } = validateInput<{
       command: string;
       timeoutMs?: number;
@@ -91,23 +91,73 @@ export const bashTool: Tool = {
       const task = startBackgroundTask(command);
       return `已后台启动（任务 ${task.id}）：${command}\n用 bash_task 工具查询状态或终止`;
     }
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        timeout: timeoutMs,
-        maxBuffer: 4 * 1024 * 1024,
-        cwd: currentCwd(), // 工具执行上下文 cwd（Worktree 场景子 agent 在自己的工作区执行）
-      });
-      const parts = [stdout.trim(), stderr.trim()].filter(Boolean);
-      return parts.length > 0 ? parts.join("\n") : "(命令无输出)";
-    } catch (err) {
-      const e = err as { message?: string; stdout?: string; stderr?: string };
-      const details = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-      const output = `命令失败：${e.message ?? String(err)}${details ? `\n${details}` : ""}`;
-      // 超时标记失败，供模型感知；普通命令失败仍以文本返回让模型调整
-      if (isExecTimeoutError(err)) {
-        return { output: `${output}\n（命令执行超时，已终止）`, isError: true };
-      }
-      return output;
-    }
+    return runCommand(command, timeoutMs, options?.signal);
   },
 };
+
+/**
+ * 前台执行命令：spawn 起 shell，累积 stdout/stderr，维护 cwd 与工具上下文一致。
+ * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
+ * 兼容旧 exec 语义：非零退出码返回失败文本、超时/中断标记 isError。
+ * @param command shell 命令
+ * @param timeoutMs 超时毫秒数
+ * @param signal 外部中止信号（用户打断当前轮时透传）
+ * @returns 命令输出文本或带失败标记的结构化结果
+ */
+function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): Promise<ExecuteResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, { shell: true, cwd: currentCwd() }); // cwd 与后台任务一致（Worktree 不绕过）
+    let output = "";
+    let timedOut = false;
+    let aborted = false;
+    let settled = false;
+
+    const kill = (): void => {
+      if (child.pid) killProcessTree(child.pid);
+    };
+    const onAbort = (): void => {
+      aborted = true;
+      kill();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
+    }, timeoutMs);
+
+    const collect = (chunk: Buffer): void => {
+      if (output.length >= MAX_BASH_OUTPUT_CHARS) return;
+      output += chunk.toString();
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    // spawn 本身失败（shell 不可用等罕见路径）也尽快收尾
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(`命令启动失败：${err.message}`);
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const details = output.trim();
+      if (aborted) {
+        resolve({ output: `${details ? `${details}\n` : ""}(命令已被用户打断)`, isError: true });
+        return;
+      }
+      if (timedOut) {
+        resolve({ output: `${details ? `${details}\n` : ""}（命令执行超时，已终止）`, isError: true });
+        return;
+      }
+      if (code !== 0) {
+        resolve(`命令失败：退出码 ${code ?? "未知"}${details ? `\n${details}` : ""}`);
+        return;
+      }
+      resolve(details.length > 0 ? details : "(命令无输出)");
+    });
+  });
+}

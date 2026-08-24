@@ -67,13 +67,17 @@ export class Models {
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流
    */
-  async *stream(modelId: string, context: Context): AsyncIterable<StreamEvent> {
+  async *stream(
+    modelId: string,
+    context: Context,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterable<StreamEvent> {
     if (!this.router) {
       const resolved = this.resolve(modelId);
       if (!resolved) {
         throw new Error(`未知模型：${modelId}`);
       }
-      yield* resolved.provider.stream(modelId, context);
+      yield* resolved.provider.stream(modelId, context, options);
       return;
     }
     // 路由模式：select 跳过冷却中的模型；失败记冷却后重选，直到成功或整链尝试过
@@ -90,7 +94,7 @@ export class Models {
       }
       let started = false;
       try {
-        for await (const event of resolved.provider.stream(selected, context)) {
+        for await (const event of resolved.provider.stream(selected, context, options)) {
           started = true;
           yield event;
         }

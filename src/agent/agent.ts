@@ -46,7 +46,7 @@ import type { Team } from "./team.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
-  stream(modelId: string, context: Context): AsyncIterable<StreamEvent>;
+  stream(modelId: string, context: Context, options?: { signal?: AbortSignal }): AsyncIterable<StreamEvent>;
 }
 
 /** 上下文压缩配置：触发判断的窗口参数与裁剪保留数 */
@@ -141,6 +141,8 @@ export class Agent {
   private active = false;
   /** 是否被中断（interrupt 请求过：停止当前任务，未产出结论，DESIGN 11.4） */
   private interrupted = false;
+  /** 当前轮的中断信号（turn 内真打断）：interrupt 中止进行中的模型流/工具执行；start 新建复位 */
+  private interruptController = new AbortController();
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -211,10 +213,12 @@ export class Agent {
    */
   start(input: string): void {
     // 新一轮用户输入到来：重置 Stop 与 turnCount，允许再次跑 turn（DESIGN 11.2 单次续跑上限）；
-    // 同步复位中断状态（新对话 = 新的生命周期，上一轮中断作废，结论可正常回灌）
+    // 同步复位中断状态（新对话 = 新的生命周期，上一轮中断作废，结论可正常回灌），
+    // 并新建中断信号（上一轮的 abort 不作用于新对话）
     this.stopped = false;
     this.turnCount = 0;
     this.interrupted = false;
+    this.interruptController = new AbortController();
     this.messages.push(userMessage(input));
   }
 
@@ -265,8 +269,10 @@ export class Agent {
     if (this.active) return;
     this.active = true;
     // 复活（新一轮驱动，DESIGN 11.2 中断后可复活）：复位中断状态——
-    // 上一轮 interrupt 置位只影响当时的 notifyCompletion 判定，新一轮结论应正常回灌父
+    // 上一轮 interrupt 置位只影响当时的 notifyCompletion 判定，新一轮结论应正常回灌父；
+    // 同步新建中断信号，上一轮的 abort 不作用于新一轮
     this.interrupted = false;
+    this.interruptController = new AbortController();
     try {
       while (true) {
         for await (const event of this.runTurn()) {
@@ -279,6 +285,7 @@ export class Agent {
           // 轮间继续 = 新任务：中断状态一并复位（review 修复：原实现只入口复位，
           // interrupt 落活跃循环中途 + 排队消息继续时，新任务结论仍被 notifyCompletion 吞掉）
           this.interrupted = false;
+          this.interruptController = new AbortController();
           continue;
         }
         // 收件箱空且终态（本轮模型回复无工具调用，或续跑预算耗尽）→ 会话结束
@@ -300,11 +307,13 @@ export class Agent {
   }
 
   /**
-   * 请求中断（turn 间，DESIGN 11.4）：置 stopped，当前 turn 结束后停止续跑；
+   * 请求中断（turn 内真打断）：置 stopped，并中止当前轮进行中的模型流/工具执行——
+   * runTurn 收到中止信号后收尾（本轮已产出保留、未执行工具补失败结果）尽快返回；
    * 收件箱有排队消息时中断不生效（消息视为新任务继续处理）；
-   * 后续唤醒消息可复活（新一轮 resume/start 时复位 interrupted，结论恢复回灌）。
+   * 后续唤醒消息可复活（新一轮 resume/start 时复位 interrupted 与中断信号，结论恢复回灌）。
    */
   interrupt(): void {
+    this.interruptController.abort();
     this.stopped = true;
     this.interrupted = true;
   }
@@ -340,12 +349,16 @@ export class Agent {
     let retryAttempts = 0;
     for (;;) {
       try {
-        for await (const event of this.modelClient.stream(this.modelId, context)) {
+        for await (const event of this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal })) {
+          // 中断引发的流错误归一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
+          if (this.interruptController.signal.aborted && event.type === "error") continue;
           collected.push(event);
           yield event;
         }
         break;
       } catch (err) {
+        // 中断：跳出重试循环，走已产出保留收尾（不由超窗剥组重发）
+        if (this.interruptController.signal.aborted) break;
         if (!isContextTooLongError(err) || retryAttempts >= MAX_CONTEXT_RETRY) {
           this.messages = messagesBeforeRetry;
           throw err;
@@ -363,6 +376,21 @@ export class Agent {
       }
     }
     const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
+    // 中断收尾（turn 内真打断）：已产出的文本/思考保留为 assistant；含但未执行的工具调用
+    // 补失败结果保持配对闭合（续跑不 400，模型看到「执行中断」自行决定重试或调整）；
+    // 完全没收到内容则连空消息也不落。中断后本轮结束，已产出留在历史、可正常续跑。
+    if (this.interruptController.signal.aborted) {
+      if (collected.length > 0) {
+        this.messages.push(assistant);
+        for (const call of toolCallsOf(assistant)) {
+          this.messages.push(
+            toolResultMessage(call.id, call.name, "执行中断：用户打断，工具未执行", true),
+          );
+        }
+      }
+      this.stopped = true;
+      return;
+    }
     this.messages.push(assistant);
     this.turnCount++;
 
@@ -663,9 +691,26 @@ export class Agent {
         message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
       };
     }
+    // 中断检查：许可已通过、准备真正启动调用前判定——若已被打断则不再启动，
+    // 补失败结果保持观测闭合（PreToolUse 已发，后有 PostToolUseFailure）
+    if (this.interruptController.signal.aborted) {
+      const error = "执行中断：用户打断，工具未执行";
+      await this.hooks?.emit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error,
+        agentPath,
+      });
+      return { message: toolResultMessage(call.id, call.name, error, true) };
+    }
     try {
       const result = await withCwd(this.cwd, () =>
-        withFileState(this.fileState, () => tool.execute(call.input)),
+        withFileState(
+          this.fileState,
+          () => tool.execute(call.input, { signal: this.interruptController.signal }),
+        ),
       );
       const { output, contextModifier, isError } =
         typeof result === "string"

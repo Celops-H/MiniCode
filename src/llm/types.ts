@@ -39,5 +39,5 @@ export interface Provider {
   readonly baseUrl: string;
   readonly auth: ProviderAuth;
   getModels(): ModelInfo[];
-  stream(modelId: string, context: Context): AsyncIterable<StreamEvent>;
+  stream(modelId: string, context: Context, options?: { signal?: AbortSignal }): AsyncIterable<StreamEvent>;
 }

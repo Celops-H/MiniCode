@@ -63,12 +63,17 @@ export class OpenAICompatibleProvider implements Provider {
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流
    */
-  async *stream(modelId: string, context: Context): AsyncIterable<StreamEvent> {
+  async *stream(
+    modelId: string,
+    context: Context,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterable<StreamEvent> {
     const request = this.protocol.buildRequest(context);
     const stream = await this.getClient().chat.completions.create({
       ...(request as Record<string, unknown>),
       model: modelId,
       stream: true,
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
     yield* this.protocol.parseStream(stream);
   }

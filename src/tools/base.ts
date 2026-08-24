@@ -19,6 +19,11 @@ export type ExecuteResult =
       isError?: boolean;
     };
 
+/** 工具执行上下文：携带可中止信号（turn 内打断透传，bash 等长进程据此杀进程树） */
+export interface ExecuteContext {
+  signal?: AbortSignal;
+}
+
 /**
  * 工具基类：工具只声明自身属性，不感知权限规则与执行调度。
  * 各属性由对应子系统消费（Registry 序列化 / Permission 审批 / Executor 执行）。
@@ -39,8 +44,8 @@ export interface Tool {
   readonly maxResultSizeChars: number;
   /** 并发安全判断：按具体输入判断，不确定返回 false（保守） */
   isConcurrencySafe?(input: unknown): boolean;
-  /** 执行工具，返回文本或结构化结果 */
-  execute(input: unknown): Promise<ExecuteResult> | ExecuteResult;
+  /** 执行工具，返回文本或结构化结果；慢工具可响应 ctx.signal 中止 */
+  execute(input: unknown, options?: ExecuteContext): Promise<ExecuteResult> | ExecuteResult;
 }
 
 /**
