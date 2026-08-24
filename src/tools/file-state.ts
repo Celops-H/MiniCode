@@ -28,7 +28,9 @@ export class FileState {
   private readonly versions = new Map<string, FileVersion>();
 
   private normalize(p: string): string {
-    return path.resolve(p);
+    // Windows 文件系统大小写不敏感：统一小写，避免 C:\a.txt 与 c:\A.TXT 各占锁/快照条目绕过 CAS
+    const resolved = path.resolve(p);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
   }
 
   getVersion(p: string): FileVersion | undefined {
