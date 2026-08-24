@@ -10,22 +10,37 @@ export const HOOK_EVENT_TYPES = [
 ] as const;
 export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];
 
-/** Hook 事件负载：携带事件发生时的现场信息（哪个工具、什么输入等）；PreToolUse 用于拦截裁决，其余用于观测 */
+/**
+ * Hook 事件负载：携带事件发生时的现场信息（哪个工具、什么输入等）；
+ * PreToolUse 用于拦截裁决，其余用于观测。
+ * 工具事件带 toolCallId（工具回合配对键，DESIGN 7.2）——「调用中 → 成功/失败」可按调用配对，
+ * 并发批内可区分；带 agentPath（发起调用的 agent，多 Agent 下可按路径归属「谁在干活」，A 组定稿）。
+ */
 export type HookEvent =
   | { type: "UserPromptSubmit"; input: string }
-  | { type: "PreToolUse"; toolName: string; input: Record<string, unknown> }
+  | {
+      type: "PreToolUse";
+      toolCallId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      agentPath: string;
+    }
   | {
       type: "PostToolUse";
+      toolCallId: string;
       toolName: string;
       input: Record<string, unknown>;
       output: string;
       isError: boolean;
+      agentPath: string;
     }
   | {
       type: "PostToolUseFailure";
+      toolCallId: string;
       toolName: string;
       input: Record<string, unknown>;
       error: string;
+      agentPath: string;
     }
   | { type: "Stop" }
   | { type: "SessionStart" }

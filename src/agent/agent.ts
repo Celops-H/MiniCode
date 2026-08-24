@@ -548,36 +548,83 @@ export class Agent {
    * @returns 工具结果消息与上下文修改
    */
   private async executeTool(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
+    // PreToolUse 在每次工具调用前无条件发射（DESIGN 13.1）——未知工具/参数校验失败也先发，
+    // 配对闭合（调用开始后必有成功/失败事件）；hook 裁决对任何工具名生效
+    const request: PermissionRequest = {
+      toolName: call.name,
+      content: typeof call.input.command === "string" ? call.input.command : undefined,
+      input: call.input,
+    };
+    const hookVerdict = await this.preToolUseVerdict(call.id, request);
+    const agentPath = this.agentPath?.toString() ?? "/root";
+    // 无管线时 hook 裁决直接生效（deny 拒绝；ask 无审批者，fail 保守拒绝）——
+    // 对未知工具同样生效（hook 拒绝优先于「未知工具」反馈）
+    const hookRejects = hookVerdict === "deny" || hookVerdict === "ask";
+
     const tool = this.registry.get(call.name);
     if (!tool) {
       const available = this.registry
         .list()
         .map((t) => t.name)
         .join("、");
-      return {
-        message: toolResultMessage(
-          call.id,
-          call.name,
-          `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`,
-          true,
-        ),
-      };
+      if (!this.permission && hookRejects) {
+        const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+        await this.hooks?.emit({
+          type: "PostToolUseFailure",
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.input,
+          error: `权限拒绝：${reason}`,
+          agentPath,
+        });
+        return {
+          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
+        };
+      }
+      // 未知工具：发失败事件（观测闭合：调用开始后必有成功/失败结果，A 组定稿）
+      const error = `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`;
+      await this.hooks?.emit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error,
+        agentPath,
+      });
+      return { message: toolResultMessage(call.id, call.name, error, true) };
     }
     // 前置参数校验：非法参数格式化为可读错误反馈模型，让其调整后重新调用
     const parsed = tool.inputSchema.safeParse(call.input);
     if (!parsed.success) {
-      return { message: toolResultMessage(call.id, call.name, formatInputError(call.name, parsed.error), true) };
+      const error = formatInputError(call.name, parsed.error);
+      if (!this.permission && hookRejects) {
+        const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+        await this.hooks?.emit({
+          type: "PostToolUseFailure",
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.input,
+          error: `权限拒绝：${reason}`,
+          agentPath,
+        });
+        return {
+          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
+        };
+      }
+      await this.hooks?.emit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error,
+        agentPath,
+      });
+      return { message: toolResultMessage(call.id, call.name, error, true) };
     }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
-    // PreToolUse 在每次工具调用前无条件发射（DESIGN 13.1 工具执行前触发）——
     // 有权限管线时裁决并入 ask 决策链（规则层 deny 优先，Hook 只在 ask 时介入）；
-    // 无权限管线时裁决直接生效（deny 拒绝；ask 无审批者，fail 保守拒绝）。
-    const request: PermissionRequest = {
-      toolName: call.name,
-      content: typeof call.input.command === "string" ? call.input.command : undefined,
-      input: call.input,
-    };
-    const hookVerdict = await this.preToolUseVerdict(request);
+    // 无权限管线时 hookVerdict 直接生效（上面工具逻辑已按 hookRejects 处理未知工具/参数失败，
+    // 这里只处理工具存在且参数合法的场景）
     if (this.permission) {
       // 免审批工具（skipsPermission，如 agent 消息投递）走轻量检查：
       // 跳过规则/缓存/用户审批，保留 plan 只读约束与 PreToolUse hook 拦截（DESIGN 7.1）
@@ -586,19 +633,34 @@ export class Agent {
         ? await this.permission.checkSkipsPermission(request, hook)
         : await this.permission.check(request, hook);
       if (!result.allowed) {
+        const reason = result.reason ?? "未授权";
+        // 权限拒绝：发失败事件（观测闭合，A 组定稿）
+        await this.hooks?.emit({
+          type: "PostToolUseFailure",
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.input,
+          error: `权限拒绝：${reason}`,
+          agentPath,
+        });
         return {
-          message: toolResultMessage(call.id, call.name, `权限拒绝：${result.reason ?? "未授权"}`, true),
+          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
         };
       }
-    } else if (hookVerdict === "deny") {
-      return {
-        message: toolResultMessage(call.id, call.name, "权限拒绝：Hook 拒绝", true),
-      };
-    } else if (hookVerdict === "ask" && !tool.skipsPermission) {
+    } else if (hookVerdict === "deny" || (hookVerdict === "ask" && !tool.skipsPermission)) {
       // 免审批工具（skipsPermission）的 ask 不升级用户审批、视为放行（与管线 checkSkipsPermission 一致）；
       // 普通工具无审批者时 fail 保守拒绝
+      const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+      await this.hooks?.emit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error: `权限拒绝：${reason}`,
+        agentPath,
+      });
       return {
-        message: toolResultMessage(call.id, call.name, "权限拒绝：需要审批但未配置审批处理", true),
+        message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
       };
     }
     try {
@@ -614,10 +676,12 @@ export class Agent {
       // PostToolUse：工具执行完成（含标记失败的结果），供观测
       await this.hooks?.emit({
         type: "PostToolUse",
+        toolCallId: call.id,
         toolName: call.name,
         input: call.input,
         output: finalOutput,
         isError: Boolean(isError),
+        agentPath,
       });
       return {
         message: toolResultMessage(call.id, call.name, finalOutput, isError),
@@ -628,9 +692,11 @@ export class Agent {
       // PostToolUseFailure：工具执行抛错，供观测
       await this.hooks?.emit({
         type: "PostToolUseFailure",
+        toolCallId: call.id,
         toolName: call.name,
         input: call.input,
         error,
+        agentPath,
       });
       return {
         message: toolResultMessage(call.id, call.name, `工具 ${call.name} 执行失败：${error}`, true),
@@ -646,12 +712,15 @@ export class Agent {
    * @returns 裁决；无任何 hook 响应时返回 undefined
    */
   private async preToolUseVerdict(
+    toolCallId: string,
     request: PermissionRequest,
   ): Promise<PermissionBehavior | undefined> {
     const results = await this.hooks?.emit({
       type: "PreToolUse",
+      toolCallId,
       toolName: request.toolName,
       input: request.input ?? {},
+      agentPath: this.agentPath?.toString() ?? "/root",
     });
     if (results?.includes("deny")) return "deny";
     if (results?.includes("ask")) return "ask";

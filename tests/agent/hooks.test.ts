@@ -32,6 +32,23 @@ function mockReadToolClient(): ModelClient {
   };
 }
 
+/** 模型调用一个不存在的工具（结果回灌后结束） */
+function unknownToolClient(): ModelClient {
+  return {
+    async *stream(_modelId, context) {
+      const hasResult = context.messages.some((m) => m.role === "tool_result");
+      if (!hasResult) {
+        yield { type: "toolcall_start", index: 0, id: "u1", name: "nope" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      } else {
+        yield { type: "text_delta", text: "结束了" };
+        yield { type: "done", stopReason: "end_turn" };
+      }
+    },
+  };
+}
+
 function makeReadTool(execute: Tool["execute"]): Tool {
   return {
     name: "read",
@@ -431,5 +448,69 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(executed2).toBe(true);
     const allowed = agent2.getMessages().find((m) => m.role === "tool_result");
     expect(allowed?.content).toBe("文件内容");
+  });
+
+  it("工具失败路径事件闭合（A 组定稿）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
+    // 未知工具：无 tool 可执行，发失败事件
+    const hooks1 = new HookBus();
+    const failure1 = vi.fn();
+    hooks1.on("PostToolUseFailure", failure1);
+    const agent1 = new Agent({
+      modelClient: unknownToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks: hooks1,
+      tools: [],
+    });
+    agent1.start("调未知工具");
+    for await (const _ of agent1.run()) {
+      // 消费
+    }
+    expect(failure1).toHaveBeenCalledTimes(1);
+    expect(failure1).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "PostToolUseFailure", toolCallId: "u1", toolName: "nope", error: expect.stringContaining("未知工具") }),
+    );
+
+    // 权限拒绝（无管线 hook deny）：发失败事件
+    const hooks2 = new HookBus();
+    const failure2 = vi.fn();
+    hooks2.on("PostToolUseFailure", failure2);
+    hooks2.on("PreToolUse", (): HookVerdict => "deny");
+    const agent2 = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks: hooks2,
+      tools: [makeReadTool(() => "不应执行")],
+    });
+    agent2.start("读文件");
+    for await (const _ of agent2.run()) {
+      // 消费
+    }
+    expect(failure2).toHaveBeenCalledTimes(1);
+    expect(failure2).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "PostToolUseFailure", toolCallId: "c1", toolName: "read", error: expect.stringContaining("权限拒绝") }),
+    );
+  });
+
+  it("工具事件带 toolCallId 配对（A 组定稿）：PreToolUse → PostToolUse 同一调用 id", async () => {
+    const hooks = new HookBus();
+    const pre = vi.fn();
+    const post = vi.fn();
+    hooks.on("PreToolUse", pre);
+    hooks.on("PostToolUse", post);
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(pre).toHaveBeenCalledWith(expect.objectContaining({ type: "PreToolUse", toolCallId: "c1" }));
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "PostToolUse", toolCallId: "c1" }));
   });
 });

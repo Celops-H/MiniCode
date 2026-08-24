@@ -30,7 +30,7 @@ describe("命令 hook 适配器（DESIGN 13）", () => {
       `process.stdout.write(JSON.stringify({ verdict: "deny" }));`,
     );
     const handler = createCommandHook(command, { timeoutMs: 5000 });
-    const verdict = await handler({ type: "PreToolUse", toolName: "bash", input: {} });
+    const verdict = await handler({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} });
     expect(verdict).toBe("deny");
   });
 
@@ -40,28 +40,28 @@ describe("命令 hook 适配器（DESIGN 13）", () => {
       makeHookCommand(dir, `process.stdout.write(JSON.stringify({ verdict: "allow" }));`),
       { timeoutMs: 5000 },
     );
-    expect(await allow({ type: "PreToolUse", toolName: "read", input: {} })).toBe("allow");
+    expect(await allow({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: {} })).toBe("allow");
     const ask = createCommandHook(
       makeHookCommand(dir, `process.stdout.write(JSON.stringify({ verdict: "ask" }));`),
       { timeoutMs: 5000 },
     );
-    expect(await ask({ type: "PreToolUse", toolName: "bash", input: {} })).toBe("ask");
+    expect(await ask({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} })).toBe("ask");
   });
 
   it("PreToolUse：非零退出 / 非 JSON 输出 / 超时 → 保守 deny", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "hook-test-"));
     // 非零退出
     const failing = createCommandHook(makeHookCommand(dir, `process.exit(1);`), { timeoutMs: 5000 });
-    expect(await failing({ type: "PreToolUse", toolName: "bash", input: {} })).toBe("deny");
+    expect(await failing({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} })).toBe("deny");
     // 输出非 JSON
     const garbage = createCommandHook(makeHookCommand(dir, `process.stdout.write("hello");`), { timeoutMs: 5000 });
-    expect(await garbage({ type: "PreToolUse", toolName: "bash", input: {} })).toBe("deny");
+    expect(await garbage({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} })).toBe("deny");
     // 超时（命令 sleep，超时 100ms）
     const slow = createCommandHook(
       makeHookCommand(dir, `await new Promise((r) => setTimeout(r, 1000)); process.stdout.write("late");`),
       { timeoutMs: 100 },
     );
-    expect(await slow({ type: "PreToolUse", toolName: "bash", input: {} })).toBe("deny");
+    expect(await slow({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} })).toBe("deny");
   });
 
   it("观测事件（PostToolUse 等）：命令被调用，返回 undefined", async () => {
@@ -72,7 +72,7 @@ describe("命令 hook 适配器（DESIGN 13）", () => {
       `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(received)}, input.hookEvent.type);`,
     );
     const handler = createCommandHook(command, { timeoutMs: 5000 });
-    const result = await handler({ type: "PostToolUse", toolName: "read", input: {}, output: "x", isError: false });
+    const result = await handler({ type: "PostToolUse", toolCallId: "t1", toolName: "read", input: {}, output: "x", isError: false });
     expect(result).toBeUndefined();
     // 命令确实执行了（stdin 收到事件）
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -88,7 +88,7 @@ describe("HookBus 与命令装配", () => {
     const command = makeHookCommand(dir, `process.stdout.write(JSON.stringify({ verdict: "deny" }));`);
     const bus = new HookBus();
     bus.on("PreToolUse", createCommandHook(command, { timeoutMs: 5000 }));
-    const results = await bus.emit({ type: "PreToolUse", toolName: "bash", input: {} });
+    const results = await bus.emit({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {} });
     expect(results).toEqual(["deny"]);
     rmSync(dir, { recursive: true, force: true });
   });
