@@ -56,6 +56,37 @@ const writeTool = {
   },
 };
 
+/** 按任务序列工作的 mock：每次新任务写对应文件，下一 turn 返回「写完」结束（turn 计数，不受历史 tool_result 影响） */
+function sequenceClient(tasks: Array<{ file: string; content: string }>): ModelClient {
+  let turn = 0;
+  return {
+    async *stream(_modelId, _context) {
+      const task = tasks[turn >> 1];
+      if (!task) {
+        yield { type: "text_delta", text: "没任务了" };
+        yield { type: "done", stopReason: "end_turn" };
+        return;
+      }
+      if (turn % 2 === 0) {
+        // 新任务：写文件（偶数 turn）
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "write" };
+        yield {
+          type: "toolcall_delta",
+          index: 0,
+          partialJson: JSON.stringify({ path: task.file, content: task.content }),
+        };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      } else {
+        // 任务完成：汇报（奇数 turn）
+        yield { type: "text_delta", text: "写完了" };
+        yield { type: "done", stopReason: "end_turn" };
+      }
+      turn++;
+    },
+  };
+}
+
 describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
   let dir: string;
   afterEach(() => {
@@ -187,13 +218,78 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     expect(second!.dir).not.toBe(first!.dir);
   });
 
+  it("Team 集成：冲突后 member.worktree 保留，子 agent 解决冲突再完成即合并成功（review 修复：原实现无条件清空断送重试）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    initGitRepo(dir);
+    writeFileSync(path.join(dir, "a.txt"), "第一行\n第二行\n第三行\n");
+    execSync("git add -A && git commit -qm second", { cwd: dir });
+
+    const team = new Team({ worktrees: true });
+    const root = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "收到结论" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      cwd: dir,
+      tools: [],
+      team,
+    });
+    team.registerRoot(root);
+
+    // A、B 同时派生（同一 base），改同一行（冲突）
+    const spawnChild = (name: string, client: ModelClient) => {
+      const childPath = team.reserveSpawn(AgentPath.root(), name) as AgentPath;
+      const worktree = team.createChildWorktree(AgentPath.root(), name)!;
+      const child = new Agent({
+        modelClient: client,
+        modelId: "mock",
+        systemPrompt: "助手",
+        cwd: worktree.dir,
+        tools: [writeTool],
+        team,
+      });
+      team.commitSpawn(childPath, child);
+      return { childPath, worktree, child };
+    };
+    const a = spawnChild("agent_a", sequenceClient([{ file: "a.txt", content: "A 的版本\n第二行\n第三行\n" }]));
+    const b = spawnChild("agent_b", sequenceClient([{ file: "a.txt", content: "B 的版本\n第二行\n第三行\n" }, { file: "from-b.txt", content: "B 后续数据" }]));
+
+    // A 先完成：合并成功
+    await team.sendMessage(a.childPath, { type: "NEW_TASK", from: AgentPath.root(), content: "写文件", triggerTurn: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await readFile(path.join(dir, "a.txt"), "utf8")).toContain("A 的版本");
+    expect(existsSync(a.worktree.dir)).toBe(false);
+
+    // B 完成：冲突，worktree 保留（不再被 Team 清空断送重试）
+    await team.sendMessage(b.childPath, { type: "NEW_TASK", from: AgentPath.root(), content: "写文件", triggerTurn: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(existsSync(b.worktree.dir)).toBe(true);
+    expect(team.resolveAgent(b.childPath)?.worktree).toBeDefined();
+    const conflictFile = await readFile(path.join(b.worktree.dir, "a.txt"), "utf8");
+    expect(conflictFile).toContain("<<<<<<<");
+
+    // 子 agent 解决冲突（编辑冲突文件为最终版本）后再完成：合并成功、worktree 清理
+    writeFileSync(path.join(b.worktree.dir, "a.txt"), "最终合并版本\n第二行\n第三行\n");
+    await team.sendMessage(b.childPath, { type: "NEW_TASK", from: AgentPath.root(), content: "继续", triggerTurn: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(await readFile(path.join(dir, "a.txt"), "utf8")).toContain("最终合并版本");
+    expect(await readFile(path.join(dir, "from-b.txt"), "utf8")).toBe("B 后续数据");
+    expect(existsSync(b.worktree.dir)).toBe(false);
+    expect(team.resolveAgent(b.childPath)?.worktree).toBeUndefined();
+  });
+
   it("子 agent 无改动：判空分支直接清理（不误报合并）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
     initGitRepo(dir);
     const info = createWorktree(dir, "worker")!;
     // 子 agent 什么都没改
-    const message = completeWorktree(dir, info);
-    expect(message).toContain("无改动");
+    const result = completeWorktree(dir, info);
+    expect(result.status).toBe("no_changes");
+    expect(result.message).toContain("无改动");
     expect(existsSync(info.dir)).toBe(false);
   });
 
@@ -206,9 +302,10 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     // 子 agent 在 worktree 里写文件
     writeFileSync(path.join(info.dir, "output.txt"), "产出数据");
 
-    const message = completeWorktree(dir, info);
+    const result = completeWorktree(dir, info);
     // 不被误判为「无改动」：产出保留在 worktree、目录未销毁
-    expect(message).toContain("保留");
+    expect(result.status).toBe("kept");
+    expect(result.message).toContain("保留");
     expect(existsSync(info.dir)).toBe(true);
     expect(await readFile(path.join(info.dir, "output.txt"), "utf8")).toBe("产出数据");
   });
@@ -225,11 +322,11 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     const infoB = createWorktree(dir, "agent_b")!;
     writeFileSync(path.join(infoA.dir, "a.txt"), "A 改第一行\n第二行\n第三行\n");
     const msgA = completeWorktree(dir, infoA);
-    expect(msgA).toContain("已合并进主分支");
+    expect(msgA.status).toBe("merged");
 
     writeFileSync(path.join(infoB.dir, "a.txt"), "第一行\n第二行\nB 改第三行\n");
     const msgB = completeWorktree(dir, infoB);
-    expect(msgB).toContain("已合并进主分支");
+    expect(msgB.status).toBe("merged");
     // 两处改动都在（自动三方合并）
     const final = await readFile(path.join(dir, "a.txt"), "utf8");
     expect(final).toContain("A 改第一行");
@@ -247,12 +344,13 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     const infoB = createWorktree(dir, "agent_b")!;
     writeFileSync(path.join(infoA.dir, "a.txt"), "A 的版本\n第二行\n第三行\n");
     const msgA = completeWorktree(dir, infoA);
-    expect(msgA).toContain("已合并进主分支");
+    expect(msgA.status).toBe("merged");
 
     writeFileSync(path.join(infoB.dir, "a.txt"), "B 的版本\n第二行\n第三行\n");
     const msgB = completeWorktree(dir, infoB);
-    expect(msgB).toContain("合并冲突");
-    expect(msgB).toContain("a.txt");
+    expect(msgB.status).toBe("kept");
+    expect(msgB.message).toContain("合并冲突");
+    expect(msgB.message).toContain("a.txt");
     // 冲突时 worktree 保留（合并中状态），冲突文件在子 agent cwd 可见
     expect(existsSync(infoB.dir)).toBe(true);
     const conflictFile = await readFile(path.join(infoB.dir, "a.txt"), "utf8");
@@ -261,7 +359,7 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     // 子 agent 解决冲突：编辑冲突文件为最终版本
     writeFileSync(path.join(infoB.dir, "a.txt"), "最终合并版本\n第二行\n第三行\n");
     const msgB2 = completeWorktree(dir, infoB);
-    expect(msgB2).toContain("已合并进主分支");
+    expect(msgB2.status).toBe("merged");
     // 主工作区得到最终版本，worktree 清理
     expect(await readFile(path.join(dir, "a.txt"), "utf8")).toContain("最终合并版本");
     expect(existsSync(infoB.dir)).toBe(false);

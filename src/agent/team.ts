@@ -72,16 +72,23 @@ export class Team {
     return info;
   }
 
-  /** 子 agent 终态（自然完成）时合并其 worktree 分支并清理 */
+  /**
+   * 子 agent 终态（自然完成）时合并其 worktree 分支。
+   * 合并成功/无改动才清空 member.worktree（终态）；冲突/失败保留（kept）——
+   * 子 agent 解决冲突后再完成时，本函数再次执行即重试合并（review 修复：原实现无条件清空，
+   * 使「冲突 agent 自解」闭环不可达，保留的 worktree 成孤儿）
+   */
   completeChildWorktree(path: AgentPath): string | undefined {
     const member = this.members.get(path.toString());
     if (!member?.worktree) return undefined;
     const parent = member.parentPath ? this.members.get(member.parentPath.toString())?.agent : undefined;
     const rootDir = parent ? resolveGitRoot(parent.getCwd()) : undefined;
     if (!rootDir) return `合并失败：无法定位仓库根`;
-    const message = completeWorktree(rootDir, member.worktree);
-    member.worktree = undefined;
-    return message;
+    const result = completeWorktree(rootDir, member.worktree);
+    if (result.status === "merged" || result.status === "no_changes") {
+      member.worktree = undefined;
+    }
+    return result.message;
   }
 
   /** 子 agent 中断/异常时清理 worktree 目录（分支保留在仓库） */

@@ -65,30 +65,35 @@ export function createWorktree(rootDir: string, agentName: string): WorktreeInfo
   return ok === undefined ? undefined : { dir, branch };
 }
 
+/** 合并结果：merged/no_changes 为终态（worktree 已清理）；kept 为保留态（目录/分支保留，可重试） */
+export type WorktreeResult =
+  | { status: "merged"; message: string }
+  | { status: "no_changes"; message: string }
+  | { status: "kept"; message: string };
+
 /**
  * 子 agent 完成后合并其分支并清理 worktree。
  * 流程：判空 → 自动提交（固定 minicode 身份）→ 子 worktree 内合入主分支最新（三方合并，
  * 不重叠改动自动合并，冲突标记落在子 worktree——子 agent 的 cwd 直接可见，可自行解决）
  * → 快进合并回主分支 → 清理。
- * 子 agent 解决冲突后再完成时，本函数再次执行：提交合并 → 快进（子分支已含主分支）→ 成功。
+ * 冲突/失败保留 worktree 与分支（kept），子 agent 解决后再完成时本函数重跑即合并成功。
  * @param rootDir 主仓库根
  * @param info worktree 信息
- * @returns 合并结果说明（成功/冲突待解决/失败原因）
  */
-export function completeWorktree(rootDir: string, info: WorktreeInfo): string {
+export function completeWorktree(rootDir: string, info: WorktreeInfo): WorktreeResult {
   // 先判空：子 agent 无改动时直接清理（区分「无改动」与「提交失败」，后者不得销毁产出）
   const dirty = git(info.dir, ["status", "--porcelain"]);
   if (dirty === "") {
     git(rootDir, ["worktree", "remove", "--force", info.dir]);
     git(rootDir, ["branch", "-D", info.branch]);
-    return "子 agent 无改动，无需合并";
+    return { status: "no_changes", message: "子 agent 无改动，无需合并" };
   }
   // 提交 worktree 改动（子 agent 的 write/edit 只落在工作区；固定 minicode 身份，不依赖用户配置）
   git(info.dir, ["add", "-A"]);
   const committed = git(info.dir, ["commit", "-m", `minicode: ${info.branch} 完成`], COMMIT_IDENTITY);
   if (committed === undefined) {
     // commit 失败（如 pre-commit hook 拒绝）：保留 worktree 与分支，改动不销毁
-    return `改动保留在分支 ${info.branch}（worktree ${info.dir}），请手动提交合并`;
+    return { status: "kept", message: `改动保留在分支 ${info.branch}（worktree ${info.dir}），请手动提交合并` };
   }
   // 子 worktree 内合入主分支最新（解决分叉）：三方合并，冲突标记落在子 worktree
   const mainBranch = git(rootDir, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -98,18 +103,21 @@ export function completeWorktree(rootDir: string, info: WorktreeInfo): string {
       // 冲突：保留 worktree（合并中状态），冲突文件在子 agent 的 cwd 可见，
       // 回灌父提示派子 agent 解决；解决后再次完成时本函数重跑即合并成功
       const conflicts = git(info.dir, ["diff", "--name-only", "--diff-filter=U"]) ?? "";
-      return `合并冲突（文件：${conflicts.split("\n").filter(Boolean).join("、")}）。请让子 agent 在其工作区解决冲突文件后提交，完成后会自动再次合并`;
+      return {
+        status: "kept",
+        message: `合并冲突（文件：${conflicts.split("\n").filter(Boolean).join("、")}）。请让子 agent 在其工作区解决冲突文件后提交，完成后会自动再次合并`,
+      };
     }
   }
   // 子分支已含主分支最新：快进合并回主分支
   const ff = git(rootDir, ["merge", "--ff-only", info.branch], COMMIT_IDENTITY);
   if (ff === undefined) {
     git(rootDir, ["merge", "--abort"]); // 恢复主工作区，改动仍在分支上
-    return `改动保留在分支 ${info.branch}（worktree ${info.dir}），请手动合并`;
+    return { status: "kept", message: `改动保留在分支 ${info.branch}（worktree ${info.dir}），请手动合并` };
   }
   git(rootDir, ["worktree", "remove", "--force", info.dir]);
   git(rootDir, ["branch", "-D", info.branch]);
-  return "已合并进主分支";
+  return { status: "merged", message: "已合并进主分支" };
 }
 
 /**
@@ -117,6 +125,11 @@ export function completeWorktree(rootDir: string, info: WorktreeInfo): string {
  * 分支保留在仓库，后续 followup 复活时无需重新创建（中断不删 worktree 由调用方决定）。
  */
 export function abortWorktree(rootDir: string, info: WorktreeInfo): void {
+  // 冲突中（MERGE_HEAD 存在）先放弃合并：冲突标记是合并中间态，不该提交进分支
+  // （review 修复：kept 保留 mid-merge worktree 后，中断/释放路径会走到这里）
+  if (git(info.dir, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== undefined) {
+    git(info.dir, ["merge", "--abort"]);
+  }
   git(info.dir, ["add", "-A"]);
   git(info.dir, ["commit", "-m", `minicode: ${info.branch} 中断提交`], COMMIT_IDENTITY);
   git(rootDir, ["worktree", "remove", "--force", info.dir]);
