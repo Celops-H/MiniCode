@@ -17,7 +17,15 @@ export async function readJsonl<T>(file: string): Promise<T[]> {
   return text
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as T);
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as T];
+      } catch {
+        // 坏行跳过（DESIGN 14 可修复）：写盘中断的半行或损坏行不拖垮整会话加载——
+        // 宁可丢这一条，也不能让整个会话读不出来
+        return [];
+      }
+    });
 }
 
 /**

@@ -129,6 +129,21 @@ describe("会话持久化与续跑", () => {
     expect(loaded.getMessages()[1]?.content).toBe("新消息");
   });
 
+  it("readJsonl 坏行跳过：单行损坏不拖垮整会话加载（review 修复，DESIGN 14 可修复）", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("好行"));
+    await store.flush();
+    // 在 JSONL 里混入损坏行（模拟写盘中断的半行）
+    const file = path.join(dir, `${session.meta.id}.jsonl`);
+    await appendFile(file, "{\"role\":\"user\",\"content\":\"半行中断\n", "utf8");
+
+    const loaded = await store.loadSession(session.meta.id);
+    // 好行仍在，坏行被跳过
+    expect(loaded.getMessages()).toHaveLength(1);
+    expect(loaded.getMessages()[0]?.content).toBe("好行");
+  });
+
   it("meta 延迟写：append 只改内存，flush 落盘", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
