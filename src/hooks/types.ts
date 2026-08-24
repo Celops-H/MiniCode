@@ -1,12 +1,14 @@
 /** Hook 事件类型（DESIGN 13.1 核心事件；子代理事件待 M3.2 接入） */
-export type HookEventType =
-  | "UserPromptSubmit"
-  | "PreToolUse"
-  | "PostToolUse"
-  | "PostToolUseFailure"
-  | "Stop"
-  | "SessionStart"
-  | "SessionEnd";
+export const HOOK_EVENT_TYPES = [
+  "UserPromptSubmit",
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Stop",
+  "SessionStart",
+  "SessionEnd",
+] as const;
+export type HookEventType = (typeof HOOK_EVENT_TYPES)[number];
 
 /** Hook 事件负载：携带事件发生时的现场信息（哪个工具、什么输入等）；PreToolUse 用于拦截裁决，其余用于观测 */
 export type HookEvent =

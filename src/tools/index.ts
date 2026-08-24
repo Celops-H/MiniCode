@@ -18,6 +18,7 @@ export {
   killAllBackgroundTasks,
 } from "./builtin/bash-background.js";
 export type { BackgroundTask, BackgroundTaskStatus } from "./builtin/bash-background.js";
+export { killProcessTree } from "./builtin/bash-background.js";
 export { editTool } from "./builtin/edit.js";
 export { readTool } from "./builtin/read.js";
 export { writeTool } from "./builtin/write.js";

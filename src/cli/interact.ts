@@ -1,5 +1,6 @@
 import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
+import type { HookBus } from "../hooks/index.js";
 
 export interface InteractOptions {
   agent: Agent;
@@ -9,21 +10,25 @@ export interface InteractOptions {
   inputs: AsyncIterable<string>;
   /** 输出函数（CLI 里写 stdout） */
   write: (text: string) => void;
+  /** Hook 总线（宿主发射会话级事件的通道，DESIGN 13.3）；缺省不发射 */
+  hooks?: HookBus;
 }
 
 /**
  * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
  * 展示工具结果 → 消息持久化。
- * @param options 交互选项（agent / store / session / inputs / write）
+ * UserPromptSubmit 由宿主（本函数）在每次输入后发射（DESIGN 13.3）。
+ * @param options 交互选项（agent / store / session / inputs / write / hooks）
  */
 export async function interact(options: InteractOptions): Promise<void> {
-  const { agent, store, session, inputs, write } = options;
+  const { agent, store, session, inputs, write, hooks } = options;
   // 已持久化的消息游标（含续跑时注入的历史），每轮只落盘增量
   let processed = agent.getMessages().length;
   for await (const line of inputs) {
     const input = line.trim();
     if (!input) continue;
     if (input === "/exit") break; // 退出交互
+    await hooks?.emit({ type: "UserPromptSubmit", input });
     agent.start(input);
     // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记
     for await (const event of agent.run()) {

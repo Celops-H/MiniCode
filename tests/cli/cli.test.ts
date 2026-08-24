@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,9 +7,22 @@ import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/cli/interact.js";
 import { buildModelClient } from "../../src/cli/models.js";
-import { createSessionAgent } from "../../src/cli/app.js";
+import { buildHookBus, createSessionAgent } from "../../src/cli/app.js";
+import { loadConfig } from "../../src/config/index.js";
+import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
 import type { Tool } from "../../src/tools/index.js";
+
+/** 用给定 hooks 配置解析配置（写临时项目配置文件，绕开用户级配置） */
+async function loadConfigWith(hooks: Record<string, string[]>): Promise<Awaited<ReturnType<typeof loadConfig>>> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cfg-"));
+  try {
+    writeFileSync(path.join(dir, ".minicode.json"), JSON.stringify({ hooks }));
+    return await loadConfig({ paths: { globalConfigFile: path.join(dir, "none.json"), projectConfigFile: path.join(dir, ".minicode.json") } });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -94,6 +107,60 @@ describe("CLI 多 Agent 组装", () => {
     expect(toolsSeen).toContain("spawn_agent");
     expect(toolsSeen).toContain("wait_agent");
     expect(systemPrompt).toContain("团队协调者");
+  });
+});
+
+describe("CLI Hook 接入", () => {
+  let dir: string;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("interact 每次输入后发射 UserPromptSubmit（宿主职责，DESIGN 13.3）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+    const seen: string[] = [];
+    const hooks = new HookBus();
+    hooks.on("UserPromptSubmit", (event) => {
+      seen.push(event.input);
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "第一问";
+      yield "第二问";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      hooks,
+    });
+    expect(seen).toEqual(["第一问", "第二问"]);
+  });
+
+  it("buildHookBus：config.hooks 装配成事件 → 命令映射（空配置不启用）", () => {
+    expect(buildHookBus(undefined)).toBeUndefined();
+    const bus = buildHookBus({ PreToolUse: ["echo {}"], SessionStart: ["echo start"] });
+    expect(bus).toBeInstanceOf(HookBus);
+  });
+});
+
+describe("CLI Hook 配置 schema", () => {
+  it("hooks 配置部分事件即可通过解析（partialRecord），未知事件拒绝", async () => {
+    const config = await loadConfigWith({ PreToolUse: ["echo {}"] });
+    expect(config.hooks).toEqual({ PreToolUse: ["echo {}"] });
+
+    await expect(loadConfigWith({ NotAnEvent: ["echo"] } as never)).rejects.toThrow();
   });
 });
 

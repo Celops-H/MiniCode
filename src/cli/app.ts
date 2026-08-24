@@ -5,12 +5,14 @@ import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent, Team } from "../agent/index.js";
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import type { Tool } from "../tools/index.js";
 import type { Message } from "../core/index.js";
 import type { ModelClient } from "../agent/index.js";
+import type { Config } from "../config/index.js";
 import { interact } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
 
@@ -86,6 +88,7 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     console.log(`会话已创建：${session.meta.id}`);
   }
 
+  const hooks = buildHookBus(config.hooks);
   const { agent } = createSessionAgent({
     modelClient: models,
     modelId: session.meta.model,
@@ -93,9 +96,12 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     tools: createBuiltinTools(),
     initialMessages: session.getMessages(),
     agents,
+    hooks,
   });
 
   logger.info(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）`);
+  // 会话开始（DESIGN 13.3：会话级事件由宿主发射）
+  await hooks?.emit({ type: "SessionStart" });
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   await interact({
     agent,
@@ -103,8 +109,26 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     session,
     inputs: rl,
     write: (text) => process.stdout.write(text),
+    hooks,
   });
   rl.close();
+  // 会话结束（DESIGN 13.3：会话级事件由宿主发射）
+  await hooks?.emit({ type: "SessionEnd" });
+}
+
+/**
+ * 按 config.hooks 装配 Hook 总线（DESIGN 13）：每条命令包装成对应事件的处理器；
+ * 未配置 hooks 时返回 undefined（Hook 系统不启用）。
+ */
+export function buildHookBus(hooks?: Config["hooks"]): HookBus | undefined {
+  if (!hooks) return undefined;
+  const bus = new HookBus();
+  for (const eventType of HOOK_EVENT_TYPES) {
+    for (const command of hooks[eventType] ?? []) {
+      bus.on(eventType, createCommandHook(command));
+    }
+  }
+  return bus;
 }
 
 /**
@@ -120,6 +144,7 @@ export function createSessionAgent(options: {
   tools?: Tool[];
   initialMessages?: Message[];
   agents?: boolean;
+  hooks?: HookBus;
 }): { agent: Agent; team?: Team } {
   if (!options.agents) {
     return { agent: new Agent(options) };

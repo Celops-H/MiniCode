@@ -105,7 +105,7 @@ function appendOutput(task: BackgroundTask, chunk: Buffer) {
 }
 
 /** 跨平台按进程树强杀：Unix 杀新进程组（负 pid），Windows 用 taskkill /T */
-function killProcessTree(pid: number) {
+export function killProcessTree(pid: number) {
   if (process.platform === "win32") {
     // 同步执行：确保返回时进程已被杀掉，避免调用方（如测试清理）提前退出导致漏杀
     spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
