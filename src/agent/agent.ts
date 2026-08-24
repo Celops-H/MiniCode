@@ -346,14 +346,29 @@ export class Agent {
    */
   private async maybeCompact(): Promise<void> {
     if (!this.compactConfig || this.compactDisabled) return;
-    const tokens = estimateTokens(this.messages);
-    if (!needsCompact(tokens, this.compactConfig)) return;
+    if (!needsCompact(estimateTokens(this.messages), this.compactConfig)) return;
+    await this.doCompact();
+  }
 
+  /**
+   * 用户主动压缩（/compact，DESIGN 15）：无视撞线判断强制走分层压缩
+   * （裁剪旧工具输出 → 摘要替换），返回是否发生压缩（供宿主反馈）。
+   * 显式请求可绕过 compactDisabled 失败保护重试（撞线自动压缩仍受保护）。
+   * 压缩替换消息后，宿主需把新消息落盘并与持久化游标联动。
+   * @returns 是否成功压缩（未配置压缩或摘要失败时 false）
+   */
+  async compactNow(): Promise<boolean> {
+    if (!this.compactConfig) return false;
+    return this.doCompact();
+  }
+
+  /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败 */
+  private async doCompact(): Promise<boolean> {
     // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要
-    const pruned = pruneToolResults(this.messages, this.compactConfig.keepRecentToolResults);
+    const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
       this.messages = pruned;
-      if (!needsCompact(estimateTokens(this.messages), this.compactConfig)) return;
+      if (!needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
     }
     // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话，并注入恢复上下文
     try {
@@ -361,15 +376,17 @@ export class Agent {
       const summary = await generateSummary(this.modelClient, this.modelId, this.messages);
       if (summary.trim().length === 0) {
         this.compactDisabled = true;
-        return;
+        return false;
       }
       this.messages = replaceWithSummary(summary);
       if (recovery) {
         // 恢复上下文由系统注入而非用户输入，标记 source: "system"
         this.messages.push(userMessage(`【恢复上下文】\n${recovery}`, "system"));
       }
+      return true;
     } catch {
       this.compactDisabled = true;
+      return false;
     }
   }
 

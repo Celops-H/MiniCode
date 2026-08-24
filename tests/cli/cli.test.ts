@@ -7,11 +7,12 @@ import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/cli/interact.js";
 import { buildModelClient } from "../../src/cli/models.js";
-import { buildHookBus, createSessionAgent } from "../../src/cli/app.js";
-import { loadConfig } from "../../src/config/index.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent } from "../../src/cli/app.js";
+import { configSchema, loadConfig } from "../../src/config/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import type { Models } from "../../src/llm/index.js";
 
 /** 用给定 hooks 配置解析配置（写临时项目配置文件，绕开用户级配置） */
 async function loadConfigWith(hooks: Record<string, string[]>): Promise<Awaited<ReturnType<typeof loadConfig>>> {
@@ -161,6 +162,134 @@ describe("CLI Hook 配置 schema", () => {
     expect(config.hooks).toEqual({ PreToolUse: ["echo {}"] });
 
     await expect(loadConfigWith({ NotAnEvent: ["echo"] } as never)).rejects.toThrow();
+  });
+});
+
+describe("CLI /compact 命令", () => {
+  let dir: string;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("interact /compact：强制压缩并重写落盘，后续轮次游标不重复落盘", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 摘要调用（消息含摘要请求）返回摘要；正常调用返回文本
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const isSummaryRequest = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+          );
+          if (isSummaryRequest) {
+            yield { type: "text_delta", text: "压缩后的摘要" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          yield { type: "text_delta", text: "回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "第一问";
+      yield "/compact";
+      yield "压缩后继续";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+    });
+
+    expect(outputs.join("")).toContain("[已压缩]");
+    // 压缩重写落盘后：盘上是摘要 + 后续对话，旧消息被覆盖
+    const loaded = await store.loadSession(session.meta.id);
+    const contents = loaded.getMessages().map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+    expect(contents[0]).toContain("【会话摘要】");
+    expect(contents.some((c) => c === "第一问")).toBe(false); // 旧消息已重写掉
+    // 压缩后继续的一轮也落盘了
+    expect(contents.at(-2)).toBe("压缩后继续");
+    expect(contents.at(-1)).toContain("回复");
+  });
+
+  it("interact /compact：未配置压缩时反馈未压缩", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "/compact";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+    });
+    expect(outputs.join("")).toContain("[未压缩]");
+  });
+
+  it("interact 未知命令反馈帮助提示", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "/nope";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+    });
+    expect(outputs.join("")).toContain("[未知命令]");
+  });
+});
+
+describe("buildCompactConfig 装配", () => {
+  it("三级 fallback：config > 模型定义 > 默认 128000；未配置 compact 返回 undefined", () => {
+    const modelsWithWindow = { resolve: () => ({ model: { contextWindow: 64000 } }) } as unknown as Models;
+    // config 显式 contextWindow 优先
+    expect(
+      buildCompactConfig(configSchema.parse({ compact: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3 } }), "m", modelsWithWindow),
+    ).toEqual({ contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3 });
+    // 无 contextWindow：取模型定义值
+    expect(buildCompactConfig(configSchema.parse({ compact: {} }), "m", modelsWithWindow)?.contextWindow).toBe(64000);
+    // 模型也没有：默认 128000，其余字段用 schema 默认值
+    const defaults = buildCompactConfig(configSchema.parse({ compact: {} }), "m");
+    expect(defaults).toEqual({ contextWindow: 128000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 });
+    // 未配置 compact：不启用
+    expect(buildCompactConfig(configSchema.parse({}), "m")).toBeUndefined();
   });
 });
 

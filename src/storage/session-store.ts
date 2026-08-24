@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message } from "../core/index.js";
@@ -94,6 +94,24 @@ export class SessionStore {
       this.pending.delete(id);
       await writeFile(this.metaFile(id), JSON.stringify(session.meta, null, 2), "utf8");
     }
+  }
+
+  /**
+   * 重写会话整份消息（/compact 压缩替换后调用）：临时文件 + 原子改名替换 JSONL，
+   * 保证单一数据源与内存一致；同时更新会话内存与元数据时间。
+   * @param session 目标会话
+   * @param messages 新消息数组（压缩后的完整消息）
+   */
+  async rewriteMessages(session: Session, messages: Message[]): Promise<void> {
+    await this.ensureDir();
+    const file = this.messageFile(session.meta.id);
+    const tmp = `${file}.tmp`;
+    // 先写临时文件再原子改名：中断时旧文件仍完整，不会损坏会话
+    await writeFile(tmp, messages.map((m) => JSON.stringify(m)).join("\n") + "\n", "utf8");
+    await rename(tmp, file);
+    session.replaceAll(messages);
+    session.meta.updatedAt = new Date().toISOString();
+    await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
   }
 
   /**

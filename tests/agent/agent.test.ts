@@ -682,6 +682,121 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages().some((m) => m.role === "tool_result" && m.content === PRUNED_MARKER)).toBe(true);
   });
 
+  it("compactNow：用户主动压缩，无视撞线判断强制走分层压缩", async () => {
+    // 摘要调用（tools 为空）返回摘要文本；正常调用返回普通文本
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "主动压缩摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("第一问"), assistantMessage([{ type: "text", text: "回答一" }])],
+      tools: [{
+        name: "echo",
+        description: "回显",
+        inputSchema: z.object({}),
+        isReadOnly: false,
+        requiresUserInteraction: false,
+        maxResultSizeChars: 1000,
+        execute: () => "回显",
+      }],
+      // 窗口很大：未撞线，普通 run 不会压缩
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(agent.getMessages().some((m) => typeof m.content === "string" && m.content.includes("【会话摘要】"))).toBe(false);
+
+    // 主动压缩：强制摘要替换
+    expect(await agent.compactNow()).toBe(true);
+    const messages = agent.getMessages();
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+    // 压缩后仍可继续对话
+    agent.start("压缩后继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(agent.getMessages().at(-1)).toMatchObject({ role: "assistant" });
+  });
+
+  it("compactNow：未配置压缩时返回 false，不动消息", async () => {
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "hi" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("第一问")],
+    });
+    expect(await agent.compactNow()).toBe(false);
+    expect(agent.getMessages()).toHaveLength(1);
+  });
+
+  it("compactNow：摘要一次失败后显式请求仍可重试（绕过失败保护，撞线仍受保护）", async () => {
+    // 摘要调用（消息含摘要请求）第一次抛错，之后成功；撞线自动压缩在此场景不触发
+    let summaryCalls = 0;
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        const isSummaryRequest = context.messages.some(
+          (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+        );
+        if (isSummaryRequest) {
+          summaryCalls++;
+          if (summaryCalls === 1) throw new Error("摘要模型瞬断");
+          yield { type: "text_delta", text: "终于成功" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("第一问"), assistantMessage([{ type: "text", text: "回答一" }])],
+      tools: [{
+        name: "echo",
+        description: "回显",
+        inputSchema: z.object({}),
+        isReadOnly: false,
+        requiresUserInteraction: false,
+        maxResultSizeChars: 1000,
+        execute: () => "回显",
+      }],
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+
+    // 第一次主动压缩失败（摘要抛错，置位 compactDisabled）
+    expect(await agent.compactNow()).toBe(false);
+    // 第二次主动压缩绕过保护重试成功
+    expect(await agent.compactNow()).toBe(true);
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+  });
+
   it("未撞线时不压缩", async () => {
     const agent = new Agent({
       modelClient: mockTextClient("正常回复"),

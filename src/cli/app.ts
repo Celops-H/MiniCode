@@ -3,7 +3,7 @@ import { Command } from "commander";
 import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
-import { Agent, Team } from "../agent/index.js";
+import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
@@ -13,6 +13,7 @@ import type { Tool } from "../tools/index.js";
 import type { Message } from "../core/index.js";
 import type { ModelClient } from "../agent/index.js";
 import type { Config } from "../config/index.js";
+import type { Models } from "../llm/index.js";
 import { interact } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
 
@@ -97,6 +98,7 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     initialMessages: session.getMessages(),
     agents,
     hooks,
+    compactConfig: buildCompactConfig(config, session.meta.model, models),
   });
 
   logger.info(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）`);
@@ -132,6 +134,26 @@ export function buildHookBus(hooks?: Config["hooks"]): HookBus | undefined {
 }
 
 /**
+ * 按 config.compact 装配压缩配置：contextWindow 缺省取模型定义值（再缺省 128000）。
+ * 未配置 compact 时返回 undefined（压缩不启用）。
+ */
+export function buildCompactConfig(
+  config: Config | undefined,
+  modelId: string,
+  models?: Models,
+): CompactConfig | undefined {
+  const compact = config?.compact;
+  if (!compact) return undefined;
+  const model = models?.resolve(modelId)?.model;
+  return {
+    contextWindow: compact.contextWindow ?? model?.contextWindow ?? 128_000,
+    maxOutputTokens: compact.maxOutputTokens,
+    safetyMargin: compact.safetyMargin,
+    keepRecentToolResults: compact.keepRecentToolResults,
+  };
+}
+
+/**
  * 按 agents 开关组装会话 agent（DESIGN 11.4）：
  * 开启时创建 Team 并注册 root、传入 agent（协作工具随 team 注册，模型可自主 spawn）；
  * 关闭时保持单 agent 会话（协作工具对模型不可见）。
@@ -145,6 +167,7 @@ export function createSessionAgent(options: {
   initialMessages?: Message[];
   agents?: boolean;
   hooks?: HookBus;
+  compactConfig?: CompactConfig;
 }): { agent: Agent; team?: Team } {
   if (!options.agents) {
     return { agent: new Agent(options) };

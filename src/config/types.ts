@@ -30,6 +30,19 @@ export const configSchema = z.object({
   modelChain: z.array(z.string()).optional(),
   /** Hook 配置：事件名 → 命令列表（shell 执行，stdin 收事件 JSON，stdout 回裁决）；未配置则 Hook 系统不启用 */
   hooks: z.partialRecord(z.enum(HOOK_EVENT_TYPES), z.array(z.string())).optional(),
+  /** 上下文压缩配置：撞线自动压缩 + /compact 手动压缩；未配置则压缩不启用 */
+  compact: z
+    .object({
+      /** 模型上下文窗口 token；缺省用模型定义值，模型也没有则默认 128000 */
+      contextWindow: z.number().optional(),
+      /** 保留给模型回复输出的 token，默认 8192 */
+      maxOutputTokens: z.number().default(8192),
+      /** 安全余量 token：预留避免撞线，默认 4096 */
+      safetyMargin: z.number().default(4096),
+      /** 历史裁剪保留最近的工具结果条数，默认 5 */
+      keepRecentToolResults: z.number().default(5),
+    })
+    .optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;

@@ -79,6 +79,24 @@ describe("会话持久化与续跑", () => {
     expect(list.map((m) => m.id)).toEqual([a.meta.id, b.meta.id]);
   });
 
+  it("rewriteMessages：重写整份 JSONL，重载后与替换内容一致（/compact 用）", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("旧对话一"));
+    await store.appendMessage(session, userMessage("旧对话二"));
+    await store.flush();
+
+    // 压缩替换：只留摘要消息
+    const summary = userMessage("【会话摘要】压缩后的历史", "system");
+    await store.rewriteMessages(session, [summary]);
+
+    // 内存同步替换
+    expect(session.getMessages()).toEqual([summary]);
+    // 磁盘重写（临时文件原子替换，旧消息被覆盖）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toEqual([summary]);
+  });
+
   it("meta 延迟写：append 只改内存，flush 落盘", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });

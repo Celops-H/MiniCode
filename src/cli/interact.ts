@@ -17,7 +17,8 @@ export interface InteractOptions {
 /**
  * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
  * 展示工具结果 → 消息持久化。
- * UserPromptSubmit 由宿主（本函数）在每次输入后发射（DESIGN 13.3）。
+ * 会话内命令（统一 / 前缀，DESIGN 15）：/exit 退出、/compact 强制压缩并重写落盘、
+ * /help 列出命令；UserPromptSubmit 由宿主（本函数）在每次输入后发射（DESIGN 13.3）。
  * @param options 交互选项（agent / store / session / inputs / write / hooks）
  */
 export async function interact(options: InteractOptions): Promise<void> {
@@ -27,7 +28,27 @@ export async function interact(options: InteractOptions): Promise<void> {
   for await (const line of inputs) {
     const input = line.trim();
     if (!input) continue;
-    if (input === "/exit") break; // 退出交互
+    if (input.startsWith("/")) {
+      // 会话内命令（统一 / 前缀，DESIGN 15）
+      if (input === "/exit") break;
+      if (input === "/compact") {
+        // 强制压缩：替换消息后重写整份落盘并重置游标（压缩是重写不是追加，游标需联动）
+        if (await agent.compactNow()) {
+          await store.rewriteMessages(session, agent.getMessages());
+          processed = agent.getMessages().length;
+          write("\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
+        } else {
+          write("\n[未压缩] 未配置压缩或摘要不可用。\n");
+        }
+        continue;
+      }
+      if (input === "/help") {
+        write("\n可用命令：/exit 退出；/compact 压缩会话历史；/help 帮助\n");
+        continue;
+      }
+      write(`\n[未知命令] ${input}（/help 查看可用命令）\n`);
+      continue;
+    }
     await hooks?.emit({ type: "UserPromptSubmit", input });
     agent.start(input);
     // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记

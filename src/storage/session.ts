@@ -36,4 +36,13 @@ export class Session {
   append(message: Message): void {
     this.messages.push(message);
   }
+
+  /**
+   * 整体替换内存消息（压缩重写后调用，与磁盘重写配套）。
+   * @param messages 新消息数组
+   */
+  replaceAll(messages: Message[]): void {
+    this.messages.length = 0;
+    this.messages.push(...messages);
+  }
 }
