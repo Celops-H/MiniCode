@@ -5,6 +5,7 @@
  */
 import { AgentPath } from "./agent-path.js";
 import type { Agent } from "./agent.js";
+import type { StreamEvent } from "../core/index.js";
 import type { MailMessage } from "./mailbox.js";
 import { abortWorktree, completeWorktree, createWorktree, resolveGitRoot, type WorktreeInfo } from "./worktree.js";
 
@@ -28,6 +29,8 @@ export interface TeamOptions {
   maxConcurrent?: number;
   /** 启用 Git Worktree 隔离：子 agent 各自独立工作区（DESIGN 4.2）；非 git 仓库时自动忽略 */
   worktrees?: boolean;
+  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论用，review 修复） */
+  onRootEvent?: (event: StreamEvent) => void;
 }
 
 export class Team {
@@ -36,6 +39,7 @@ export class Team {
   private readonly maxDepth: number;
   private readonly maxConcurrent: number;
   private readonly worktrees: boolean;
+  private readonly onRootEvent: ((event: StreamEvent) => void) | undefined;
   private spawnCount = 0;
   private activeExecutions = 0;
   /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒，DESIGN 11.2） */
@@ -46,6 +50,7 @@ export class Team {
     this.maxDepth = options.maxDepth ?? 1;
     this.maxConcurrent = options.maxConcurrent ?? 4;
     this.worktrees = options.worktrees ?? false;
+    this.onRootEvent = options.onRootEvent;
   }
 
   /**
@@ -194,8 +199,17 @@ export class Team {
   /** 消费单个 agent 的续跑循环；结束后释放槽位、重试待驱动队列并回灌结论（watcher） */
   private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
     try {
-      for await (const _ of agent.resume()) {
-        // 消费事件流（驱动推进）
+      // root 被后台驱动（如子 agent 完成唤醒续跑）时事件无人渲染——
+      // 转发给 onRootEvent（宿主 CLI 渲染 root 迟到结论），否则汇总结论被消费丢弃（review 修复）
+      const isRoot = agent.agentPath?.isRoot() ?? false;
+      for await (const event of agent.resume()) {
+        if (isRoot) {
+          try {
+            this.onRootEvent?.(event);
+          } catch {
+            // 渲染回调抛错不中止驱动推进（review 修复：原实现回调抛错中止事件流、结论截断）
+          }
+        }
       }
     } catch {
       // 模型流等错误不外泄为未处理 rejection（Node 默认会崩进程）；

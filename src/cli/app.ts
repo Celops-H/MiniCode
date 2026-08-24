@@ -11,10 +11,11 @@ import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import type { Tool } from "../tools/index.js";
 import type { Message } from "../core/index.js";
+import type { StreamEvent } from "../core/index.js";
 import type { ModelClient } from "../agent/index.js";
 import type { Config } from "../config/index.js";
 import type { Models } from "../llm/index.js";
-import { interact } from "./interact.js";
+import { interact, renderStreamEvent } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
 
 const SYSTEM_PROMPT = "你是 MiniCode，一个 AI 编程助手，通过工具帮助用户完成任务。";
@@ -90,6 +91,9 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
   }
 
   const hooks = buildHookBus(config.hooks);
+  const write = (text: string): void => {
+    process.stdout.write(text);
+  };
   const { agent } = createSessionAgent({
     modelClient: models,
     modelId: session.meta.model,
@@ -99,6 +103,9 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     agents,
     hooks,
     compactConfig: buildCompactConfig(config, session.meta.model, models),
+    // root 被后台驱动（子 agent 完成唤醒续跑）时事件转给 CLI 渲染：
+    // 迟到子 agent 完成的汇总结论不打丢（review 修复），renderStreamEvent 与 interact 同渲染逻辑
+    onRootEvent: (event) => renderStreamEvent(write, event),
     // checkpoint（DESIGN 14）：工具执行前把已产生的消息落盘——
     // 以 session 内存消息数为游标（appendMessage 同步 append 到内存），只入队未落盘部分
     checkpoint: async (messages) => {
@@ -119,7 +126,7 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     store,
     session,
     inputs: rl,
-    write: (text) => process.stdout.write(text),
+    write,
     hooks,
   });
   rl.close();
@@ -178,11 +185,13 @@ export function createSessionAgent(options: {
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;
+  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
+  onRootEvent?: (event: StreamEvent) => void;
 }): { agent: Agent; team?: Team } {
   if (!options.agents) {
     return { agent: new Agent(options) };
   }
-  const team = new Team();
+  const team = new Team({ onRootEvent: options.onRootEvent });
   const agent = new Agent({
     ...options,
     systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}`,

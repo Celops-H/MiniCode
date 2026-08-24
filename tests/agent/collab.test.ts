@@ -701,6 +701,45 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(final).toBeDefined();
   });
 
+  it("root 被后台驱动（子 agent 完成唤醒续跑）时事件经 onRootEvent 转发，迟到结论不被丢弃（review 修复）", async () => {
+    const forwarded: string[] = [];
+    const team = new Team({ onRootEvent: (event) => {
+      if (event.type === "text_delta") forwarded.push(event.text);
+    } });
+    const root = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "汇总结论" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+    });
+    team.registerRoot(root);
+
+    // 子 agent 干完回灌结论 → 唤醒 root 后台续跑
+    const worker = new Agent({
+      modelClient: toolThenTextClient("x", {}),
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+    });
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    team.commitSpawn(path, worker);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(200);
+
+    // root 的汇总结论经 onRootEvent 转发给宿主渲染（不再被后台消费丢弃）
+    expect(forwarded).toContain("汇总结论");
+  });
+
   it("wait_agent：不能等待自己", async () => {
     const team = new Team();
     const root = new Agent({

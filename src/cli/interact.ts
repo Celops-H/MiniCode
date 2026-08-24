@@ -1,6 +1,31 @@
 import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import type { HookBus } from "../hooks/index.js";
+import type { StreamEvent } from "../core/index.js";
+
+/**
+ * 渲染单个流式事件为文本（CLI 与 root 后台事件共用，DESIGN 15）：
+ * 文本/思考直接输出，工具调用与错误加标记。
+ */
+export function renderStreamEvent(write: (text: string) => void, event: StreamEvent): void {
+  switch (event.type) {
+    case "text_delta":
+      write(event.text);
+      break;
+    case "thinking_delta":
+      write(event.thinking);
+      break;
+    case "toolcall_start":
+      write(`\n[工具] ${event.name ?? "调用"} …`);
+      break;
+    case "toolcall_end":
+      write("\n");
+      break;
+    case "error":
+      write(`\n[错误] ${event.message}`);
+      break;
+  }
+}
 
 export interface InteractOptions {
   agent: Agent;
@@ -55,23 +80,7 @@ export async function interact(options: InteractOptions): Promise<void> {
     agent.start(input);
     // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记
     for await (const event of agent.run()) {
-      switch (event.type) {
-        case "text_delta":
-          write(event.text);
-          break;
-        case "thinking_delta":
-          write(event.thinking);
-          break;
-        case "toolcall_start":
-          write(`\n[工具] ${event.name ?? "调用"} …`);
-          break;
-        case "toolcall_end":
-          write("\n");
-          break;
-        case "error":
-          write(`\n[错误] ${event.message}`);
-          break;
-      }
+      renderStreamEvent(write, event);
     }
     write("\n");
     // 历史被改写（压缩/裁剪/剥组）：agent 内存为真相，重写整份盘防落盘错位；
