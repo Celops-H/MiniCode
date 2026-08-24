@@ -45,4 +45,45 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(resolveMainModel(config)).toBe("a-1");
     expect(resolveMainModel()).toBe("deepseek-chat");
   });
+
+  it("providers-only（无 modelChain）时主模型为首个模型，可解析（修复未知模型崩溃）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+      ],
+    };
+    const models = buildModelClient(config);
+    expect(resolveMainModel(config)).toBe("a-1");
+    expect(models.resolve(resolveMainModel(config))).toBeDefined();
+  });
+
+  it("-m 指定配置之外的模型时显式报错，不静默忽略", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+      ],
+      modelChain: ["a-1"],
+    };
+    expect(() => buildModelClient(config, "outside-model")).toThrow("未在配置的 providers 中");
+  });
+
+  it("-m 指定配置内的模型时可用，并作为主模型", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "a",
+          baseUrl: "https://a.example.com",
+          apiKeyEnv: "A_API_KEY",
+          models: [{ id: "a-1" }, { id: "a-2" }],
+        },
+      ],
+      modelChain: ["a-1"],
+    };
+    const models = buildModelClient(config, "a-2");
+    expect(resolveMainModel(config, "a-2")).toBe("a-2");
+    expect(models.resolve("a-2")).toBeDefined();
+  });
 });
