@@ -140,6 +140,111 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(turn3).toHaveLength(0);
   });
 
+  it("续跑修复：末尾孤立的工具调用补「执行中断」失败结果（checkpoint 崩溃恢复）", async () => {
+    // 模拟崩溃后的盘上状态：user + assistant(工具调用)，无 tool_result
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: { path: "a.ts" } }]),
+    ];
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const lastToolResult = [...context.messages].reverse().find((m) => m.role === "tool_result");
+          if (!lastToolResult) {
+            yield { type: "text_delta", text: "开始" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          // 模型看到「执行中断」失败结果后总结
+          yield { type: "text_delta", text: `已看到中断：${String(lastToolResult.content)}` };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: orphanHistory,
+    });
+    // 构造时已修复配对：孤儿调用补了失败结果
+    const repaired = agent.getMessages();
+    expect(repaired).toHaveLength(3);
+    expect(repaired[2]).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: expect.stringContaining("工具执行中断"),
+    });
+    // 续跑正常：模型看到失败结果，不会 400
+    agent.start("继续");
+    const events: StreamEvent[] = [];
+    for await (const e of agent.run()) events.push(e);
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "end_turn" });
+  });
+
+  it("正常历史末尾配对完整时不做修复", async () => {
+    const complete: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+      toolResultMessage("c1", "read", "内容", false),
+      assistantMessage([{ type: "text", text: "总结" }]),
+    ];
+    const agent = new Agent({
+      modelClient: mockTextClient("继续"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: complete,
+    });
+    expect(agent.getMessages()).toHaveLength(4);
+  });
+
+  it("checkpoint：工具执行前回调已产生的消息（用户输入 + 含调用的回复）", async () => {
+    let checkpointSeen: Message[] = [];
+    let toolRan = false;
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [{
+        name: "read",
+        description: "读取文件",
+        inputSchema: z.object({ path: z.string() }),
+        isReadOnly: true,
+        requiresUserInteraction: false,
+        maxResultSizeChars: 100,
+        execute: () => {
+          toolRan = true;
+          return "内容";
+        },
+      }],
+      checkpoint: (messages) => {
+        checkpointSeen = [...messages];
+      },
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    // checkpoint 在工具执行前拿到 user + assistant（含工具调用），不含 tool_result
+    expect(toolRan).toBe(true);
+    expect(checkpointSeen.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(checkpointSeen[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "tool_call", id: "c1", name: "read" }],
+    });
+  });
+
   it("未知工具调用回灌为错误消息，模型据此继续", async () => {
     const agent = new Agent({
       modelClient: {

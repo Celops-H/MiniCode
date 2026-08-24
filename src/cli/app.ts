@@ -99,6 +99,15 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
     agents,
     hooks,
     compactConfig: buildCompactConfig(config, session.meta.model, models),
+    // checkpoint（DESIGN 14）：工具执行前把已产生的消息落盘——
+    // 以 session 内存消息数为游标（appendMessage 同步 append 到内存），只入队未落盘部分
+    checkpoint: async (messages) => {
+      const newOnes = messages.slice(session.getMessages().length);
+      for (const message of newOnes) {
+        await store.appendMessage(session, message);
+      }
+      await store.flush();
+    },
   });
 
   logger.info(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）`);
@@ -168,6 +177,7 @@ export function createSessionAgent(options: {
   agents?: boolean;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
+  checkpoint?: (messages: Message[]) => Promise<void> | void;
 }): { agent: Agent; team?: Team } {
   if (!options.agents) {
     return { agent: new Agent(options) };

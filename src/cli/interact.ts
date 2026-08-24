@@ -23,8 +23,8 @@ export interface InteractOptions {
  */
 export async function interact(options: InteractOptions): Promise<void> {
   const { agent, store, session, inputs, write, hooks } = options;
-  // 已持久化的消息游标（含续跑时注入的历史），每轮只落盘增量
-  let processed = agent.getMessages().length;
+  // 已落盘游标 = session 内存消息数（appendMessage 会同步 append 到 session 内存；
+  // checkpoint 回调在工具执行前已把 user+assistant 入队，轮末只补 tool_result）
   for await (const line of inputs) {
     const input = line.trim();
     if (!input) continue;
@@ -32,10 +32,9 @@ export async function interact(options: InteractOptions): Promise<void> {
       // 会话内命令（统一 / 前缀，DESIGN 15）
       if (input === "/exit") break;
       if (input === "/compact") {
-        // 强制压缩：替换消息后重写整份落盘并重置游标（压缩是重写不是追加，游标需联动）
+        // 强制压缩：替换消息后重写整份落盘（压缩是重写不是追加，session 内存随之整体替换）
         if (await agent.compactNow()) {
           await store.rewriteMessages(session, agent.getMessages());
-          processed = agent.getMessages().length;
           write("\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
         } else {
           write("\n[未压缩] 未配置压缩或摘要不可用。\n");
@@ -72,8 +71,9 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
     }
     write("\n");
-    // 工具结果是回灌消息（非事件），本轮结束后展示并入队
-    const newMessages = agent.getMessages().slice(processed);
+    // 本轮新增消息 = agent 消息去掉已落盘部分（checkpoint 已提前落盘过部分消息，
+    // 这里补齐剩余；无工具轮时是 user+assistant，工具轮时是 tool_result 与后续文本）
+    const newMessages = agent.getMessages().slice(session.getMessages().length);
     for (const message of newMessages) {
       if (message.role === "tool_result") {
         write(`\n[工具结果] ${message.content}\n`);
@@ -82,6 +82,5 @@ export async function interact(options: InteractOptions): Promise<void> {
     }
     // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
     await store.flush();
-    processed = agent.getMessages().length;
   }
 }

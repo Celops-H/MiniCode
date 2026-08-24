@@ -249,6 +249,148 @@ describe("CLI /compact 命令", () => {
     expect(outputs.join("")).toContain("[未压缩]");
   });
 
+  it("工具调用前 checkpoint：模型消息落盘后才执行工具（DESIGN 14）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 工具执行时观察盘上是否已有本轮 assistant 消息（flush checkpoint 后应为真）
+    let diskHasAssistantDuringTool = false;
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: async () => {
+        const { readFile } = await import("node:fs/promises");
+        try {
+          const raw = await readFile(path.join(dir, `${session.meta.id}.jsonl`), "utf8");
+          diskHasAssistantDuringTool = raw.includes('"role":"assistant"');
+        } catch {
+          diskHasAssistantDuringTool = false;
+        }
+        return "内容";
+      },
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      // 模拟 app 的 checkpoint 装配（DESIGN 14）：工具执行前把已产生消息落盘
+      checkpoint: async (messages) => {
+        const newOnes = messages.slice(session.getMessages().length);
+        for (const message of newOnes) {
+          await store.appendMessage(session, message);
+        }
+        await store.flush();
+      },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "读文件";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+    });
+    // 工具执行时本轮 assistant 消息（含工具调用）已在盘上
+    expect(diskHasAssistantDuringTool).toBe(true);
+  });
+
+  it("checkpoint 多轮工具调用：盘上消息序列与内存逐条一致（去重不重复落盘）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({ text: z.string() }),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 100,
+      execute: (input) => `echo:${(input as { text: string }).text}`,
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const toolResults = context.messages.filter((m) => m.role === "tool_result");
+          if (toolResults.length === 0) {
+            // 第一轮：两个并行工具调用
+            yield { type: "toolcall_start", index: 0, id: "a1", name: "echo" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"text":"A"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "toolcall_start", index: 1, id: "a2", name: "echo" };
+            yield { type: "toolcall_delta", index: 1, partialJson: '{"text":"B"}' };
+            yield { type: "toolcall_end", index: 1 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else if (toolResults.length === 2) {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          } else {
+            yield { type: "text_delta", text: "多余轮次" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [echoTool],
+      checkpoint: async (messages) => {
+        const newOnes = messages.slice(session.getMessages().length);
+        for (const message of newOnes) {
+          await store.appendMessage(session, message);
+        }
+        await store.flush();
+      },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "并行干活";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+    });
+    // 盘上 = 内存（不重复、顺序一致）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(session.getMessages().map((m) => m.role));
+    expect(loaded.getMessages().map((m) => m.role)).toEqual([
+      "user",
+      "assistant", // 含两个并行 tool_call
+      "tool_result",
+      "tool_result",
+      "assistant",
+    ]);
+    // 两个工具结果都执行成功
+    expect(loaded.getMessages().map((m) => (m.role === "tool_result" ? m.content : null)).filter(Boolean)).toEqual([
+      "echo:A",
+      "echo:B",
+    ]);
+  });
+
   it("interact 未知命令反馈帮助提示", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);

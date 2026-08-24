@@ -78,6 +78,12 @@ export interface AgentOptions {
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
+  /**
+   * checkpoint 回调（DESIGN 14）：每批工具执行前调用，传入当前全部消息——
+   * 宿主在此把已产生的消息（用户输入 + 模型回复含工具调用）落盘，
+   * 工具副作用不可逆，执行前崩溃时历史在盘上可恢复续跑
+   */
+  checkpoint?: (messages: Message[]) => Promise<void> | void;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
   team?: Team;
 }
@@ -100,6 +106,8 @@ export class Agent {
   agentPath?: AgentPath;
   /** 工具输出超限的落盘目录（DESIGN 9.1 ①） */
   private readonly outputDir: string;
+  /** checkpoint 回调（DESIGN 14）：工具执行前宿主落盘用 */
+  private readonly checkpoint?: (messages: Message[]) => Promise<void> | void;
   /** agent 邮箱（DESIGN 11.3）：其他 agent 投递的消息队列，注入上下文供模型读取 */
   private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
@@ -124,6 +132,7 @@ export class Agent {
     this.hooks = options.hooks;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
     this.team = options.team;
+    this.checkpoint = options.checkpoint;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
@@ -140,7 +149,10 @@ export class Agent {
       }
     }
     if (options.initialMessages) {
-      this.messages.push(...options.initialMessages);
+      // checkpoint 崩溃恢复（DESIGN 14）：末尾可能残留「工具调用无结果」的孤儿状态——
+      // 工具执行前已落盘但结果未及写盘。补失败结果保持配对完整（续跑不 400），
+      // 模型看到「执行中断」自行决定重试或调整（比剥掉调用保留上下文）
+      this.messages.push(...repairOrphanToolCalls(options.initialMessages));
     }
   }
 
@@ -320,6 +332,10 @@ export class Agent {
       await this.hooks?.emit({ type: "Stop" });
       return;
     }
+
+    // checkpoint（DESIGN 14）：工具副作用不可逆，执行前让宿主把本轮已产生的
+    // 消息（用户输入 + 含工具调用的回复）落盘，崩溃时历史可恢复续跑
+    await this.checkpoint?.(this.messages);
 
     // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
     const batches = partitionByConcurrency(
@@ -510,6 +526,32 @@ export class Agent {
     if (results?.includes("allow")) return "allow";
     return undefined;
   }
+}
+
+/**
+ * 修复末尾孤立的工具调用（DESIGN 14 checkpoint 崩溃恢复）：消息末尾是含工具调用的
+ * assistant 时其 tool_result 必然未落盘（tool_result 紧跟调用，正常历史末尾不会是
+ * 孤儿调用）。为其补「执行中断」失败结果保持配对完整（续跑不 400），
+ * 模型看到「执行中断」自行决定重试或调整（比剥掉调用保留上下文）。
+ * @param messages 加载的会话消息
+ * @returns 修复后的消息数组
+ */
+function repairOrphanToolCalls(messages: Message[]): Message[] {
+  const last = messages.at(-1);
+  if (last?.role !== "assistant") return messages;
+  const calls = toolCallsOf(last);
+  if (calls.length === 0) return messages;
+  return [
+    ...messages,
+    ...calls.map((call) =>
+      toolResultMessage(
+        call.id,
+        call.name,
+        "工具执行中断：进程可能在执行中退出，结果未落盘，请重新确认状态后再执行",
+        true,
+      ),
+    ),
+  ];
 }
 
 /**
