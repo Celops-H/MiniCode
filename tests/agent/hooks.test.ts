@@ -330,4 +330,106 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
       }),
     );
   });
+
+  it("无权限管线时 PreToolUse 也无条件发射：deny 直接拒绝执行（review 修复：原实现依赖管线，CLI 未装配则永不触发）", async () => {
+    let executed = false;
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(executed).toBe(false);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("权限拒绝");
+  });
+
+  it("无权限管线时 PreToolUse 无条件发射：allow 放行，工具正常执行", async () => {
+    const hooks = new HookBus();
+    const handler = vi.fn();
+    hooks.on("PreToolUse", handler);
+    hooks.on("PreToolUse", (): HookVerdict => "allow");
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: "PreToolUse", toolName: "read" }));
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("文件内容");
+  });
+
+  it("无权限管线时 ask 保守拒绝（无审批者）；免审批工具 ask 视为放行（与管线 checkSkipsPermission 一致）", async () => {
+    // 普通工具：ask 无审批者 → 拒绝
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "ask");
+    let executed = false;
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(executed).toBe(false);
+    const denied = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(denied?.content).toContain("权限拒绝");
+
+    // 免审批工具（skipsPermission，如 agent 消息投递）：ask 放行
+    const hooks2 = new HookBus();
+    hooks2.on("PreToolUse", (): HookVerdict => "ask");
+    let executed2 = false;
+    const agent2 = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks: hooks2,
+      tools: [
+        {
+          ...makeReadTool(() => {
+            executed2 = true;
+            return "文件内容";
+          }),
+          skipsPermission: true,
+        },
+      ],
+    });
+    agent2.start("读文件");
+    for await (const _ of agent2.run()) {
+      // 消费
+    }
+    expect(executed2).toBe(true);
+    const allowed = agent2.getMessages().find((m) => m.role === "tool_result");
+    expect(allowed?.content).toBe("文件内容");
+  });
 });

@@ -569,18 +569,19 @@ export class Agent {
       return { message: toolResultMessage(call.id, call.name, formatInputError(call.name, parsed.error), true) };
     }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
-    // 免审批工具（skipsPermission，如 agent 消息投递）走轻量检查：
-    // 跳过规则/缓存/用户审批，保留 plan 只读约束与 PreToolUse hook 拦截（DESIGN 7.1）
+    // PreToolUse 在每次工具调用前无条件发射（DESIGN 13.1 工具执行前触发）——
+    // 有权限管线时裁决并入 ask 决策链（规则层 deny 优先，Hook 只在 ask 时介入）；
+    // 无权限管线时裁决直接生效（deny 拒绝；ask 无审批者，fail 保守拒绝）。
+    const request: PermissionRequest = {
+      toolName: call.name,
+      content: typeof call.input.command === "string" ? call.input.command : undefined,
+      input: call.input,
+    };
+    const hookVerdict = await this.preToolUseVerdict(request);
     if (this.permission) {
-      const rawCommand = call.input.command;
-      const request: PermissionRequest = {
-        toolName: call.name,
-        content: typeof rawCommand === "string" ? rawCommand : undefined,
-        input: call.input,
-      };
-      const hook = this.hooks
-        ? (r: PermissionRequest) => this.preToolUseVerdict(r)
-        : undefined;
+      // 免审批工具（skipsPermission，如 agent 消息投递）走轻量检查：
+      // 跳过规则/缓存/用户审批，保留 plan 只读约束与 PreToolUse hook 拦截（DESIGN 7.1）
+      const hook = hookVerdict !== undefined ? async (): Promise<PermissionBehavior | undefined> => hookVerdict : undefined;
       const result = tool.skipsPermission
         ? await this.permission.checkSkipsPermission(request, hook)
         : await this.permission.check(request, hook);
@@ -589,6 +590,16 @@ export class Agent {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${result.reason ?? "未授权"}`, true),
         };
       }
+    } else if (hookVerdict === "deny") {
+      return {
+        message: toolResultMessage(call.id, call.name, "权限拒绝：Hook 拒绝", true),
+      };
+    } else if (hookVerdict === "ask" && !tool.skipsPermission) {
+      // 免审批工具（skipsPermission）的 ask 不升级用户审批、视为放行（与管线 checkSkipsPermission 一致）；
+      // 普通工具无审批者时 fail 保守拒绝
+      return {
+        message: toolResultMessage(call.id, call.name, "权限拒绝：需要审批但未配置审批处理", true),
+      };
     }
     try {
       const result = await withCwd(this.cwd, () =>
@@ -628,8 +639,9 @@ export class Agent {
   }
 
   /**
-   * PreToolUse Hook 裁决：触发事件总线，多个 hook 结果聚合为 deny 优先于 ask 优先于 allow
-   * （DESIGN 8.1 第一个反对即停）；无 hook 返回 undefined，继续走用户审批。
+   * PreToolUse Hook 裁决：发射事件总线（每次工具调用前，无条件），
+   * 多个 hook 结果聚合为 deny 优先于 ask 优先于 allow（DESIGN 8.1 第一个反对即停）；
+   * 无 hook 返回 undefined（有权限管线时继续走用户审批）。
    * @param request 权限请求（含工具名与完整参数）
    * @returns 裁决；无任何 hook 响应时返回 undefined
    */
