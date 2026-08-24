@@ -3,6 +3,12 @@ import type { Message, UserMessage } from "../core/index.js";
 /** 文件操作工具：从 input.path 提取最近操作的文件 */
 const FILE_TOOLS = new Set(["read", "write", "edit"]);
 
+/** 恢复上下文消息的标记前缀（压缩后由系统注入，source: "system"；增量合并时据此排除在增量之外） */
+export const RECOVERY_MARKER = "【恢复上下文】";
+
+/** 恢复上下文里单条用户请求的最大长度（DESIGN 9.4 紧凑补回：防大输入被完整拷回导致连续压缩自我放大） */
+const MAX_REQUEST_CHARS = 200;
+
 /** 恢复上下文提取的截断选项 */
 export interface RecoveryContextOptions {
   /** 最多记录最近操作文件数，默认 5 */
@@ -49,11 +55,14 @@ export function extractRecoveryContext(
     }
   }
 
-  // 活跃任务：最近的用户请求（排除摘要/恢复上下文等系统注入消息，避免连续压缩自我放大）
+  // 活跃任务：最近的用户请求（排除摘要/恢复上下文等系统注入消息，避免连续压缩自我放大）；
+  // 单条截断到 MAX_REQUEST_CHARS，防大输入被完整带回
   const recentRequests: string[] = [];
   for (let i = messages.length - 1; i >= 0 && recentRequests.length < maxRequests; i--) {
     const message = messages[i]!; // 循环边界保证 i 不越界
-    if (message.role === "user" && message.source !== "system") recentRequests.push(message.content);
+    if (message.role === "user" && message.source !== "system") {
+      recentRequests.push(truncateRequest(message.content));
+    }
   }
 
   // 会话起始上下文：首条真实用户消息（排除系统注入的摘要）
@@ -61,9 +70,18 @@ export function extractRecoveryContext(
     (message): message is UserMessage =>
       message.role === "user" && message.source !== "system",
   );
-  const sessionStart = firstUser?.content;
+  const sessionStart = firstUser ? truncateRequest(firstUser.content) : undefined;
 
   return { files, recentRequests, sessionStart };
+}
+
+/** 截断单条用户请求（超出部分省略号标记）；末尾为高代理项时回退一位，避免拆散 emoji 等代理对 */
+function truncateRequest(content: string): string {
+  if (content.length <= MAX_REQUEST_CHARS) return content;
+  let cut = MAX_REQUEST_CHARS;
+  const code = content.charCodeAt(cut - 1);
+  if (code >= 0xd800 && code <= 0xdbff) cut--;
+  return `${content.slice(0, cut)}…`;
 }
 
 /**

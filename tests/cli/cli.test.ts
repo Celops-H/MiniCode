@@ -213,6 +213,8 @@ describe("CLI /compact 命令", () => {
     });
 
     expect(outputs.join("")).toContain("[已压缩]");
+    // 标记已消费：/compact 后的正常轮次不再误报「历史已压缩」（防标记泄漏冗余重写）
+    expect(outputs.join("")).not.toContain("[历史已压缩]");
     // 压缩重写落盘后：盘上是摘要 + 后续对话，旧消息被覆盖
     const loaded = await store.loadSession(session.meta.id);
     const contents = loaded.getMessages().map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
@@ -389,6 +391,63 @@ describe("CLI /compact 命令", () => {
       "echo:A",
       "echo:B",
     ]);
+  });
+
+  it("撞线压缩后落盘同步：agent 内存为真相重写整份盘，本轮消息不丢（存量 bug 修复）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 摘要调用（消息含摘要请求）返回摘要；正常调用返回文本
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const isSummaryRequest = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+          );
+          if (isSummaryRequest) {
+            yield { type: "text_delta", text: "压缩摘要" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          yield { type: "text_delta", text: "回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      // 窗口：第一轮不撞线；第二轮（历史+1200 字大输入）撞线触发压缩；压缩后（摘要+恢复上下文）不再撞线
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "很长的问题".repeat(200);
+      yield "压缩后继续";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+    });
+
+    // 第二轮撞线压缩：删除了已落盘历史 → 重写整份盘 = agent 当前全部（摘要 + 本轮回复）
+    const loaded = await store.loadSession(session.meta.id);
+    const contents = loaded.getMessages().map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(contents[0]).toContain("【会话摘要】");
+    expect(contents.some((c) => c === "你好")).toBe(false); // 旧历史被重写覆盖
+    // 本轮（第二轮）回复在盘上，与 agent 内存一致（无遗漏）
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(agent.getMessages().map((m) => m.role));
+    expect(outputs.join("")).toContain("[历史已压缩]");
+
+    // 压缩后继续的一轮也正常落盘
+    expect(contents.some((c) => c === "压缩后继续")).toBe(true);
+    // assistant 回复（content 为数组）也在盘上
+    expect(JSON.stringify(loaded.getMessages().map((m) => m.content))).toContain("回复");
   });
 
   it("interact 未知命令反馈帮助提示", async () => {

@@ -42,6 +42,35 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
     expect(context.sessionStart).toBe("开始");
   });
 
+  it("超长用户请求截断到 200 字符（DESIGN 9.4 紧凑补回，防连续压缩自我放大）", () => {
+    const long = "很长的输入".repeat(100); // 500 字符
+    const messages: Message[] = [userMessage("开始"), userMessage(long), userMessage("新的请求")];
+    const context = extractRecoveryContext(messages);
+    // 活跃任务：新请求完整 + 长请求截断（超 200 字符带省略号）
+    expect(context.recentRequests[0]).toBe("新的请求");
+    expect(context.recentRequests[1]!.length).toBeLessThanOrEqual(201);
+    expect(context.recentRequests[1]).toMatch(/…$/);
+    // 会话起始同样截断
+    expect(context.sessionStart!.length).toBeLessThanOrEqual(201);
+    // 恰好 200 字符不截断
+    const exact = "a".repeat(200);
+    const exactCtx = extractRecoveryContext([userMessage(exact)]);
+    expect(exactCtx.recentRequests[0]).toBe(exact);
+  });
+
+  it("截断不拆散代理对（emoji 落在截断边界时回退一位）", () => {
+    // 199 个 ascii + 1 个 emoji（2 码元）：截断 200 会落在代理对中间
+    const long = "a".repeat(199) + "😀" + "b".repeat(50);
+    const context = extractRecoveryContext([userMessage(long)]);
+    const truncated = context.recentRequests[0]!;
+    expect(truncated).toMatch(/^a{199}…$/); // emoji 整体被回退丢弃，不产生孤立代理项
+    // 无孤立代理项
+    for (const ch of truncated) {
+      const code = ch.codePointAt(0)!;
+      expect(code >= 0xd800 && code <= 0xdfff).toBe(false);
+    }
+  });
+
   it("无用户消息时 sessionStart 为空", () => {
     const messages: Message[] = [
       assistantMessage([{ type: "text", text: "hi" }]),

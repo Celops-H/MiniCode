@@ -55,6 +55,9 @@ export async function generateSummary(
     .join("");
 }
 
+/** 摘要消息的标记前缀（系统生成，source: "system"；增量合并时据此定位旧摘要） */
+export const SUMMARY_MARKER = "【会话摘要】";
+
 /**
  * 把旧对话替换为摘要消息（压缩结果）。
  * 摘要由系统生成而非用户输入，标记 source: "system"。
@@ -62,5 +65,5 @@ export async function generateSummary(
  * @returns 替换后的消息数组（单条摘要用户消息）
  */
 export function replaceWithSummary(summary: string): Message[] {
-  return [userMessage(`【会话摘要】\n${summary}`, "system")];
+  return [userMessage(`${SUMMARY_MARKER}\n${summary}`, "system")];
 }

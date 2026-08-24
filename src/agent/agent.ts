@@ -21,7 +21,9 @@ import {
   parseContextTooLongGap,
   peelToolGroups,
   pruneToolResults,
+  RECOVERY_MARKER,
   replaceWithSummary,
+  SUMMARY_MARKER,
 } from "../context/index.js";
 import {
   formatInputError,
@@ -113,6 +115,8 @@ export class Agent {
   private messages: Message[] = [];
   /** 摘要压缩失败后置位，停止后续压缩尝试（DESIGN 9.5 失败保护） */
   private compactDisabled = false;
+  /** 历史被改写标记（压缩/裁剪/超窗剥组改过已落盘消息）：宿主据此重写持久化，防落盘与内存错位 */
+  private historyRewritten = false;
   /** 已执行的 turn 数（与 maxTurns 比较，防失控） */
   private turnCount = 0;
   /** Stop 已触发：run 结束；多 Agent 场景下收件箱来消息可唤醒续跑（DESIGN 11.2） */
@@ -316,6 +320,7 @@ export class Agent {
           throw err;
         }
         this.messages = peeled;
+        this.historyRewritten = true; // 已落盘的工具回合被剥除
         context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
         collected.length = 0;
         retryAttempts++;
@@ -384,12 +389,44 @@ export class Agent {
     const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
       this.messages = pruned;
+      this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
       if (!needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
     }
     // ② LLM 摘要：撞线前最后一步，用结构化摘要替换旧对话，并注入恢复上下文
     try {
       const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
-      const summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+      // 增量合并（DESIGN 9.7）：已有旧摘要时只总结摘要后的增量（附旧摘要供合并），
+      // 模型不必重读全量历史，省 token 且多次压缩信息不丢
+      const summaryIndex = this.messages.findIndex(
+        (m) =>
+          m.role === "user" &&
+          m.source === "system" &&
+          typeof m.content === "string" &&
+          m.content.startsWith(SUMMARY_MARKER),
+      );
+      let summary: string;
+      if (summaryIndex >= 0) {
+        const previous = this.messages[summaryIndex]!.content as string;
+        // 跳过紧随摘要的恢复上下文（内容源自压缩前全量历史，已被旧摘要覆盖，不算增量）；
+        // 其余 source:"system" 消息（如邮箱注入）是真实增量，保留
+        let deltaStart = summaryIndex + 1;
+        if (
+          deltaStart < this.messages.length &&
+          typeof this.messages[deltaStart]!.content === "string" &&
+          (this.messages[deltaStart]!.content as string).startsWith(RECOVERY_MARKER)
+        ) {
+          deltaStart++;
+        }
+        const delta = this.messages.slice(deltaStart);
+        summary = await generateSummary(
+          this.modelClient,
+          this.modelId,
+          delta.length > 0 ? delta : this.messages,
+          `已有会话摘要：\n${previous}\n请基于旧摘要增量更新：旧摘要中未变化的内容不要重复展开，只合并新增部分`,
+        );
+      } else {
+        summary = await generateSummary(this.modelClient, this.modelId, this.messages);
+      }
       if (summary.trim().length === 0) {
         this.compactDisabled = true;
         return false;
@@ -397,13 +434,25 @@ export class Agent {
       this.messages = replaceWithSummary(summary);
       if (recovery) {
         // 恢复上下文由系统注入而非用户输入，标记 source: "system"
-        this.messages.push(userMessage(`【恢复上下文】\n${recovery}`, "system"));
+        this.messages.push(userMessage(`${RECOVERY_MARKER}\n${recovery}`, "system"));
       }
+      this.historyRewritten = true; // 已落盘历史被摘要替换
       return true;
     } catch {
       this.compactDisabled = true;
       return false;
     }
+  }
+
+  /**
+   * 读取并复位「历史被改写」标记（DESIGN 14 落盘一致性）：压缩/裁剪/超窗剥组
+   * 改写过已落盘的历史，宿主在轮末据此重写整份持久化（agent 内存为真相）。
+   * @returns 本回合是否改写过历史
+   */
+  consumeHistoryRewritten(): boolean {
+    const was = this.historyRewritten;
+    this.historyRewritten = false;
+    return was;
   }
 
   /**

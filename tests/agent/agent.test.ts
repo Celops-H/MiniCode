@@ -902,6 +902,89 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
+  it("增量合并（DESIGN 9.7）：第二次压缩只读旧摘要后的增量，附旧摘要合并，不重读全量历史", async () => {
+    // 记录每次摘要调用收到的消息数与请求内容
+    const summaryRequests: { messages: number; hasPrevious: boolean; deltaFirstStartsRecovery: boolean }[] = [];
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        const isSummaryRequest = context.messages.some(
+          (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+        );
+        if (isSummaryRequest) {
+          const prev = context.messages.some((m) => typeof m.content === "string" && m.content.includes("旧摘要"));
+          // 增量不应包含恢复上下文（内容已被旧摘要覆盖，不算增量）
+          const hasRecoveryInDelta = context.messages.some(
+            (m) =>
+              m.role === "user" &&
+              (m as { source?: string }).source === "system" &&
+              typeof m.content === "string" &&
+              m.content.startsWith("【恢复上下文】"),
+          );
+          summaryRequests.push({
+            messages: context.messages.length,
+            hasPrevious: prev,
+            deltaFirstStartsRecovery: hasRecoveryInDelta,
+          });
+          yield { type: "text_delta", text: prev ? "合并后的摘要" : "首次摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      // 历史足够大：第一次压缩会撞线
+      initialMessages: Array.from({ length: 10 }, (_, i) => userMessage(`历史消息${i} `.repeat(50))),
+      tools: [{
+        name: "echo",
+        description: "回显",
+        inputSchema: z.object({}),
+        isReadOnly: false,
+        requiresUserInteraction: false,
+        maxResultSizeChars: 1000,
+        execute: () => "回显",
+      }],
+      // 窗口：首次撞线（10 条历史约 900 token）；摘要后增量（恢复上下文+大输入约 364 token）不撞线，
+      // 第二次压缩由 compactNow 显式触发
+      compactConfig: { contextWindow: 500, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("第一轮");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    // 第一次压缩：全量总结，无旧摘要
+    expect(summaryRequests).toHaveLength(1);
+    expect(summaryRequests[0]).toMatchObject({ hasPrevious: false });
+    // 摘要消息已就位
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+
+    // 继续对话制造增量后再次压缩：只读增量 + 旧摘要合并（消息数远小于全量历史）
+    agent.start("增量问题".repeat(80));
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(await agent.compactNow()).toBe(true);
+    expect(summaryRequests).toHaveLength(2);
+    expect(summaryRequests[1]).toMatchObject({ hasPrevious: true });
+    // 增量请求消息数（增量 + 摘要请求）远小于首次（10 条历史 + 请求）
+    expect(summaryRequests[1]!.messages).toBeLessThan(summaryRequests[0]!.messages);
+    // 增量不含恢复上下文（内容已被旧摘要覆盖）：增量首条是真实对话消息
+    expect(summaryRequests[1]!.deltaFirstStartsRecovery).toBe(false);
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+  });
+
   it("未撞线时不压缩", async () => {
     const agent = new Agent({
       modelClient: mockTextClient("正常回复"),

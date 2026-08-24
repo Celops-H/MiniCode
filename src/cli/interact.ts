@@ -35,6 +35,7 @@ export async function interact(options: InteractOptions): Promise<void> {
         // 强制压缩：替换消息后重写整份落盘（压缩是重写不是追加，session 内存随之整体替换）
         if (await agent.compactNow()) {
           await store.rewriteMessages(session, agent.getMessages());
+          agent.consumeHistoryRewritten(); // 消费压缩置位的历史改写标记，防下轮误报重写
           write("\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
         } else {
           write("\n[未压缩] 未配置压缩或摘要不可用。\n");
@@ -49,6 +50,8 @@ export async function interact(options: InteractOptions): Promise<void> {
       continue;
     }
     await hooks?.emit({ type: "UserPromptSubmit", input });
+    // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
+    const roundStart = agent.getMessages().length;
     agent.start(input);
     // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记
     for await (const event of agent.run()) {
@@ -71,16 +74,25 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
     }
     write("\n");
-    // 本轮新增消息 = agent 消息去掉已落盘部分（checkpoint 已提前落盘过部分消息，
-    // 这里补齐剩余；无工具轮时是 user+assistant，工具轮时是 tool_result 与后续文本）
-    const newMessages = agent.getMessages().slice(session.getMessages().length);
-    for (const message of newMessages) {
+    // 历史被改写（压缩/裁剪/剥组）：agent 内存为真相，重写整份盘防落盘错位；
+    // 否则只落盘本轮新增（checkpoint 已提前落盘过部分，这里补齐剩余）
+    const agentMessages = agent.getMessages();
+    if (agent.consumeHistoryRewritten()) {
+      await store.rewriteMessages(session, agentMessages);
+      write("\n[历史已压缩] 上下文已压缩，落盘已同步。\n");
+    } else {
+      const newMessages = agentMessages.slice(session.getMessages().length);
+      for (const message of newMessages) {
+        await store.appendMessage(session, message);
+      }
+      // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
+      await store.flush();
+    }
+    // 回显本轮工具结果（重写分支也要回显，不能因压缩吞掉工具输出）
+    for (const message of agentMessages.slice(roundStart)) {
       if (message.role === "tool_result") {
         write(`\n[工具结果] ${message.content}\n`);
       }
-      await store.appendMessage(session, message);
     }
-    // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
-    await store.flush();
   }
 }
