@@ -7,7 +7,7 @@ import { Agent } from "../agent/index.js";
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
-import { createBuiltinTools } from "../tools/index.js";
+import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import { interact } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
 
@@ -48,6 +48,10 @@ program
   });
 
 export async function main(): Promise<void> {
+  // 进程退出统一清理后台任务（DESIGN 7.5），防孤儿进程残留
+  process.on("exit", () => {
+    killAllBackgroundTasks();
+  });
   await loadDotEnv();
   await program.parseAsync(process.argv);
 }
