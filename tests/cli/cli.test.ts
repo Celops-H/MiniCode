@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Agent } from "../../src/agent/index.js";
+import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/cli/interact.js";
 import { buildModelClient } from "../../src/cli/models.js";
+import { createSessionAgent } from "../../src/cli/app.js";
 import { SessionStore } from "../../src/storage/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
@@ -28,6 +29,71 @@ describe("CLI 模型组装", () => {
   it("可覆盖模型 id", () => {
     const models = buildModelClient(undefined, "qwen-plus");
     expect(models.resolve("qwen-plus")).toBeDefined();
+  });
+});
+
+describe("CLI 多 Agent 组装", () => {
+  it("关闭 agents：单 agent 会话，协作工具不可见", async () => {
+    const toolsSeen: string[][] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        toolsSeen.push(context.tools.map((t) => t.name));
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 100,
+      execute: () => "内容",
+    };
+    const { agent, team } = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      agents: false,
+    });
+    expect(team).toBeUndefined();
+    agent.start("hi");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(toolsSeen[0]).toContain("read");
+    expect(toolsSeen[0]).not.toContain("spawn_agent");
+  });
+
+  it("开启 agents：建 Team 注册 root、系统提示补协调者角色、协作工具可见", async () => {
+    let toolsSeen: string[] = [];
+    let systemPrompt = "";
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        toolsSeen = context.tools.map((t) => t.name);
+        systemPrompt = context.systemPrompt;
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const { agent, team } = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      agents: true,
+    });
+    expect(team).toBeDefined();
+    expect(team!.resolveAgent(AgentPath.root())?.agent).toBe(agent);
+    agent.start("hi");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(toolsSeen).toContain("spawn_agent");
+    expect(toolsSeen).toContain("wait_agent");
+    expect(systemPrompt).toContain("团队协调者");
   });
 });
 

@@ -54,7 +54,10 @@ function spawnAgentTool(deps: CollabDeps): Tool {
     name: "spawn_agent",
     description:
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
-      "任务会唤醒它开始执行；受团队并发上限与 spawn 深度上限约束",
+      "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
+      "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
+      "多个互不依赖的子任务可在同一轮并行派生，等待期间可继续做不依赖它们结果的本地工作，" +
+      "需要等结果时用 wait_agent",
     inputSchema: z.object({
       agentName: z.string(),
       prompt: z.string(),
