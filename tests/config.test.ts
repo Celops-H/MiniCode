@@ -108,6 +108,48 @@ describe("loadConfig", () => {
     await expect(loadConfig({ paths })).rejects.toThrow();
   });
 
+  it("拼错字段直接报错（strict，不默认忽略）", async () => {
+    await expect(
+      loadConfig({ paths: setup({ global: { loglevel: "debug" } }) }),
+    ).rejects.toThrow();
+  });
+
+  it("嵌套对象同样 strict：provider/models 拼错字段直接报错", async () => {
+    await expect(
+      loadConfig({
+        paths: setup({
+          global: {
+            providers: [
+              {
+                id: "deepseek",
+                baseUrl: "https://api.deepseek.com",
+                apiKeyEnv: "DEEPSEEK_API_KEY",
+                models: [{ id: "deepseek-chat" }],
+                unknownField: 1,
+              },
+            ],
+          },
+        }),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      loadConfig({
+        paths: setup({
+          global: {
+            providers: [
+              {
+                id: "deepseek",
+                baseUrl: "https://api.deepseek.com",
+                apiKeyEnv: "DEEPSEEK_API_KEY",
+                models: [{ id: "deepseek-chat", contextWidow: 64000 }], // 拼错
+              },
+            ],
+          },
+        }),
+      }),
+    ).rejects.toThrow();
+  });
+
   it("全局配置提供模型 providers 与优先级链", async () => {
     const config = await loadConfig({
       paths: setup({

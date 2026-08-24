@@ -2,26 +2,31 @@ import { z } from "zod";
 import { LOG_LEVELS } from "../logger/index.js";
 import { HOOK_EVENT_TYPES } from "../hooks/index.js";
 
-/** 单个模型配置（OpenAI 兼容厂商的模型） */
-export const modelConfigSchema = z.object({
-  id: z.string(),
-  name: z.string().optional(),
-  contextWindow: z.number().optional(),
-});
+/** 单个模型配置（OpenAI 兼容厂商的模型）；strict：拼错字段直接报错而非默认忽略 */
+export const modelConfigSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().optional(),
+    contextWindow: z.number().optional(),
+  })
+  .strict();
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 
-/** 单个 Provider 配置（OpenAI 兼容厂商） */
-export const providerConfigSchema = z.object({
-  id: z.string(),
-  baseUrl: z.string().url(),
-  apiKeyEnv: z.string(),
-  models: z.array(modelConfigSchema),
-});
+/** 单个 Provider 配置（OpenAI 兼容厂商）；strict：拼错字段直接报错而非默认忽略 */
+export const providerConfigSchema = z
+  .object({
+    id: z.string(),
+    baseUrl: z.string().url(),
+    apiKeyEnv: z.string(),
+    models: z.array(modelConfigSchema),
+  })
+  .strict();
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
-/** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段 */
-export const configSchema = z.object({
-  logLevel: z.enum(LOG_LEVELS).default("info"),
+/** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错（DESIGN 16） */
+export const configSchema = z
+  .object({
+    logLevel: z.enum(LOG_LEVELS).default("info"),
   /** 会话存储目录（用户级固定，环境变量 MINICODE_SESSIONS_DIR 可覆盖）；缺省 ~/.minicode/sessions/ */
   sessionsDir: z.string().optional(),
   /** 模型 Provider 列表（多厂商）；未配置回退默认单模型 */
@@ -43,6 +48,7 @@ export const configSchema = z.object({
       keepRecentToolResults: z.number().default(5),
     })
     .optional(),
-});
+})
+  .strict();
 
 export type Config = z.infer<typeof configSchema>;
