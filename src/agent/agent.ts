@@ -16,7 +16,10 @@ import {
   estimateTokens,
   extractRecoveryContext,
   generateSummary,
+  isContextTooLongError,
   needsCompact,
+  parseContextTooLongGap,
+  peelToolGroups,
   pruneToolResults,
   replaceWithSummary,
 } from "../context/index.js";
@@ -54,6 +57,9 @@ export interface CompactConfig {
   /** 历史裁剪保留最近的工具结果条数 */
   keepRecentToolResults: number;
 }
+
+/** 超窗应急剥组的最大重试次数（DESIGN 9.6：剥组与重试有上限，超限报错） */
+const MAX_CONTEXT_RETRY = 3;
 
 export interface AgentOptions {
   modelClient: ModelClient;
@@ -274,11 +280,34 @@ export class Agent {
         this.messages.push(userMessage(formatMailMessage(mail), "system"));
       }
     }
-    const context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
+    let context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
     const collected: StreamEvent[] = [];
-    for await (const event of this.modelClient.stream(this.modelId, context)) {
-      collected.push(event);
-      yield event;
+    // 超窗应急剥组重发（DESIGN 9.6）：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
+    // 不做摘要；剥组与重试有上限，超限直接报错并恢复剥前消息（剥组是重试手段，失败不留副作用）
+    const messagesBeforeRetry = this.messages;
+    let retryAttempts = 0;
+    for (;;) {
+      try {
+        for await (const event of this.modelClient.stream(this.modelId, context)) {
+          collected.push(event);
+          yield event;
+        }
+        break;
+      } catch (err) {
+        if (!isContextTooLongError(err) || retryAttempts >= MAX_CONTEXT_RETRY) {
+          this.messages = messagesBeforeRetry;
+          throw err;
+        }
+        const peeled = peelToolGroups(this.messages, parseContextTooLongGap(err));
+        if (!peeled) {
+          this.messages = messagesBeforeRetry;
+          throw err;
+        }
+        this.messages = peeled;
+        context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
+        collected.length = 0;
+        retryAttempts++;
+      }
     }
     const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
     this.messages.push(assistant);
