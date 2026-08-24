@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { currentCwd } from "../file-state.js";
 
 /** 后台任务状态：运行中 / 完成 / 失败 / 已终止 */
 export type BackgroundTaskStatus = "running" | "completed" | "failed" | "killed";
@@ -44,7 +45,11 @@ export function startBackgroundTask(command: string): BackgroundTask {
   };
   // Unix 用 detached 让子进程独立成进程组，便于按进程树终止；
   // Windows 的 detached 会断开 stdio 导致收不到输出，改用 taskkill /T 按树杀
-  const child = spawn(command, { shell: true, detached: process.platform !== "win32" });
+  const child = spawn(command, {
+    shell: true,
+    detached: process.platform !== "win32",
+    cwd: currentCwd(), // 绑定工具执行上下文 cwd（后台命令与前台一致，Worktree 隔离不绕过）
+  });
   child.stdout?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
   child.stderr?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
   child.on("error", (err) => {

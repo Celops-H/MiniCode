@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
-import { currentFileState, hashContent } from "../file-state.js";
+import { currentFileState, hashContent, resolvePath } from "../file-state.js";
 
 const schema = z.object({
   path: z.string(),
@@ -27,12 +27,13 @@ export const readTool: Tool = {
       offset?: number;
       limit?: number;
     }>(readTool, input);
-    const content = await readFile(path, "utf8");
+    const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd（DESIGN 7.6 配套）
+    const content = await readFile(file, "utf8");
     // 记录版本令牌（DESIGN 7.6）：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
     const fileState = currentFileState();
     if (fileState) {
-      const disk = await stat(path);
-      fileState.setVersion(path, {
+      const disk = await stat(file);
+      fileState.setVersion(file, {
         mtimeMs: disk.mtimeMs,
         size: disk.size,
         contentHash: limit === undefined ? hashContent(content) : undefined,

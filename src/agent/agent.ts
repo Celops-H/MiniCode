@@ -37,7 +37,7 @@ import {
 } from "../tools/index.js";
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
 import type { HookBus } from "../hooks/index.js";
-import { FileState, withFileState } from "../tools/file-state.js";
+import { FileState, withCwd, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 import { AgentPath } from "./agent-path.js";
@@ -84,6 +84,8 @@ export interface AgentOptions {
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
+  /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2）；缺省进程 cwd */
+  cwd?: string;
   /**
    * checkpoint 回调（DESIGN 14）：每批工具执行前调用，传入当前全部消息——
    * 宿主在此把已产生的消息（用户输入 + 模型回复含工具调用）落盘，
@@ -114,6 +116,8 @@ export class Agent {
   agentPath?: AgentPath;
   /** 工具输出超限的落盘目录（DESIGN 9.1 ①） */
   private readonly outputDir: string;
+  /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2） */
+  private readonly cwd: string;
   /** checkpoint 回调（DESIGN 14）：工具执行前宿主落盘用 */
   private readonly checkpoint?: (messages: Message[]) => Promise<void> | void;
   /** 会话记忆是否启用（DESIGN 9.7） */
@@ -147,6 +151,7 @@ export class Agent {
     this.permission = options.permission;
     this.hooks = options.hooks;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
+    this.cwd = options.cwd ?? process.cwd();
     this.team = options.team;
     this.checkpoint = options.checkpoint;
     this.memoryEnabled = options.memory ?? false;
@@ -181,6 +186,9 @@ export class Agent {
    * @returns 子 agent 实例（路径已设置，待 commitSpawn 登记）
    */
   private createChildAgent(agentName: string, path: AgentPath): Agent {
+    // Git Worktree 隔离（DESIGN 4.2）：worktrees 开启且父在 git 仓库内时，
+    // 子 agent 绑定独立工作区（cwd），文件写与父物理隔离；非 git 仓库继承父 cwd
+    const worktree = this.team?.createChildWorktree(path.parent(), agentName);
     const child = new Agent({
       modelClient: this.modelClient,
       modelId: this.modelId,
@@ -191,6 +199,7 @@ export class Agent {
       team: this.team,
       maxTurns: this.maxTurns,
       outputDir: this.outputDir,
+      cwd: worktree?.dir ?? this.cwd,
     });
     child.agentPath = path;
     return child;
@@ -213,6 +222,11 @@ export class Agent {
    */
   getMessages(): Message[] {
     return [...this.messages];
+  }
+
+  /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2；Team 创建 worktree 时读取） */
+  getCwd(): string {
+    return this.cwd;
   }
 
   /**
@@ -568,7 +582,9 @@ export class Agent {
       }
     }
     try {
-      const result = await withFileState(this.fileState, () => tool.execute(call.input));
+      const result = await withCwd(this.cwd, () =>
+        withFileState(this.fileState, () => tool.execute(call.input)),
+      );
       const { output, contextModifier, isError } =
         typeof result === "string"
           ? { output: result, contextModifier: undefined, isError: undefined }

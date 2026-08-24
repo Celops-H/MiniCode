@@ -29,7 +29,7 @@ export class FileState {
 
   private normalize(p: string): string {
     // Windows 文件系统大小写不敏感：统一小写，避免 C:\a.txt 与 c:\A.TXT 各占锁/快照条目绕过 CAS
-    const resolved = path.resolve(p);
+    const resolved = resolvePath(p);
     return process.platform === "win32" ? resolved.toLowerCase() : resolved;
   }
 
@@ -97,6 +97,9 @@ export class FileState {
 /** 当前 agent 的文件状态：Agent 执行工具时经 AsyncLocalStorage 绑定到本次工具执行的异步链 */
 const stateStore = new AsyncLocalStorage<FileState>();
 
+/** 当前工具执行上下文的 cwd：Agent 指定工作目录时经 AsyncLocalStorage 绑定；缺省进程 cwd */
+const cwdStore = new AsyncLocalStorage<string>();
+
 /** 在当前工具执行上下文中记录/校验文件版本；无 agent 上下文时返回 undefined */
 export function currentFileState(): FileState | undefined {
   return stateStore.getStore();
@@ -105,4 +108,22 @@ export function currentFileState(): FileState | undefined {
 /** 把一次工具执行的异步链绑定到指定 FileState（Agent 在 executeTool 调用处使用） */
 export async function withFileState<T>(state: FileState, fn: () => T | Promise<T>): Promise<T> {
   return stateStore.run(state, fn);
+}
+
+/** 当前工具执行的工作目录（Agent 指定 cwd 时返回之，否则进程 cwd） */
+export function currentCwd(): string {
+  return cwdStore.getStore() ?? process.cwd();
+}
+
+/** 把一次工具执行的异步链绑定到指定工作目录（Agent 在 executeTool 调用处使用） */
+export async function withCwd<T>(cwd: string, fn: () => T | Promise<T>): Promise<T> {
+  return cwdStore.run(cwd, fn);
+}
+
+/**
+ * 按当前工具执行上下文解析路径：绝对路径原样，相对路径基于当前 cwd。
+ * 工具统一经此解析用户输入的路径（Worktree 场景下子 agent 的 cwd 是独立工作区）。
+ */
+export function resolvePath(p: string): string {
+  return path.isAbsolute(p) ? p : path.resolve(currentCwd(), p);
 }

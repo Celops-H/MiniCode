@@ -6,6 +6,7 @@
 import { AgentPath } from "./agent-path.js";
 import type { Agent } from "./agent.js";
 import type { MailMessage } from "./mailbox.js";
+import { abortWorktree, completeWorktree, createWorktree, resolveGitRoot, type WorktreeInfo } from "./worktree.js";
 
 export interface TeamMember {
   /** agent 实例；预留未提交时为 undefined */
@@ -14,6 +15,8 @@ export interface TeamMember {
   parentPath?: AgentPath;
   /** spawn 深度（root=0），递归防护用（DESIGN 11.4 深度默认 1） */
   depth: number;
+  /** Git Worktree 信息（worktrees 开启且为 git 仓库时）：并行隔离的工作区与分支（DESIGN 4.2） */
+  worktree?: WorktreeInfo;
 }
 
 export interface TeamOptions {
@@ -23,6 +26,8 @@ export interface TeamOptions {
   maxDepth?: number;
   /** 同时推进的 agent 数上限；缺省 4（DESIGN 11.7） */
   maxConcurrent?: number;
+  /** 启用 Git Worktree 隔离：子 agent 各自独立工作区（DESIGN 4.2）；非 git 仓库时自动忽略 */
+  worktrees?: boolean;
 }
 
 export class Team {
@@ -30,6 +35,7 @@ export class Team {
   private readonly maxAgents: number;
   private readonly maxDepth: number;
   private readonly maxConcurrent: number;
+  private readonly worktrees: boolean;
   private spawnCount = 0;
   private activeExecutions = 0;
   /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒，DESIGN 11.2） */
@@ -39,6 +45,54 @@ export class Team {
     this.maxAgents = options.maxAgents ?? Infinity;
     this.maxDepth = options.maxDepth ?? 1;
     this.maxConcurrent = options.maxConcurrent ?? 4;
+    this.worktrees = options.worktrees ?? false;
+  }
+
+  /**
+   * 为子 agent 创建 Git Worktree（worktrees 开启且父在 git 仓库内时）：
+   * 子 agent 独立工作区 + 独立分支，文件写物理隔离（DESIGN 4.2）。
+   * 创建成功后记录到对应 member（commitSpawn 后即可用，release 时自动清理）。
+   * @param parentPath 父 agent 路径
+   * @param agentName 子 agent 名
+   * @returns worktree 信息；不可用（未开启/非 git 仓库）返回 undefined
+   */
+  createChildWorktree(parentPath: AgentPath, agentName: string): WorktreeInfo | undefined {
+    if (!this.worktrees) return undefined;
+    const parent = this.members.get(parentPath.toString())?.agent;
+    if (!parent) return undefined;
+    const rootDir = resolveGitRoot(parent.getCwd());
+    if (!rootDir) return undefined; // 非 git 仓库：退化为共享目录 + CAS 冲突防护
+    const info = createWorktree(rootDir, agentName);
+    if (!info) return undefined;
+    const childPath = parentPath.join(agentName);
+    if (typeof childPath !== "string") {
+      const member = this.members.get(childPath.toString());
+      if (member) member.worktree = info;
+    }
+    return info;
+  }
+
+  /** 子 agent 终态（自然完成）时合并其 worktree 分支并清理 */
+  completeChildWorktree(path: AgentPath): string | undefined {
+    const member = this.members.get(path.toString());
+    if (!member?.worktree) return undefined;
+    const parent = member.parentPath ? this.members.get(member.parentPath.toString())?.agent : undefined;
+    const rootDir = parent ? resolveGitRoot(parent.getCwd()) : undefined;
+    if (!rootDir) return `合并失败：无法定位仓库根`;
+    const message = completeWorktree(rootDir, member.worktree);
+    member.worktree = undefined;
+    return message;
+  }
+
+  /** 子 agent 中断/异常时清理 worktree 目录（分支保留在仓库） */
+  abortChildWorktree(path: AgentPath): void {
+    const member = this.members.get(path.toString());
+    if (!member?.worktree) return;
+    const parent = member.parentPath ? this.members.get(member.parentPath.toString())?.agent : undefined;
+    const rootDir = parent ? resolveGitRoot(parent.getCwd()) : undefined;
+    if (!rootDir) return;
+    abortWorktree(rootDir, member.worktree);
+    member.worktree = undefined;
   }
 
   /** 注册根 agent（协调者，路径固定 `/root`，不占 spawn 计数） */
@@ -78,8 +132,12 @@ export class Team {
     agent.agentPath = path;
   }
 
-  /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏） */
+  /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏）；有 worktree 时一并清理 */
   releaseSpawn(path: AgentPath): void {
+    const member = this.members.get(path.toString());
+    if (member?.worktree) {
+      this.abortChildWorktree(path);
+    }
     if (this.members.delete(path.toString())) {
       this.spawnCount--;
     }
@@ -153,11 +211,20 @@ export class Team {
     const parentPath = this.members.get(path.toString())?.parentPath;
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
-    if (agent.isInterrupted()) return; // 被中断：显式动作，调用方已知，不投中途文本当结论
+    if (agent.isInterrupted()) {
+      // 被中断：显式动作，调用方已知，不投中途文本当结论。
+      // 不清理 worktree——后续 followup 可复活续用（DESIGN 11.2），目录/分支/注册均保留
+      return;
+    }
+    // 自然完成：合并 worktree 分支进主分支（DESIGN 4.2），合并结果附在结论前提示父
+    const mergeMessage = this.completeChildWorktree(path);
+    const content = mergeMessage
+      ? `${mergeMessage}。\n${agent.conclusionText()}`
+      : agent.conclusionText();
     await this.sendMessage(parentPath, {
       type: "FINAL_ANSWER",
       from: path,
-      content: agent.conclusionText(),
+      content,
       triggerTurn: true,
     });
   }

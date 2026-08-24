@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { currentCwd, resolvePath } from "../file-state.js";
 
 const schema = z.object({
   pattern: z.string(),
@@ -28,7 +29,7 @@ export const grepTool: Tool = {
       glob?: string;
     }>(grepTool, input);
     const regex = new RegExp(pattern);
-    const cwd = dir ?? process.cwd();
+    const cwd = dir ? resolvePath(dir) : currentCwd();
     const results: string[] = [];
     const { files, truncated } = await listTextFiles(cwd);
     for (const file of files) {

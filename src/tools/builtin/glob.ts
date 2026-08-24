@@ -2,6 +2,7 @@ import { glob } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { currentCwd, resolvePath } from "../file-state.js";
 
 const schema = z.object({
   pattern: z.string(),
@@ -21,7 +22,7 @@ export const globTool: Tool = {
   async execute(input) {
     const { pattern, path: cwd } = validateInput<{ pattern: string; path?: string }>(globTool, input);
     const matches: string[] = [];
-    for await (const file of glob(pattern, { cwd: cwd ?? process.cwd() })) {
+    for await (const file of glob(pattern, { cwd: cwd ? resolvePath(cwd) : currentCwd() })) {
       matches.push(file);
     }
     return matches.length > 0 ? matches.join("\n") : "未找到匹配文件";

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
+import { currentCwd } from "../file-state.js";
 import { startBackgroundTask } from "./bash-background.js";
 
 const execAsync = promisify(exec);
@@ -94,6 +95,7 @@ export const bashTool: Tool = {
       const { stdout, stderr } = await execAsync(command, {
         timeout: timeoutMs,
         maxBuffer: 4 * 1024 * 1024,
+        cwd: currentCwd(), // 工具执行上下文 cwd（Worktree 场景子 agent 在自己的工作区执行）
       });
       const parts = [stdout.trim(), stderr.trim()].filter(Boolean);
       return parts.length > 0 ? parts.join("\n") : "(命令无输出)";

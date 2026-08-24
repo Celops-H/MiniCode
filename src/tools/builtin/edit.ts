@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
-import { currentFileState } from "../file-state.js";
+import { currentFileState, resolvePath } from "../file-state.js";
 
 const schema = z.object({
   path: z.string(),
@@ -25,13 +25,14 @@ export const editTool: Tool = {
       oldString: string;
       newString: string;
     }>(editTool, input);
+    const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd
     const fileState = currentFileState();
     const edit = async () => {
       // CAS 校验：磁盘 vs 本 agent 快照，冲突拒绝（DESIGN 7.6）
-      const stale = fileState ? await fileState.assertWritable(path) : null;
+      const stale = fileState ? await fileState.assertWritable(file) : null;
       if (stale) return stale;
 
-      const content = await readFile(path, "utf8");
+      const content = await readFile(file, "utf8");
       const firstIndex = content.indexOf(oldString);
       if (firstIndex === -1) {
         return `未找到待替换的文本`;
@@ -42,11 +43,11 @@ export const editTool: Tool = {
       }
 
       const updated = content.slice(0, firstIndex) + newString + content.slice(firstIndex + oldString.length);
-      await writeFile(path, updated, "utf8");
-      await fileState?.refreshVersion(path, updated);
+      await writeFile(file, updated, "utf8");
+      await fileState?.refreshVersion(file, updated);
       return `已替换 1 处`;
     };
     // per-path 锁关 TOCTOU：校验 + 读 + 替换 + 写入 + 刷新快照一气呵成
-    return fileState ? fileState.withFileLock(path, edit) : edit();
+    return fileState ? fileState.withFileLock(file, edit) : edit();
   },
 };

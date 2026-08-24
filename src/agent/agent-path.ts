@@ -43,6 +43,12 @@ export class AgentPath {
     return this.value.slice(this.value.lastIndexOf("/") + 1);
   }
 
+  /** 父路径；root 的父是自身（root 无父） */
+  parent(): AgentPath {
+    if (this.isRoot()) return this;
+    return AgentPath.parse(this.value.slice(0, this.value.lastIndexOf("/"))) as AgentPath;
+  }
+
   /** 派生直接子路径（子 agent 名须合法） */
   join(agentName: string): AgentPath | string {
     const error = validateAgentName(agentName);
