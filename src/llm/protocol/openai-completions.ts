@@ -40,43 +40,54 @@ export class OpenAICompletionsProtocol implements Protocol {
    */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
     const started = new Set<number>();
-    for await (const chunk of stream) {
-      const choice = firstChoice(chunk);
-      if (!choice) continue;
+    try {
+      for await (const chunk of stream) {
+        const choice = firstChoice(chunk);
+        if (!choice) continue;
 
-      const delta = choice.delta;
-      if (delta?.content) {
-        yield { type: "text_delta", text: delta.content };
-      }
+        const delta = choice.delta;
+        if (delta?.content) {
+          yield { type: "text_delta", text: delta.content };
+        }
 
-      // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量
-      if (Array.isArray(delta?.tool_calls)) {
-        for (const tc of delta.tool_calls) {
-          if (tc.index === undefined) continue;
-          if (tc.id && !started.has(tc.index)) {
-            yield {
-              type: "toolcall_start",
-              index: tc.index,
-              id: tc.id,
-              name: tc.function?.name,
-            };
-            started.add(tc.index);
-          }
-          if (tc.function?.arguments) {
-            yield { type: "toolcall_delta", index: tc.index, partialJson: tc.function.arguments };
+        // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量
+        if (Array.isArray(delta?.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            if (tc.index === undefined) continue;
+            if (tc.id && !started.has(tc.index)) {
+              yield {
+                type: "toolcall_start",
+                index: tc.index,
+                id: tc.id,
+                name: tc.function?.name,
+              };
+              started.add(tc.index);
+            }
+            if (tc.function?.arguments) {
+              yield { type: "toolcall_delta", index: tc.index, partialJson: tc.function.arguments };
+            }
           }
         }
-      }
 
-      // 流结束：为所有已开始的工具调用补发结束事件
-      if (choice.finish_reason) {
-        for (const index of started) {
-          yield { type: "toolcall_end", index };
+        // 流结束：为所有已开始的工具调用补发结束事件
+        if (choice.finish_reason) {
+          for (const index of started) {
+            yield { type: "toolcall_end", index };
+          }
+          yield { type: "done", stopReason: choice.finish_reason };
+          return;
         }
-        yield { type: "done", stopReason: choice.finish_reason };
-        return;
       }
+    } catch (err) {
+      // 流中断异常：发 error 事件（观测通道）后原样抛出（控制流，剥组重试等依赖异常）
+      yield { type: "error", message: (err as Error).message ?? String(err) };
+      throw err;
     }
+    // 迭代正常结束但无 finish_reason（如厂商提前断流）：已开始的调用补发结束，报 error
+    for (const index of started) {
+      yield { type: "toolcall_end", index };
+    }
+    yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
   }
 }
 

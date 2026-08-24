@@ -161,4 +161,53 @@ describe("parseStream：SSE → 统一事件", () => {
       { type: "done", stopReason: "tool_calls" },
     ]);
   });
+
+  it("流中断异常：发 error 事件（观测）后原样抛出（控制流）", async () => {
+    const events: StreamEvent[] = [];
+    async function* throwingStream(): AsyncIterable<unknown> {
+      yield { choices: [{ delta: { content: "部分" }, index: 0 }] };
+      throw new Error("连接中断");
+    }
+    let thrown: string | undefined;
+    try {
+      for await (const e of protocol.parseStream(throwingStream())) {
+        events.push(e);
+      }
+    } catch (err) {
+      thrown = (err as Error).message;
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "部分" },
+      { type: "error", message: "连接中断" },
+    ]);
+    expect(thrown).toBe("连接中断");
+  });
+
+  it("流意外结束（未收到 finish_reason）：补发工具结束并报 error", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "call_1", type: "function", function: { name: "read", arguments: "" } },
+                ],
+              },
+              index: 0,
+            },
+          ],
+        },
+        // 流在此正常结束，无 finish_reason（厂商提前断流）
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_end", index: 0 },
+      { type: "error", message: expect.stringContaining("未收到 finish_reason") },
+    ]);
+  });
 });

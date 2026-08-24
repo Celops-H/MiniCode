@@ -41,57 +41,63 @@ export class AnthropicMessagesProtocol implements Protocol {
     let nextToolIndex = 0;
     let stopReason: string | undefined;
 
-    for await (const chunk of stream) {
-      if (typeof chunk !== "object" || chunk === null) continue;
-      const event = chunk as AnthropicChunk;
+    try {
+      for await (const chunk of stream) {
+        if (typeof chunk !== "object" || chunk === null) continue;
+        const event = chunk as AnthropicChunk;
 
-      switch (event.type) {
-        case "content_block_start": {
-          const block = event.content_block;
-          if (block?.type === "tool_use") {
-            const toolIndex = nextToolIndex++;
-            toolIndexByBlock.set(event.index ?? -1, toolIndex);
-            yield {
-              type: "toolcall_start",
-              index: toolIndex,
-              id: block.id,
-              name: block.name,
-            };
+        switch (event.type) {
+          case "content_block_start": {
+            const block = event.content_block;
+            if (block?.type === "tool_use") {
+              const toolIndex = nextToolIndex++;
+              toolIndexByBlock.set(event.index ?? -1, toolIndex);
+              yield {
+                type: "toolcall_start",
+                index: toolIndex,
+                id: block.id,
+                name: block.name,
+              };
+            }
+            break;
           }
-          break;
-        }
-        case "content_block_delta": {
-          const delta = event.delta;
-          if (delta?.type === "text_delta") {
-            yield { type: "text_delta", text: delta.text ?? "" };
-          } else if (delta?.type === "thinking_delta") {
-            yield { type: "thinking_delta", thinking: delta.thinking ?? "" };
-          } else if (delta?.type === "input_json_delta") {
-            const toolIndex = toolIndexByBlock.get(event.index ?? -1) ?? 0;
-            yield { type: "toolcall_delta", index: toolIndex, partialJson: delta.partial_json ?? "" };
+          case "content_block_delta": {
+            const delta = event.delta;
+            if (delta?.type === "text_delta") {
+              yield { type: "text_delta", text: delta.text ?? "" };
+            } else if (delta?.type === "thinking_delta") {
+              yield { type: "thinking_delta", thinking: delta.thinking ?? "" };
+            } else if (delta?.type === "input_json_delta") {
+              const toolIndex = toolIndexByBlock.get(event.index ?? -1) ?? 0;
+              yield { type: "toolcall_delta", index: toolIndex, partialJson: delta.partial_json ?? "" };
+            }
+            break;
           }
-          break;
-        }
-        case "content_block_stop": {
-          const toolIndex = toolIndexByBlock.get(event.index ?? -1);
-          if (toolIndex !== undefined) {
-            yield { type: "toolcall_end", index: toolIndex };
+          case "content_block_stop": {
+            const toolIndex = toolIndexByBlock.get(event.index ?? -1);
+            if (toolIndex !== undefined) {
+              yield { type: "toolcall_end", index: toolIndex };
+            }
+            break;
           }
-          break;
+          case "message_delta":
+            // Anthropic 的停止原因在 message_delta.delta.stop_reason
+            stopReason = event.delta?.stop_reason;
+            break;
+          case "message_stop":
+            yield { type: "done", stopReason: stopReason ?? "end_turn" };
+            return;
+          case "error":
+            yield { type: "error", message: String((chunk as { error?: unknown }).error ?? "未知错误") };
+            return;
+          default:
+            break;
         }
-        case "message_delta":
-          // Anthropic 的停止原因在 message_delta.delta.stop_reason
-          stopReason = event.delta?.stop_reason;
-          break;
-        case "message_stop":
-          yield { type: "done", stopReason: stopReason ?? "end_turn" };
-          return;
-        case "error":
-          yield { type: "error", message: String((chunk as { error?: unknown }).error ?? "未知错误") };
-          return;
-        default:
-          break;
       }
+    } catch (err) {
+      // 流中断异常：发 error 事件（观测通道）后原样抛出（控制流，剥组重试等依赖异常）
+      yield { type: "error", message: (err as Error).message ?? String(err) };
+      throw err;
     }
   }
 }

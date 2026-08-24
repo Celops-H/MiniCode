@@ -149,4 +149,25 @@ describe("parseStream：SSE → 统一事件", () => {
     }
     expect(events[0]).toMatchObject({ type: "error" });
   });
+
+  it("流中断异常：发 error 事件（观测）后原样抛出（控制流）", async () => {
+    const events: StreamEvent[] = [];
+    async function* throwingStream(): AsyncIterable<unknown> {
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "部分" } };
+      throw new Error("连接中断");
+    }
+    let thrown: string | undefined;
+    try {
+      for await (const e of protocol.parseStream(throwingStream())) {
+        events.push(e);
+      }
+    } catch (err) {
+      thrown = (err as Error).message;
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "部分" },
+      { type: "error", message: "连接中断" },
+    ]);
+    expect(thrown).toBe("连接中断");
+  });
 });
