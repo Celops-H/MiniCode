@@ -103,6 +103,10 @@ export class SessionStore {
    * @param messages 新消息数组（压缩后的完整消息）
    */
   async rewriteMessages(session: Session, messages: Message[]): Promise<void> {
+    // 快照必须放在函数第一行（首个 await 前）：appendMessage 是同步的，
+    // 若快照在 ensureDir 之后，调用 rewrite 后立即 append 的消息会被当成旧消息误删
+    // （review 修复：并发 append 的新消息保留，重写前的旧消息稍后删除）
+    const staleIds = new Set(this.pending.get(session.meta.id)?.messages.map((m) => m.id) ?? []);
     await this.ensureDir();
     const file = this.messageFile(session.meta.id);
     const tmp = `${file}.tmp`;
@@ -112,6 +116,14 @@ export class SessionStore {
     session.replaceAll(messages);
     session.meta.updatedAt = new Date().toISOString();
     await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
+    // 删除快照中的旧消息（否则后续 flush 会把旧消息追加到重写后的 JSONL 造成错位）；
+    // 重写期间新 append 的消息保留。删除在全部 IO 之后：重写失败则 pending 原样保留，flush 仍可补盘
+    const entry = this.pending.get(session.meta.id);
+    if (entry) {
+      const remaining = entry.messages.filter((m) => !staleIds.has(m.id));
+      if (remaining.length === 0) this.pending.delete(session.meta.id);
+      else entry.messages = remaining;
+    }
   }
 
   /**

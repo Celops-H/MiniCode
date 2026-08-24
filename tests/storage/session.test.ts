@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -95,6 +95,38 @@ describe("会话持久化与续跑", () => {
     // 磁盘重写（临时文件原子替换，旧消息被覆盖）
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages()).toEqual([summary]);
+  });
+
+  it("rewriteMessages 清理攒批残留：重写前未 flush 的消息不污染重写后的盘（review 修复）", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    // 重写前 append 未 flush（攒批残留：重写前的旧消息）
+    await store.appendMessage(session, userMessage("旧对话"));
+    const summary = userMessage("【会话摘要】压缩后的历史", "system");
+    await store.rewriteMessages(session, [summary]);
+    // 此后 flush：不得把残留的旧消息追加到重写后的 JSONL
+    await store.flush();
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toEqual([summary]);
+  });
+
+  it("rewriteMessages 不误删重写期间并发追加的消息（真实并行，review 修复：快照过滤 vs 无条件删除的区分测试）", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    // 旧消息攒批未 flush
+    await store.appendMessage(session, userMessage("旧对话"));
+    const summary = userMessage("【会话摘要】压缩后的历史", "system");
+    // 重写与追加并行：append 落在重写 IO 间隙（无条件删除会误删此消息，快照过滤保留）
+    const rewriting = store.rewriteMessages(session, [summary]);
+    await store.appendMessage(session, userMessage("新消息"));
+    await rewriting;
+    await store.flush();
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toHaveLength(2);
+    expect(loaded.getMessages()[0]).toEqual(summary);
+    expect(loaded.getMessages()[1]?.content).toBe("新消息");
   });
 
   it("meta 延迟写：append 只改内存，flush 落盘", async () => {
