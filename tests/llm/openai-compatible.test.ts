@@ -56,7 +56,7 @@ describe("getModels", () => {
 });
 
 describe("stream", () => {
-  it("组装请求（model + stream）并经协议归一化为统一事件", async () => {
+  it("组装请求（model + stream）并经协议转成统一事件流", async () => {
     const { provider, getRequest } = makeProvider(
       { DEEPSEEK_API_KEY: "sk" },
       { choices: [{ delta: { content: "hi" }, index: 0 }] },

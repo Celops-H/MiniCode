@@ -121,7 +121,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("thinking_delta 归一化为思考增量", async () => {
+  it("thinking_delta 统一成思考增量", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(

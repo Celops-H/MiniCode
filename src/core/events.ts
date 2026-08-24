@@ -1,5 +1,5 @@
 /**
- * 统一流式事件：适配器将各家流式输出归一化为该事件流，主循环只消费它。
+ * 统一流式事件：适配器将各家流式输出转成该事件流，主循环只消费它。
  * text / thinking 以 delta 增量到达（TUI 渲染累积即可，无需 start/end）；
  * toolcall 三组 start-delta-end（start 携带工具名与 id，标记调用边界；
  * 同一 index 可能重复 start——id/name 后补时（OpenAI 兼容厂商先发参数后补 id），

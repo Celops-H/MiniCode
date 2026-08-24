@@ -62,7 +62,7 @@ function makeReadTool(execute: Tool["execute"]): Tool {
 }
 
 describe("Agent 接入 Hook 事件", () => {
-  it("run 处理用户输入前触发 UserPromptSubmit（携带输入内容，宿主在 start 后发射）", async () => {
+  it("run 处理用户输入前触发 UserPromptSubmit（携带输入内容，宿主在 start 后触发）", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("UserPromptSubmit", handler);
@@ -73,7 +73,7 @@ describe("Agent 接入 Hook 事件", () => {
       hooks,
     });
     agent.start("你好");
-    // 会话级 Hook 由宿主发射：每次用户输入后一次
+    // 会话级 Hook 由宿主触发：每次用户输入后一次
     await hooks.emit({ type: "UserPromptSubmit", input: "你好" });
     for await (const _ of agent.run()) {
       // 消费事件流
@@ -83,7 +83,7 @@ describe("Agent 接入 Hook 事件", () => {
     expect(handler).toHaveBeenCalledWith({ type: "UserPromptSubmit", input: "你好" });
   });
 
-  it("多轮输入：宿主每次 start 后各发射一次 UserPromptSubmit", async () => {
+  it("多轮输入：宿主每次 start 后各触发一次 UserPromptSubmit", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("UserPromptSubmit", handler);
@@ -109,7 +109,7 @@ describe("Agent 接入 Hook 事件", () => {
     expect(handler).toHaveBeenNthCalledWith(2, { type: "UserPromptSubmit", input: "第二个问题" });
   });
 
-  it("SessionStart 由宿主在会话开始时发射一次", async () => {
+  it("SessionStart 由宿主在会话开始时触发一次", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("SessionStart", handler);
@@ -119,7 +119,7 @@ describe("Agent 接入 Hook 事件", () => {
       systemPrompt: "助手",
       hooks,
     });
-    // 会话级 Hook 由宿主发射：会话开始（首次驱动前）一次
+    // 会话级 Hook 由宿主触发：会话开始（首次驱动前）一次
     await hooks.emit({ type: "SessionStart" });
     agent.start("第一问");
     for await (const _ of agent.run()) {
@@ -348,7 +348,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
-  it("无权限管线时 PreToolUse 也无条件发射：deny 直接拒绝执行（review 修复：原实现依赖管线，CLI 未装配则永不触发）", async () => {
+  it("无权限管线时 PreToolUse 也无条件触发：deny 直接拒绝执行（review 修复：原实现依赖管线，CLI 未装配则永不触发）", async () => {
     let executed = false;
     const hooks = new HookBus();
     hooks.on("PreToolUse", (): HookVerdict => "deny");
@@ -374,7 +374,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(result?.content).toContain("权限拒绝");
   });
 
-  it("无权限管线时 PreToolUse 无条件发射：allow 放行，工具正常执行", async () => {
+  it("无权限管线时 PreToolUse 无条件触发：allow 放行，工具正常执行", async () => {
     const hooks = new HookBus();
     const handler = vi.fn();
     hooks.on("PreToolUse", handler);
@@ -450,7 +450,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(allowed?.content).toBe("文件内容");
   });
 
-  it("工具失败路径事件闭合（A 组定稿）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
+  it("工具失败路径事件闭合（此前确认）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
     // 未知工具：无 tool 可执行，发失败事件
     const hooks1 = new HookBus();
     const failure1 = vi.fn();
@@ -493,7 +493,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
-  it("工具事件带 toolCallId 配对（A 组定稿）：PreToolUse → PostToolUse 同一调用 id", async () => {
+  it("工具事件带 toolCallId 配对（此前确认）：PreToolUse → PostToolUse 同一调用 id", async () => {
     const hooks = new HookBus();
     const pre = vi.fn();
     const post = vi.fn();

@@ -37,14 +37,14 @@ export interface InteractOptions {
    * 输出函数（CLI 里写 stdout）。承担两类文本：
    * 状态文本（[已压缩]/[未压缩]/[历史已压缩]/[未知命令]）与工具结果回显（[工具结果]，
    * CLI 遗留路径）。TUI 不依赖 write 做结构化渲染——流式事件走 onEvent，工具结果走
-   * PostToolUse Hook 事件（A 组定稿）。
+   * PostToolUse Hook 事件（此前确认）。
    */
   write: (text: string) => void;
-  /** 流式事件渲染回调（A 组定稿：渲染归属调用方，TUI 结构化消费）；缺省用 renderStreamEvent 文本渲染。
+  /** 流式事件渲染回调（此前确认：渲染归属调用方，TUI 结构化消费）；缺省用 renderStreamEvent 文本渲染。
    * 注意与 Team.onRootEvent 配套接入：onEvent 覆盖用户输入驱动的流，onRootEvent 覆盖
    * root 后台驱动（迟到子 agent 结论）的流，两侧都要接才不遗漏。 */
   onEvent?: (event: StreamEvent) => void;
-  /** Hook 总线（宿主发射会话级事件的通道，DESIGN 13.3）；缺省不发射 */
+  /** Hook 总线（宿主触发会话级事件的通道，DESIGN 13.3）；缺省不触发 */
   hooks?: HookBus;
 }
 
@@ -52,7 +52,7 @@ export interface InteractOptions {
  * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
  * 展示工具结果 → 消息持久化。
  * 会话内命令（统一 / 前缀，DESIGN 15）：/exit 退出、/compact 强制压缩并重写落盘、
- * /help 列出命令；UserPromptSubmit 由宿主（本函数）在每次输入后发射（DESIGN 13.3）。
+ * /help 列出命令；UserPromptSubmit 由宿主（本函数）在每次输入后触发（DESIGN 13.3）。
  * @param options 交互选项（agent / store / session / inputs / write / hooks）
  */
 export async function interact(options: InteractOptions): Promise<void> {
@@ -88,7 +88,7 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
     agent.start(input);
-    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，A 组定稿）
+    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，此前确认）
     for await (const event of agent.run()) {
       render(event);
     }

@@ -117,7 +117,7 @@ describe("CLI Hook 接入", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("interact 每次输入后发射 UserPromptSubmit（宿主职责，DESIGN 13.3）", async () => {
+  it("interact 每次输入后触发 UserPromptSubmit（宿主职责，DESIGN 13.3）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -149,7 +149,7 @@ describe("CLI Hook 接入", () => {
     expect(seen).toEqual(["第一问", "第二问"]);
   });
 
-  it("onEvent 回调接管流式事件渲染（A 组定稿：渲染归属调用方，TUI 结构化消费）", async () => {
+  it("onEvent 回调接管流式事件渲染（此前确认：渲染归属调用方，TUI 结构化消费）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });

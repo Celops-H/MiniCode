@@ -7,7 +7,7 @@ async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
   for (const v of vals) yield v;
 }
 
-describe("Protocol 接口契约", () => {
+describe("Protocol 接口约定", () => {
   const mockProtocol: Protocol = {
     type: "openai-chat-completions",
     buildRequest(context) {
@@ -26,7 +26,7 @@ describe("Protocol 接口契约", () => {
     expect(req).toEqual({ messages: [{ role: "user", content: "hi" }] });
   });
 
-  it("parseStream 将厂商流式 chunk 归一化为统一事件", async () => {
+  it("parseStream 将厂商流式 chunk 转成统一事件流", async () => {
     const events: StreamEvent[] = [];
     for await (const e of mockProtocol.parseStream(chunkGen("a", "b"))) events.push(e);
     expect(events).toEqual([
@@ -37,7 +37,7 @@ describe("Protocol 接口契约", () => {
   });
 });
 
-describe("Provider 接口契约", () => {
+describe("Provider 接口约定", () => {
   const mockProvider: Provider = {
     id: "mock",
     name: "Mock",

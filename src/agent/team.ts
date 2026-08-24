@@ -32,7 +32,7 @@ export interface TeamOptions {
   worktrees?: boolean;
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论用，review 修复） */
   onRootEvent?: (event: StreamEvent) => void;
-  /** Hook 总线（子 agent 生命周期事件发射通道，A 组定稿）；缺省不发射 */
+  /** Hook 总线（子 agent 生命周期事件触发通道，此前确认）；缺省不触发 */
   hooks?: HookBus;
 }
 
@@ -141,14 +141,14 @@ export class Team {
     return child;
   }
 
-  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）；发射派生事件（A 组定稿） */
+  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）；触发派生事件（此前确认） */
   commitSpawn(path: AgentPath, agent: Agent): void {
     const member = this.members.get(path.toString());
     if (!member) return;
     member.agent = agent;
     agent.agentPath = path;
     if (member.parentPath) {
-      // 观测事件发射失败不影响 spawn 流程（review 修复：unhandled rejection 会崩进程）
+      // 观测事件触发失败不影响 spawn 流程（review 修复：unhandled rejection 会崩进程）
       void this.hooks
         ?.emit({
           type: "AgentSpawned",
@@ -278,7 +278,7 @@ export class Team {
     });
   }
 
-  /** 观测事件安全发射：handler 抛错不影响结论回灌与驱动流程（review 修复：未处理 rejection 会崩进程） */
+  /** 观测事件安全触发：handler 抛错不影响结论回灌与驱动流程（review 修复：未处理 rejection 会崩进程） */
   private async safeEmit(event: Parameters<HookBus["emit"]>[0]): Promise<void> {
     try {
       await this.hooks?.emit(event);

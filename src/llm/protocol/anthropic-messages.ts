@@ -31,7 +31,7 @@ export class AnthropicMessagesProtocol implements Protocol {
   }
 
   /**
-   * 解析 Anthropic 流式响应，归一化为统一事件。
+   * 解析 Anthropic 流式响应，转成统一事件流。
    * tool_use 参数经 input_json_delta 增量到达；content_block 的 index 映射为工具调用序号。
    * @param stream Anthropic 原始流式事件对象
    * @returns 统一事件流

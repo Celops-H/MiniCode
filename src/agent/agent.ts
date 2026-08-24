@@ -80,7 +80,7 @@ export interface AgentOptions {
   compactConfig?: CompactConfig;
   /** 权限管线；不传则工具执行前不做权限检查（DESIGN 8 权限审批） */
   permission?: PermissionPipeline;
-  /** Hook 事件总线；不传则不发射 Hook 事件（DESIGN 13） */
+  /** Hook 事件总线；不传则不触发 Hook 事件（DESIGN 13） */
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
@@ -250,7 +250,7 @@ export class Agent {
 
 /**
    * 会话驱动入口（宿主调用，DESIGN 13）：推进 turn 直到会话结束。
-   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主发射——
+   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发——
    * SessionStart 在会话开始（创建后首次驱动前）一次，UserPromptSubmit 在每次用户输入后一次。
    */
   async *run(): AsyncGenerator<StreamEvent> {
@@ -328,7 +328,7 @@ export class Agent {
    * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
    * 无工具调用则置 Stop 结束，否则执行工具调用并回灌结果。
    * 结束（Stop / 达到 maxTurns）后不再产生事件；收件箱消息可在后续注入唤醒续跑。
-   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主发射，本方法保持纯粹。
+   * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发，本方法保持纯粹。
    */
   async *runTurn(): AsyncGenerator<StreamEvent> {
     if (this.stopped) return;
@@ -350,7 +350,7 @@ export class Agent {
     for (;;) {
       try {
         for await (const event of this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal })) {
-          // 中断引发的流错误归一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
+          // 中断引发的流错误统一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
           if (this.interruptController.signal.aborted && event.type === "error") continue;
           collected.push(event);
           yield event;
@@ -590,7 +590,7 @@ export class Agent {
    * @returns 工具结果消息与上下文修改
    */
   private async executeTool(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
-    // PreToolUse 在每次工具调用前无条件发射（DESIGN 13.1）——未知工具/参数校验失败也先发，
+    // PreToolUse 在每次工具调用前无条件触发（DESIGN 13.1）——未知工具/参数校验失败也先发，
     // 配对闭合（调用开始后必有成功/失败事件）；hook 裁决对任何工具名生效
     const request: PermissionRequest = {
       toolName: call.name,
@@ -623,7 +623,7 @@ export class Agent {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
         };
       }
-      // 未知工具：发失败事件（观测闭合：调用开始后必有成功/失败结果，A 组定稿）
+      // 未知工具：发失败事件（观测闭合：调用开始后必有成功/失败结果，此前确认）
       const error = `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`;
       await this.hooks?.emit({
         type: "PostToolUseFailure",
@@ -676,7 +676,7 @@ export class Agent {
         : await this.permission.check(request, hook);
       if (!result.allowed) {
         const reason = result.reason ?? "未授权";
-        // 权限拒绝：发失败事件（观测闭合，A 组定稿）
+        // 权限拒绝：发失败事件（观测闭合，此前确认）
         await this.hooks?.emit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
@@ -764,7 +764,7 @@ export class Agent {
   }
 
   /**
-   * PreToolUse Hook 裁决：发射事件总线（每次工具调用前，无条件），
+   * PreToolUse Hook 裁决：触发事件总线（每次工具调用前，无条件），
    * 多个 hook 结果聚合为 deny 优先于 ask 优先于 allow（DESIGN 8.1 第一个反对即停）；
    * 无 hook 返回 undefined（有权限管线时继续走用户审批）。
    * @param request 权限请求（含工具名与完整参数）

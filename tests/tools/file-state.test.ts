@@ -51,7 +51,7 @@ describe("文件写冲突防护（DESIGN 7.6 per-agent 快照）", () => {
     expect(await readFile(file, "utf8")).toBe("v2");
   });
 
-  describe.skipIf(process.platform !== "win32")("Windows 路径大小写归一（DESIGN 7.6）", () => {
+  describe.skipIf(process.platform !== "win32")("Windows 路径大小写统一（DESIGN 7.6）", () => {
     it("read 小写路径后，大写路径的外部修改命中同一快照（write 拒绝）", async () => {
       const dir = setup();
       const file = path.join(dir, "a.txt");
@@ -62,7 +62,7 @@ describe("文件写冲突防护（DESIGN 7.6 per-agent 快照）", () => {
       await withFileState(state, () => readTool.execute({ path: file }));
       // 外部用大写路径修改（Windows 大小写不敏感，同一文件）
       writeFileSync(path.join(dir, "A.TXT"), "v2");
-      // 用小写路径 write：快照键已归一，命中 v1 快照 → 拒绝
+      // 用小写路径 write：快照键已统一，命中 v1 快照 → 拒绝
       const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v3" }));
       expect(out).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
       expect(await readFile(file, "utf8")).toBe("v2");

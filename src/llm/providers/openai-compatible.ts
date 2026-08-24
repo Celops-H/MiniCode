@@ -58,7 +58,7 @@ export class OpenAICompatibleProvider implements Provider {
   }
 
   /**
-   * 流式调用模型：组装请求 → 发到 OpenAI 兼容 API → 归一化为统一事件。
+   * 流式调用模型：组装请求 → 发到 OpenAI 兼容 API → 转成统一事件流。
    * @param modelId 模型 id
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流

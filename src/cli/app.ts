@@ -118,7 +118,7 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
   });
 
   logger.info(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）`);
-  // 会话开始（DESIGN 13.3：会话级事件由宿主发射）
+  // 会话开始（DESIGN 13.3：会话级事件由宿主触发）
   await hooks?.emit({ type: "SessionStart" });
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -131,8 +131,8 @@ async function startSession(modelId?: string, sessionId?: string, agents = false
       hooks,
     });
   } finally {
-    // 会话结束（DESIGN 13.3：会话级事件由宿主发射）；
-    // try/finally 兜底：interact 内抛错（如模型流错误）也要发射 SessionEnd，观测事件不缺失
+    // 会话结束（DESIGN 13.3：会话级事件由宿主触发）；
+    // try/finally 兜底：interact 内抛错（如模型流错误）也要触发 SessionEnd，观测事件不缺失
     await hooks?.emit({ type: "SessionEnd" });
   }
   rl.close();

@@ -740,7 +740,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(forwarded).toContain("汇总结论");
   });
 
-  it("子 agent 生命周期事件（A 组定稿）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
+  it("子 agent 生命周期事件（此前确认）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
     const events: string[] = [];
     const hooks = new HookBus();
     hooks.on("AgentSpawned", (e) => {

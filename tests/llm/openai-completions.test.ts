@@ -212,7 +212,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("推理模型的 reasoning_content 归一化为 thinking_delta", async () => {
+  it("推理模型的 reasoning_content 统一成 thinking_delta", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
