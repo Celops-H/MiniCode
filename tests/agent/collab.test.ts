@@ -627,6 +627,80 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(worker.isInterrupted()).toBe(true);
   });
 
+  it("interrupt 后复活：新一轮驱动复位中断状态，完成结论正常回灌父（review 修复：原实现不复位导致结论被吞）", async () => {
+    const team = new Team();
+    const root = new Agent({
+      modelClient: toolThenTextClient("x", {}),
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+    });
+    team.registerRoot(root);
+    // worker：第一轮调 read 工具，拿到结果后总结
+    const worker = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "r1", name: "read" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "复活后总结" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      tools: [
+        {
+          name: "read",
+          description: "慢读",
+          inputSchema: z.object({}),
+          isReadOnly: true,
+          requiresUserInteraction: false,
+          maxResultSizeChars: 100,
+          execute: async () => {
+            await sleep(100);
+            return "内容";
+          },
+        },
+      ],
+    });
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    team.commitSpawn(path, worker);
+
+    // 第一任务：read 执行期间中断
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "读文件",
+      triggerTurn: true,
+    });
+    await sleep(30);
+    worker.interrupt();
+    await sleep(150);
+    expect(worker.isInterrupted()).toBe(true);
+    // 被中断的结论不回灌（interrupt 是显式动作，不投中途文本当结论）
+    expect(root.getMessages().find((m) => m.role === "user" && m.source === "system")).toBeUndefined();
+
+    // followup 复活：新任务驱动 → resume 复位中断 → 完成结论回灌父
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "继续",
+      triggerTurn: true,
+    });
+    await sleep(200);
+    expect(worker.isInterrupted()).toBe(false);
+    const final = root
+      .getMessages()
+      .find((m) => m.role === "user" && m.source === "system" && m.content.includes("复活后总结"));
+    expect(final).toBeDefined();
+  });
+
   it("wait_agent：不能等待自己", async () => {
     const team = new Team();
     const root = new Agent({

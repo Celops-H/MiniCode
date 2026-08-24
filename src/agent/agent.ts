@@ -210,9 +210,11 @@ export class Agent {
    * @param input 用户输入内容
    */
   start(input: string): void {
-    // 新一轮用户输入到来：重置 Stop 与 turnCount，允许再次跑 turn（DESIGN 11.2 单次续跑上限）
+    // 新一轮用户输入到来：重置 Stop 与 turnCount，允许再次跑 turn（DESIGN 11.2 单次续跑上限）；
+    // 同步复位中断状态（新对话 = 新的生命周期，上一轮中断作废，结论可正常回灌）
     this.stopped = false;
     this.turnCount = 0;
+    this.interrupted = false;
     this.messages.push(userMessage(input));
   }
 
@@ -262,6 +264,9 @@ export class Agent {
   async *resume(): AsyncGenerator<StreamEvent> {
     if (this.active) return;
     this.active = true;
+    // 复活（新一轮驱动，DESIGN 11.2 中断后可复活）：复位中断状态——
+    // 上一轮 interrupt 置位只影响当时的 notifyCompletion 判定，新一轮结论应正常回灌父
+    this.interrupted = false;
     try {
       while (true) {
         for await (const event of this.runTurn()) {
@@ -271,6 +276,9 @@ export class Agent {
         if (this.mailbox.hasPending()) {
           this.stopped = false;
           this.turnCount = 0;
+          // 轮间继续 = 新任务：中断状态一并复位（review 修复：原实现只入口复位，
+          // interrupt 落活跃循环中途 + 排队消息继续时，新任务结论仍被 notifyCompletion 吞掉）
+          this.interrupted = false;
           continue;
         }
         // 收件箱空且终态（本轮模型回复无工具调用，或续跑预算耗尽）→ 会话结束
@@ -293,7 +301,8 @@ export class Agent {
 
   /**
    * 请求中断（turn 间，DESIGN 11.4）：置 stopped，当前 turn 结束后停止续跑；
-   * 收件箱有排队消息时中断不生效（消息视为新任务继续处理）；后续唤醒消息可复活。
+   * 收件箱有排队消息时中断不生效（消息视为新任务继续处理）；
+   * 后续唤醒消息可复活（新一轮 resume/start 时复位 interrupted，结论恢复回灌）。
    */
   interrupt(): void {
     this.stopped = true;
