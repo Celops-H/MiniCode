@@ -21,12 +21,10 @@ import {
   replaceWithSummary,
 } from "../context/index.js";
 import {
-  createSubagentTool,
   formatInputError,
   partitionByConcurrency,
   runBatches,
   spillOutput,
-  SUBAGENT_SYSTEM_PROMPT,
   ToolRegistry,
   type ExecuteOutcome,
   type Tool,
@@ -72,10 +70,6 @@ export interface AgentOptions {
   permission?: PermissionPipeline;
   /** Hook 事件总线；不传则不发射 Hook 事件（DESIGN 13） */
   hooks?: HookBus;
-  /** 启用子代理：注册 subagent 工具（DESIGN 10），缺省关闭 */
-  subagent?: boolean;
-  /** 子代理步数上限，缺省 10（防失控） */
-  subagentMaxTurns?: number;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
@@ -92,7 +86,6 @@ export class Agent {
   private readonly compactConfig?: CompactConfig;
   private readonly permission?: PermissionPipeline;
   private readonly hooks?: HookBus;
-  private readonly subagentMaxTurns: number;
   /** 本 agent 的文件状态快照（DESIGN 7.6）：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
   private readonly fileState = new FileState();
   /** 归属的团队（多 Agent 协作，DESIGN 11.1）；不传则本 agent 独立运行、不展示协作工具 */
@@ -123,18 +116,11 @@ export class Agent {
     this.compactConfig = options.compactConfig;
     this.permission = options.permission;
     this.hooks = options.hooks;
-    this.subagentMaxTurns = options.subagentMaxTurns ?? 10;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
     this.team = options.team;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
       this.registry.register(tool);
-    }
-    // 启用子代理时注册 subagent 工具，执行时创建独立上下文的子 Agent（DESIGN 10）
-    if (options.subagent) {
-      this.registry.register(
-        createSubagentTool({ runSubagent: (prompt) => this.runSubagent(prompt) }),
-      );
     }
     // 多 agent 环境：注册协作工具（DESIGN 11.4，仅团队内可见）
     if (this.team) {
@@ -477,30 +463,6 @@ export class Agent {
     if (results?.includes("ask")) return "ask";
     if (results?.includes("allow")) return "allow";
     return undefined;
-  }
-
-  /**
-   * 执行子代理：创建独立上下文的新 Agent 实例，只回传结论文本（DESIGN 10）。
-   * 子代理不继承父历史（只含任务描述），中间过程不进入父上下文。
-   * 递归防护（DESIGN 10.3）：子代理工具集去掉 subagent 自身，物理上无法再派生子代理。
-   * @param prompt 子任务描述
-   * @returns 子代理最后一条 assistant 文本结论
-   */
-  private async runSubagent(prompt: string): Promise<string> {
-    const subagent = new Agent({
-      modelClient: this.modelClient,
-      modelId: this.modelId,
-      systemPrompt: SUBAGENT_SYSTEM_PROMPT,
-      tools: this.registry.list().filter((tool) => tool.name !== "subagent"),
-      maxTurns: this.subagentMaxTurns,
-      // 权限继承（DESIGN 10.3 bubble）：复用父管线，子代理的规则/模式/审批/缓存冒泡到父会话
-      permission: this.permission,
-    });
-    subagent.start(prompt);
-    for await (const _ of subagent.run()) {
-      // 消费子代理事件流
-    }
-    return lastAssistantText(subagent.getMessages());
   }
 }
 
