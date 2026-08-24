@@ -21,15 +21,6 @@ export async function readJsonl<T>(file: string): Promise<T[]> {
 }
 
 /**
- * 追加一行到 JSONL 文件，自动创建父目录。
- * @param file 文件路径
- * @param item 待序列化追加的对象
- */
-export async function appendJsonl<T>(file: string, item: T): Promise<void> {
-  await appendJsonlBatch(file, [item]);
-}
-
-/**
  * 批量追加多行到 JSONL 文件，一次 I/O 写完整批（避免逐条 append 的系统调用开销）。
  * @param file 文件路径
  * @param items 待序列化追加的对象数组
