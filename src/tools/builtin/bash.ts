@@ -46,13 +46,21 @@ export function isExecTimeoutError(err: unknown): boolean {
 export function isReadOnlyBashCommand(command: string): boolean {
   const trimmed = command.trim();
   if (trimmed.length === 0) return false;
+  // 换行：多行命令（如 echo hi\nrm file）第二行可写，一律非只读
+  if (/\r?\n/.test(trimmed)) return false;
   // 重定向、管道、连接符、后台、子 shell → 可能写入文件或改变状态
   if (/[<>|;&()]/.test(trimmed)) return false;
   // 命令替换（$() / 反引号）、变量赋值前缀（VAR=x cmd）→ 改变状态
   if (/\$\(|\x60|^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed)) return false;
   const first = trimmed.split(/\s+/)[0];
   if (!first) return false;
-  if (first === "find" && /-(delete|exec|ok)\b/.test(trimmed)) return false;
+  // find 的写操作（delete/exec/execdir/okdir/ok/print 到文件等）→ 改变状态
+  if (
+    first === "find" &&
+    /-(delete|exec|execdir|okdir|ok|fprint|fprintf|fprint0|fls)\b/.test(trimmed)
+  ) {
+    return false;
+  }
   return READ_ONLY_COMMANDS.has(first);
 }
 

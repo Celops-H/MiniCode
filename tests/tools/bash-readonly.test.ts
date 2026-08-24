@@ -40,6 +40,21 @@ describe("isReadOnlyBashCommand（bash 只读判定）", () => {
     expect(isReadOnlyBashCommand("find . -exec rm {} \\;")).toBe(false);
   });
 
+  it("find 的 execdir/okdir/fprint 写操作判为非只读", () => {
+    expect(isReadOnlyBashCommand("find . -execdir rm {} \\;")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -okdir rm {} \\;")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -fprint out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -fprintf out.txt '%p'")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -fprint0 out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -fls out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("find . -ok rm {} \\;")).toBe(false);
+  });
+
+  it("多行命令（含换行）判为非只读（第二行可写）", () => {
+    expect(isReadOnlyBashCommand("echo hi\nrm file.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("ls\r\nrm file.txt")).toBe(false);
+  });
+
   it("空串判为非只读（保守）", () => {
     expect(isReadOnlyBashCommand("")).toBe(false);
     expect(isReadOnlyBashCommand("   ")).toBe(false);
