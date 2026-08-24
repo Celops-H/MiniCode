@@ -149,6 +149,35 @@ describe("CLI Hook 接入", () => {
     expect(seen).toEqual(["第一问", "第二问"]);
   });
 
+  it("onEvent 回调接管流式事件渲染（A 组定稿：渲染归属调用方，TUI 结构化消费）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复内容"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+    const events: string[] = [];
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      onEvent: (event) => {
+        if (event.type === "text_delta") events.push(event.text);
+      },
+    });
+    // 结构化事件经 onEvent 消费（write 不再承担流式渲染）
+    expect(events).toEqual(["回复内容"]);
+  });
+
   it("buildHookBus：config.hooks 装配成事件 → 命令映射（空配置不启用）", () => {
     expect(buildHookBus(undefined)).toBeUndefined();
     const bus = buildHookBus({ PreToolUse: ["echo {}"], SessionStart: ["echo start"] });

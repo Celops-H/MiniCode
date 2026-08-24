@@ -33,8 +33,17 @@ export interface InteractOptions {
   session: Session;
   /** 输入行迭代（CLI 里是 readline 每行一个输入） */
   inputs: AsyncIterable<string>;
-  /** 输出函数（CLI 里写 stdout） */
+  /**
+   * 输出函数（CLI 里写 stdout）。承担两类文本：
+   * 状态文本（[已压缩]/[未压缩]/[历史已压缩]/[未知命令]）与工具结果回显（[工具结果]，
+   * CLI 遗留路径）。TUI 不依赖 write 做结构化渲染——流式事件走 onEvent，工具结果走
+   * PostToolUse Hook 事件（A 组定稿）。
+   */
   write: (text: string) => void;
+  /** 流式事件渲染回调（A 组定稿：渲染归属调用方，TUI 结构化消费）；缺省用 renderStreamEvent 文本渲染。
+   * 注意与 Team.onRootEvent 配套接入：onEvent 覆盖用户输入驱动的流，onRootEvent 覆盖
+   * root 后台驱动（迟到子 agent 结论）的流，两侧都要接才不遗漏。 */
+  onEvent?: (event: StreamEvent) => void;
   /** Hook 总线（宿主发射会话级事件的通道，DESIGN 13.3）；缺省不发射 */
   hooks?: HookBus;
 }
@@ -48,6 +57,7 @@ export interface InteractOptions {
  */
 export async function interact(options: InteractOptions): Promise<void> {
   const { agent, store, session, inputs, write, hooks } = options;
+  const render = options.onEvent ?? ((event: StreamEvent): void => renderStreamEvent(write, event));
   // 已落盘游标 = session 内存消息数（appendMessage 会同步 append 到 session 内存；
   // checkpoint 回调在工具执行前已把 user+assistant 入队，轮末只补 tool_result）
   for await (const line of inputs) {
@@ -78,9 +88,9 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
     agent.start(input);
-    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记
+    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，A 组定稿）
     for await (const event of agent.run()) {
-      renderStreamEvent(write, event);
+      render(event);
     }
     write("\n");
     // 历史被改写（压缩/裁剪/剥组）：agent 内存为真相，重写整份盘防落盘错位；
