@@ -28,7 +28,13 @@ export const grepTool: Tool = {
       path?: string;
       glob?: string;
     }>(grepTool, input);
-    const regex = new RegExp(pattern);
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern);
+    } catch (err) {
+      // 模型常给内联大小写标志（(?i)）等 JS 不认的写法，返回可读原因让模型改词重试
+      return `grep 正则无效：${(err as Error).message}`;
+    }
     const cwd = dir ? resolvePath(dir) : currentCwd();
     const results: string[] = [];
     const { files, truncated } = await listTextFiles(cwd);
@@ -43,6 +49,7 @@ export const grepTool: Tool = {
       const lines = content.split("\n");
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? "";
+        regex.lastIndex = 0; // 防带 g/y 标志的正则跨行推进 lastIndex 漏匹配
         if (regex.test(line)) {
           results.push(`${file}:${i + 1}:${line}`);
         }

@@ -75,6 +75,22 @@ describe("文件类内置工具", () => {
     expect(out).not.toContain("b.txt");
   });
 
+  it("grep 正则无效时返回可读错误不崩溃", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "a.txt"), "Hello world");
+    const out = await tool("grep").execute({ pattern: "(?i)hello", path: dir });
+    expect(out).toMatch(/正则无效/);
+  });
+
+  it("grep 多行全匹配（不跨行漏匹配）", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "a.txt"), "abc\nabc\nabc");
+    const out = await tool("grep").execute({ pattern: "abc", path: dir });
+    expect(out).toContain("a.txt:1");
+    expect(out).toContain("a.txt:2");
+    expect(out).toContain("a.txt:3");
+  });
+
   it("无匹配时返回提示", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "a.txt"), "内容");
