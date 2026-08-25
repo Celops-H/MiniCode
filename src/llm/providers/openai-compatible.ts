@@ -21,6 +21,8 @@ export interface OpenAICompatibleOptions {
   apiKeyEnv: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
+  /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
+  reasoningContent?: boolean;
   /** 创建 client 的工厂（测试注入 mock） */
   createClient?: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
 }
@@ -32,7 +34,7 @@ export class OpenAICompatibleProvider implements Provider {
   readonly baseUrl: string;
   readonly auth: ProviderAuth;
 
-  private readonly protocol = new OpenAICompletionsProtocol();
+  private readonly protocol: OpenAICompletionsProtocol;
   private readonly modelList: ModelInfo[];
   private readonly createClient: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
   private readonly apiKey?: string;
@@ -43,6 +45,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.name = options.name;
     this.baseUrl = options.baseUrl;
     this.modelList = options.models;
+    this.protocol = new OpenAICompletionsProtocol({ reasoningContent: options.reasoningContent });
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;

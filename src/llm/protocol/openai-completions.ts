@@ -22,13 +22,20 @@ interface Choice {
 export class OpenAICompletionsProtocol implements Protocol {
   readonly type = "openai-chat-completions" as const;
 
+  /** DeepSeek 等推理厂商：assistant 的 thinking 块回传为 reasoning_content 字段 */
+  private readonly reasoningContent: boolean;
+
+  constructor(options: { reasoningContent?: boolean } = {}) {
+    this.reasoningContent = options.reasoningContent ?? false;
+  }
+
   /**
    * 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装。
    * @param context 一次模型调用的完整输入
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
   buildRequest(context: Context): unknown {
-    const converted = context.messages.map(toOpenAIMessage);
+    const converted = context.messages.map((message) => toOpenAIMessage(message, this.reasoningContent));
     return {
       // 系统提示词作为首条 system 消息进请求体（空则不占位，厂商拒空 system）
       messages: context.systemPrompt
@@ -142,9 +149,10 @@ function firstChoice(chunk: unknown): Choice | null {
 /**
  * 统一消息 → OpenAI 消息；assistant 的文本与工具调用拆成两个字段。
  * @param message 统一格式消息
+ * @param reasoningContent DeepSeek 等推理厂商：thinking 回传为 reasoning_content 字段
  * @returns OpenAI 消息对象
  */
-function toOpenAIMessage(message: Message): Record<string, unknown> {
+function toOpenAIMessage(message: Message, reasoningContent: boolean): Record<string, unknown> {
   switch (message.role) {
     case "user":
       return { role: "user", content: message.content };
@@ -156,9 +164,10 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
         .filter((b): b is TextContent => b.type === "text")
         .map((b) => ({ type: "text", text: b.text }));
       // 目标厂商无 thinking 概念，退化为文本
-      const thinkingBlocks = message.content
+      const thinkingText = message.content
         .filter((b): b is ThinkingContent => b.type === "thinking")
-        .map((b) => ({ type: "text", text: `<thinking>${b.thinking}</thinking>` }));
+        .map((b) => b.thinking)
+        .join("\n");
       // 工具调用转成 tool_calls 数组，参数序列化为 JSON 字符串
       const toolCalls = message.content
         .filter((b): b is ToolCall => b.type === "tool_call")
@@ -169,7 +178,11 @@ function toOpenAIMessage(message: Message): Record<string, unknown> {
         }));
 
       const out: Record<string, unknown> = { role: "assistant" };
-      const contentBlocks = [...textBlocks, ...thinkingBlocks];
+      const contentBlocks = [...textBlocks];
+      // DeepSeek 等推理厂商：上一轮 reasoning_content 必须原样回传（工具调用后下一轮缺了会 400 拒绝），
+      // 放到同名字段而不是退化进 content；OpenAI 官方保持退化文本行为
+      if (reasoningContent && thinkingText) out.reasoning_content = thinkingText;
+      else if (thinkingText) contentBlocks.push({ type: "text", text: `<thinking>${thinkingText}</thinking>` });
       if (contentBlocks.length > 0) out.content = contentBlocks;
       if (toolCalls.length > 0) out.tool_calls = toolCalls;
       return out;

@@ -72,6 +72,22 @@ describe("buildRequest：消息与工具转换", () => {
     });
   });
 
+  it("reasoningContent 模式：thinking 回传为 reasoning_content 字段，content 只留文本", () => {
+    const reasoningProtocol = new OpenAICompletionsProtocol({ reasoningContent: true });
+    const context = createContext("s", [
+      assistantMessage([
+        { type: "thinking", thinking: "内部推理" },
+        { type: "text", text: "回复" },
+      ]),
+    ]);
+    const req = reasoningProtocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "回复" }],
+      reasoning_content: "内部推理",
+    });
+  });
+
   it("工具 schema 转换为 function 格式", () => {
     const context = createContext("s", [], [
       { name: "read", description: "读文件", inputSchema: { type: "object", properties: { path: { type: "string" } } } },

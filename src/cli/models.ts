@@ -29,6 +29,8 @@ export function buildModelClient(config?: Config, modelId?: string): Models {
           name: provider.id,
           baseUrl: provider.baseUrl,
           apiKeyEnv: provider.apiKeyEnv,
+          // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
+          reasoningContent: provider.id === "deepseek",
           models: provider.models.map((m) => ({
             id: m.id,
             name: m.name ?? m.id,
@@ -70,6 +72,7 @@ function buildDefaultModelClient(modelId?: string): Models {
       name: "DeepSeek",
       baseUrl: DEFAULT_BASE_URL,
       apiKeyEnv: API_KEY_ENV,
+      reasoningContent: true, // DeepSeek 推理模型要求回传 reasoning_content
       models: [{ id, name: id, api: "openai-chat-completions", providerId: "deepseek" }],
     }),
   );
