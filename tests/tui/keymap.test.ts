@@ -15,11 +15,11 @@ it("normal 态：字符→input、回车→send、Esc→esc、Ctrl+C→noop（�
   expect(mapKey({ kind: "pageup" })).toEqual({ type: "scroll", dir: 1 });
 });
 
-it("modal 态：1/a/d→权限决策、Esc→取消、Ctrl+C 弃用、Ctrl+D 保留退出", () => {
+it("modal 态：1/2/3→权限决策、Esc→取消、Ctrl+C 弃用、Ctrl+D 保留退出", () => {
   const m = { popup: "modal" as const };
   expect(mapKey({ kind: "char", char: "1" }, m)).toEqual({ type: "permission", decision: "allow" });
-  expect(mapKey({ kind: "char", char: "a" }, m)).toEqual({ type: "permission", decision: "allow-all" });
-  expect(mapKey({ kind: "char", char: "d" }, m)).toEqual({ type: "permission", decision: "deny" });
+  expect(mapKey({ kind: "char", char: "2" }, m)).toEqual({ type: "permission", decision: "allow-all" });
+  expect(mapKey({ kind: "char", char: "3" }, m)).toEqual({ type: "permission", decision: "deny" });
   expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
   expect(mapKey({ kind: "ctrl-c" }, m)).toEqual({ type: "noop" });
   expect(mapKey({ kind: "ctrl-d" }, m)).toEqual({ type: "exit" });

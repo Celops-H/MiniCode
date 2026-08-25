@@ -94,11 +94,11 @@ export const NEW_SESSION_ID = "__new__";
 /** 嵌入弹层：权限确认 / 会话切换 */
 export type ModalState = PermissionModalState | SessionModalState;
 
-/** 权限三决策文案（UI-SPEC §4：进入药顺序与 selected 对应） */
+/** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
   { key: "1", label: "允许本次", decision: "allow" },
-  { key: "a", label: "允许会话全部", decision: "allow-all" },
-  { key: "d", label: "拒绝", decision: "deny" },
+  { key: "2", label: "允许会话全部", decision: "allow-all" },
+  { key: "3", label: "拒绝", decision: "deny" },
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */

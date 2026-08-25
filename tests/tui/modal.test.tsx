@@ -2,6 +2,7 @@
  * 层 1：嵌入弹块——权限确认 / 会话切换面板渲染断言。
  */
 import { testRender } from "@opentui/solid";
+import { createStore } from "solid-js/store";
 import { it, expect } from "vitest";
 import { ModalView } from "../../src/tui/view/Modal.js";
 import type { ModalState } from "../../src/tui/state.js";
@@ -21,12 +22,30 @@ it("权限弹块：工具名/参数/三决策与选中高亮", async () => {
   expect(frame).toContain("bash");
   expect(frame).toContain("pnpm test");
   expect(frame).toContain("[1] 允许本次");
-  expect(frame).toContain("[a] 允许会话全部");
-  expect(frame).toContain("[d] 拒绝");
+  expect(frame).toContain("[2] 允许会话全部");
+  expect(frame).toContain("[3] 拒绝");
   // selected=1 即「允许会话全部」高亮（带 ◀ 标记）
   expect(frame).toContain("◀");
   // 框线（视觉分隔体系：权限弹窗 rounded 边框 + 边框内标题）
   expect(frame).toContain("╭");
+});
+
+it("高亮随 selected 挪动（◀ 跟着选中项走）——For+条件曾在此渲染器下不刷新标量的回归", async () => {
+  const [modal, setModal] = createStore<ModalState>({
+    kind: "permission",
+    toolName: "bash",
+    content: "pnpm test",
+    argsText: "{}",
+    selected: 0,
+  });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  await setup.waitForVisualIdle();
+  const pos0 = setup.captureCharFrame().indexOf("◀");
+  setModal({ kind: "permission", toolName: "bash", content: "pnpm test", argsText: "{}", selected: 2 });
+  await setup.waitForVisualIdle();
+  const pos2 = setup.captureCharFrame().indexOf("◀");
+  // 从第 1 项挪到第 3 项：◀ 位置右移（3 项间距明显）
+  expect(pos2).toBeGreaterThan(pos0);
 });
 
 it("会话面板：列表/新建入口/键位提示", async () => {

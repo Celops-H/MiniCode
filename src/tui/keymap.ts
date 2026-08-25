@@ -97,7 +97,7 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
   }
 }
 
-/** modal 态（权限确认 / 会话面板）：方向键导航、Enter 确认、Esc 取消、1/a/d 权限决策；
+/** modal 态（权限确认 / 会话面板）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
  *  Ctrl+D 保留退出；Ctrl+C 弃用（与终端复制冲突，改 Esc 语义）。 */
 function mapModalKey(key: Key): TuiAction {
   switch (key.kind) {
@@ -121,8 +121,8 @@ function mapModalKey(key: Key): TuiAction {
       return { type: "scroll", dir: -1 };
     case "char":
       if (key.char === "1") return { type: "permission", decision: "allow" };
-      if (key.char === "a") return { type: "permission", decision: "allow-all" };
-      if (key.char === "d") return { type: "permission", decision: "deny" };
+      if (key.char === "2") return { type: "permission", decision: "allow-all" };
+      if (key.char === "3") return { type: "permission", decision: "deny" };
       return { type: "noop" };
     default:
       return { type: "noop" };
