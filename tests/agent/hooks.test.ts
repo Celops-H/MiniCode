@@ -594,3 +594,51 @@ describe("Agent hook/approver 抛错不中断回合（⑭e）", () => {
     expect(result?.isError).toBe(true);
   });
 });
+
+describe("未知工具 + 权限管线裁决（⑭g）", () => {
+  it("有权限管线时未知工具也尊重 hook deny，给权限拒绝而非未知工具", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: unknownToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [] }),
+      tools: [],
+    });
+    agent.start("调未知工具");
+    for await (const _ of agent.run()) {
+      // 消费，断言回合完整
+    }
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining("权限拒绝") }),
+    );
+  });
+
+  it("有权限管线时未知工具放行后才报未知工具", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "allow");
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: unknownToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [parseRuleString("read", "deny")] }), // 规则不匹配未知工具
+      tools: [],
+    });
+    agent.start("调未知工具");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining("未知工具") }),
+    );
+  });
+});

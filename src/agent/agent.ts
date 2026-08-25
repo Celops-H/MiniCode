@@ -640,7 +640,25 @@ export class Agent {
         .list()
         .map((t) => t.name)
         .join("、");
-      if (!this.permission && hookRejects) {
+      // 有权限管线：未知工具也先走权限裁决（规则 deny 优先、hook 裁决与审批对任何工具名生效），
+      // 拒绝给权限错误；放行才反馈「未知工具」——与注释「hook 拒绝优先于未知工具反馈」一致
+      if (this.permission) {
+        const hook = hookVerdict !== undefined ? async (): Promise<PermissionBehavior | undefined> => hookVerdict : undefined;
+        const result = await this.permission.check(request, hook);
+        if (!result.allowed) {
+          const reason = result.reason ?? "未授权";
+          await this.safeEmit({
+            type: "PostToolUseFailure",
+            toolCallId: call.id,
+            toolName: call.name,
+            input: call.input,
+            error: `权限拒绝：${reason}`,
+            agentPath,
+          });
+          return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true) };
+        }
+      } else if (hookRejects) {
+        // 无管线时 hook 裁决直接生效（hook 拒绝优先于「未知工具」反馈）
         const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
         await this.safeEmit({
           type: "PostToolUseFailure",
