@@ -40,7 +40,7 @@ export function App(props: AppProps): JSX.Element {
   return (
     <box flexDirection="column" flexGrow={1}>
       <Messages blocks={props.state.blocks} modelLabel={props.model} streaming={props.state.streaming} />
-      <PromptView prompt={props.state.prompt} />
+      <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} />
     </box>
   );
