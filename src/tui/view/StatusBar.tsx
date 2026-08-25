@@ -14,11 +14,11 @@ export interface StatusBarProps {
 export function StatusBar(props: StatusBarProps): JSX.Element {
   return (
     <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} paddingTop={1} flexShrink={0}>
-      <box flexDirection="row" gap={1}>
+      <box flexDirection="row" gap={1} flexShrink={0}>
         <text fg={theme.text}>{props.model}</text>
         <text fg={theme.textMuted}>· 会话 {props.sessionId.slice(-6)}</text>
       </box>
-      <text fg={theme.textMuted}>
+      <text fg={theme.textMuted} flexShrink={0}>
         {props.status === "running" ? (
           <span style={{ fg: theme.warning }}>▶ 运行中（Ctrl+C 打断当前轮）</span>
         ) : (

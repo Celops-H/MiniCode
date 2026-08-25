@@ -72,7 +72,7 @@ function ToolView(props: { b: ToolBlock }): JSX.Element {
   const hint =
     props.b.collapsedOutput && hasOutput
       ? props.b.output
-        ? `▾ 输出 ${props.b.output.split("\n").length} 行 · Enter 展开`
+        ? `▾ 输出 ${props.b.output.replace(/\n$/, "").split("\n").length} 行 · Enter 展开`
         : "▾ 错误详情 · Enter 展开"
       : "";
   return (
