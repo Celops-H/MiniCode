@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /**
  * 等待 signal 中止，中止时抛 AbortError（模拟底层流在 abort 时中断）。
@@ -282,5 +286,26 @@ describe("Agent 主循环：turn 内真打断", () => {
     expect(results).toHaveLength(2);
     expect(results[0]).toMatchObject({ toolCallId: "call_1", isError: true });
     expect(results[1]).toMatchObject({ toolCallId: "call_2", isError: true });
+  });
+
+  it("流忽略 abort 永不结束：中断看门狗 3s 强制收尾，run 不被永久卡住", async () => {
+    vi.useFakeTimers();
+    // 忽略 signal 的永挂流（模拟 SDK/厂商不响应 abort，真机「打断后一切无响应」场景）
+    const client: ModelClient = {
+      async *stream() {
+        yield { type: "text_delta", text: "开头段" };
+        await new Promise<void>(() => {}); // 永不 resolve
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手" });
+    agent.start("看门狗");
+    const eventsPromise = run(agent);
+    await Promise.resolve(); // 让流推进到挂起点
+    agent.interrupt();
+    await vi.advanceTimersByTimeAsync(3_001); // 看门狗超时触发
+    const events = await eventsPromise;
+    // 已产出保留、回合收尾（不再永久挂起，宿主输入循环可恢复）
+    expect(events).toEqual([{ type: "text_delta", text: "开头段" }]);
+    expect(agent.getMessages()).toHaveLength(2); // user + 半截 assistant
   });
 });

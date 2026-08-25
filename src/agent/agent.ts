@@ -349,7 +349,11 @@ export class Agent {
     let retryAttempts = 0;
     for (;;) {
       try {
-        for await (const event of this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal })) {
+        for await (const event of withInterruptTimeout(
+          this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
+          this.interruptController.signal,
+          INTERRUPT_STREAM_TIMEOUT_MS,
+        )) {
           // 中断引发的流错误统一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
           if (this.interruptController.signal.aborted && event.type === "error") continue;
           collected.push(event);
@@ -898,4 +902,47 @@ function toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
   return (async function* () {
     for (const item of items) yield item;
   })();
+}
+
+/** 中断看门狗超时：signal 中止后流仍未结束的容忍窗口（ms） */
+const INTERRUPT_STREAM_TIMEOUT_MS = 3_000;
+
+/**
+ * 中断看门狗：signal 中止后，流若在 timeoutMs 内仍未产出/结束（SDK 或厂商不响应 abort），
+ * 强制抛 AbortError 结束迭代——保证 interrupt 后本轮必然快速收尾，
+ * 宿主输入循环不会被永不结束的流卡死（真机「打断后命令全部无响应」根因）。
+ * @param source 原始流
+ * @param signal 中断信号
+ * @param timeoutMs 中止后的容忍窗口
+ * @returns 包装后的流
+ */
+async function* withInterruptTimeout<T>(
+  source: AsyncIterable<T>,
+  signal: AbortSignal,
+  timeoutMs: number,
+): AsyncIterable<T> {
+  const iterator = source[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const next = iterator.next();
+      let timer: NodeJS.Timeout | undefined;
+      let onAbort: (() => void) | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          timer = setTimeout(() => reject(new DOMException("Aborted", "AbortError")), timeoutMs);
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      });
+      const result = await Promise.race([next, deadline]);
+      if (timer) clearTimeout(timer);
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+      if (result.done) return;
+      yield result.value;
+    }
+  } finally {
+    // 不等待 return：永挂流（await 永不 settle）的 return() 也永不完成，等待会把收尾卡死；
+    // 触发清理但不等结果，底层流正常时自会释放
+    iterator.return?.().catch(() => undefined);
+  }
 }
