@@ -12,6 +12,7 @@ import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import type { Tool } from "../tools/index.js";
 import type { Message, ThinkingLevel } from "../core/index.js";
+import type { PermissionPipeline } from "../permission/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { ModelClient } from "../agent/index.js";
 import type { Config } from "../config/index.js";
@@ -86,6 +87,17 @@ program
     for (const meta of sessions) {
       console.log(`${meta.id}  ${meta.title}  ${meta.model}  ${meta.updatedAt}`);
     }
+  });
+
+// TUI 会话界面（前端接线，入口装配在 src/tui/index.tsx）
+program
+  .command("tui")
+  .description("进入 TUI 会话界面")
+  .option("-c, --continue <sessionId>", "继续指定会话")
+  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
+  .action(async (options: { continue?: string; agents?: boolean }) => {
+    const { runTuiEntry } = await import("../tui/index.js");
+    await runTuiEntry({ sessionId: options.continue, agents: options.agents });
   });
 
 export async function main(): Promise<void> {
@@ -225,6 +237,8 @@ export function createSessionAgent(options: {
   thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
   onRootEvent?: (event: StreamEvent) => void;
+  /** 权限管线（TUI 注入用户审批 approver）；缺省不启用 */
+  permission?: PermissionPipeline;
 }): { agent: Agent; team?: Team } {
   const envPrompt = environmentPrompt();
   if (options.agents === false) {
