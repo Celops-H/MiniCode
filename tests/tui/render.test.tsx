@@ -14,7 +14,7 @@ describe("view/App 渲染链", () => {
       () => (
         <App state={channel.state} model="test-model" sessionId="abc123" onAction={channel.onAction} />
       ),
-      { width: 40, height: 8 },
+      { width: 80, height: 10 },
     );
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();

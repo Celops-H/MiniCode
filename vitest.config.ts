@@ -37,7 +37,8 @@ export default defineConfig({
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
   },
-  // [临时验证] 与 vite.config 的 noExternal 保持一致，确认统一 solid-js 实例不影响现有测试
+  // 与 vite.config 的 noExternal 保持一致：统一 solid-js 单实例（组件与 @opentui/solid 共享，
+  // 否则 store 更新驱动不了 reconciler 渲染），TUI 回归测试依赖此配置
   ssr: {
     noExternal: ["solid-js", "@opentui/solid"],
   },

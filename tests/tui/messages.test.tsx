@@ -45,8 +45,11 @@ it("工具卡按状态显示图标与名称", async () => {
     { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: false, output: "export function a() {}" },
   ]);
   await ok.waitForVisualIdle();
-  expect(ok.captureCharFrame()).toContain("✓");
-  expect(ok.captureCharFrame()).toContain("read");
+  const frame = ok.captureCharFrame();
+  expect(frame).toContain("✓");
+  expect(frame).toContain("read");
+  // 卡片 rounded 框线（视觉分隔体系：边框内标题）
+  expect(frame).toContain("╭");
 
   const fail = await app([
     { kind: "tool", index: 0, turn: 0, name: "grep", args: "{}", status: "failure", error: "Invalid pattern", collapsedArgs: true, collapsedOutput: false },

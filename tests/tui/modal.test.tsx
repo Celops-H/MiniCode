@@ -25,6 +25,8 @@ it("权限弹块：工具名/参数/三决策与选中高亮", async () => {
   expect(frame).toContain("[d] 拒绝");
   // selected=1 即「允许会话全部」高亮（带 ◀ 标记）
   expect(frame).toContain("◀");
+  // 框线（视觉分隔体系：权限弹窗 rounded 边框 + 边框内标题）
+  expect(frame).toContain("╭");
 });
 
 it("会话面板：列表/新建入口/键位提示", async () => {

@@ -1,7 +1,8 @@
 /**
- * 输入框视图（R3a）：多行编辑 + 光标（反色块）+ slash 候选列表。
+ * 输入框视图（R3a + 收尾打磨批 ①）：多行编辑 + 光标（反色块）+ slash 候选列表。
  * 编辑逻辑全在 reducer（input/backspace/cursor/history/newline/send 动作），本组件只读 prompt 呈现。
- * 光标反色块紧跟光标前文本：opentui 布局引擎按展示宽度排版（CJK 宽字符自动占 2 格），无需手动换算。
+ * 边界：输入区顶部边框线 + 面板底色，与消息区/状态行分隔；光标反色块高对比，光标紧跟光标前文本
+ * （opentui 布局引擎按展示宽度排版，CJK 宽字符自动占 2 格）。
  * 候选列表：输入以 / 开头时按 query 匹配命令展示，选中项高亮（↑↓ 选择、Tab 补全由 reducer 处理）。
  */
 import { For } from "solid-js";
@@ -9,17 +10,22 @@ import type { JSX } from "@opentui/solid";
 import type { PromptState, SlashCandidate } from "../state.js";
 import { theme } from "./theme.js";
 
-/** slash 候选列表：query 与匹配项，选中项高亮 */
+/** slash 候选列表：query 与匹配项，选中项高亮 chip */
 function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
   return (
     <box flexDirection="column" flexShrink={0}>
       <For each={props.candidate.items}>
         {(item, i) => (
           <box flexShrink={0}>
-            <text fg={i() === props.candidate.selected ? theme.foregroundAccent : theme.textMuted}>
-              {i() === props.candidate.selected ? "▸ " : "  "}
-              {item}
-            </text>
+            {i() === props.candidate.selected ? (
+              <text>
+                <span style={{ bg: theme.foregroundAccent, fg: theme.text }}>
+                  ▸ {item}
+                </span>
+              </text>
+            ) : (
+              <text fg={theme.textMuted}>  {item}</text>
+            )}
           </box>
         )}
       </For>
@@ -35,8 +41,10 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
       flexShrink={0}
       paddingX={1}
       paddingTop={1}
+      paddingBottom={1}
+      backgroundColor={theme.backgroundPanel}
       border={["top"]}
-      borderColor={theme.backgroundPanel}
+      borderColor={theme.border}
     >
       {props.candidate ? <CandidateList candidate={props.candidate} /> : null}
       <For each={props.prompt.lines}>
@@ -50,7 +58,8 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
             <text>
               {prefix}
               {before}
-              <span style={{ bg: theme.textMuted, fg: theme.text }}> </span>
+              {/* 反色块光标：强调色底 + 深色字，编辑位置一眼可见 */}
+              <span style={{ bg: theme.foregroundAccent, fg: theme.background }}> </span>
               {after}
             </text>
           );
