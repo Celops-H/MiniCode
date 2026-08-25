@@ -8,7 +8,7 @@ import { it, expect } from "vitest";
 import { createChannel } from "../../src/tui/loop.js";
 import { opentuiKeyToKey } from "../../src/tui/opentuiKeys.js";
 import { mapKey } from "../../src/tui/keymap.js";
-import { initState, reduceAction, cyclePermissionMode, permissionModeLabel, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceHook, cyclePermissionMode, permissionModeLabel, type TuiState } from "../../src/tui/state.js";
 
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   const base = initState([]);
@@ -51,6 +51,16 @@ it("Shift+Tab 切换权限模式（一般→plan→auto 循环）", () => {
   expect(permissionModeLabel("default")).toBe("default");
   expect(permissionModeLabel("plan")).toBe("plan mode");
   expect(permissionModeLabel("bypassPermissions")).toBe("auto mode");
+});
+
+it("AgentSpawned 追加到 agents 树（main() 恒在首位，去重）", () => {
+  const base = initState([]);
+  expect(base.agents).toEqual(["/root"]);
+  const spawned = reduceHook(base, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });
+  expect(spawned.agents).toEqual(["/root", "/root/task_1"]);
+  // 重复事件去重
+  const dup = reduceHook(spawned, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });
+  expect(dup.agents).toEqual(["/root", "/root/task_1"]);
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

@@ -150,6 +150,8 @@ export interface TuiState {
   status: "idle" | "running";
   /** 当前权限模式（一般/plan/auto）：Shift+Tab 切换，回灌后端 PermissionPipeline */
   permissionMode: PermissionMode;
+  /** 可见 agent 路径列表（main() 恒在首位，AgentSpawned 追加）——底栏 agent 树数据源 */
+  agents: string[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
   /** 可折叠块聚焦（Tab 切换、Enter 翻折）：-1 无聚焦（Enter 发送） */
@@ -251,6 +253,7 @@ export function initState(messages: Message[]): TuiState {
     streaming: undefined,
     status: "idle",
     permissionMode: "default",
+    agents: ["/root"],
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
@@ -511,6 +514,7 @@ export function reduceHook(state: TuiState, event: HookEvent): TuiState {
     case "AgentSpawned":
       return {
         ...state,
+        agents: state.agents.includes(event.path) ? state.agents : [...state.agents, event.path],
         blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path }],
       };
     case "AgentCompleted":

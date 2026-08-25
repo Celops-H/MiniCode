@@ -73,7 +73,8 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
       paddingTop={1}
       paddingBottom={1}
       backgroundColor={theme.backgroundPanel}
-      border={["top"]}
+      // 上+下两条边界线：与背景块对齐，输入框随行数增高时线跟着块的上下沿走（上限 20 行）
+      border={["top", "bottom"]}
       borderColor={theme.border}
     >
       {props.candidate ? <CandidateList candidate={props.candidate} /> : null}

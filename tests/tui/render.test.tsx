@@ -7,6 +7,7 @@ import { testRender } from "@opentui/solid";
 import { describe, it, expect } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
+import type { TuiState } from "../../src/tui/state.js";
 
 describe("view/App 渲染链", () => {
   it("根组件渲染出界面骨架内容", async () => {
@@ -36,5 +37,18 @@ describe("view/App 渲染链", () => {
     // 模型名与权限模式 chip 保留在同一行（flexShrink:0 右侧溢出被截而非换行）
     expect(frame).toContain("test-model");
     expect(frame).toContain("模式[default]");
+  });
+
+  it("底栏显示 agent 树：main() + 子 agent 一行", async () => {
+    const channel = createChannel([]);
+    const st: TuiState = { ...channel.state, agents: ["/root", "/root/task_1"] };
+    const setup = await testRender(
+      () => <App state={st} model="m" sessionId="s" onAction={channel.onAction} />,
+      { width: 64, height: 12 },
+    );
+    await setup.waitForVisualIdle();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("main()");
+    expect(frame).toContain("task_1()");
   });
 });

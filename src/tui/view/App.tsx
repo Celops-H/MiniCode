@@ -15,6 +15,7 @@ import { Messages } from "./Messages.js";
 import { PromptView } from "./Prompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { ModalView } from "./Modal.js";
+import { AgentStrip } from "./AgentStrip.js";
 import { theme } from "./theme.js";
 
 export interface AppProps {
@@ -63,6 +64,7 @@ export function App(props: AppProps): JSX.Element {
       ) : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} permissionMode={props.state.permissionMode} />
+      {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
     </box>
   );
 }
