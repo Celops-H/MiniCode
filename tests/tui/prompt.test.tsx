@@ -4,7 +4,21 @@
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
 import { PromptView } from "../../src/tui/view/Prompt.js";
+import { createChannel } from "../../src/tui/loop.js";
 import type { PromptState, SlashCandidate } from "../../src/tui/state.js";
+
+/** 光标反色块所在列：扫描最亮的紫色 bg 空格（测试 blink=false，光标恒亮） */
+function cursorColumn(setup: { captureSpans: () => { lines: Array<{ spans: Array<{ text: string; bg: { b: number }; width: number }> }> } }): number {
+  const frame = setup.captureSpans();
+  for (const line of frame.lines) {
+    let x = 0;
+    for (const span of line.spans) {
+      if (span.bg && span.bg.b > 0.7 && span.text === " ") return x;
+      x += span.width ?? 1;
+    }
+  }
+  return -1;
+}
 
 const prompt = (over: Partial<PromptState> = {}): PromptState => ({
   lines: [""],
@@ -51,4 +65,21 @@ it("slash 候选列表显示匹配命令与选中态", async () => {
   expect(frame).toContain("/compact");
   expect(frame).toContain("/continue");
   expect(frame).toContain("▸");
+});
+
+it("光标随左右键定位：curCol 移动后反色块列跟随（For+条件渲染器回归）", async () => {
+  const channel = createChannel([]);
+  const setup = await testRender(
+    () => <PromptView prompt={channel.state.prompt} blink={false} />,
+    { width: 40, height: 4 },
+  );
+  await setup.waitForVisualIdle();
+  channel.onAction({ type: "input", text: "ab" });
+  await setup.waitForVisualIdle();
+  const afterInput = cursorColumn(setup);
+  expect(afterInput).toBeGreaterThan(0);
+  channel.onAction({ type: "cursor", dir: "left" });
+  await setup.waitForVisualIdle();
+  const afterLeft = cursorColumn(setup);
+  expect(afterLeft).toBe(afterInput - 1);
 });

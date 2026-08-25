@@ -1,40 +1,70 @@
 /**
- * 输入框视图（R3a + 收尾打磨批 ①）：多行编辑 + 光标（反色块）+ slash 候选列表。
+ * 输入框视图（R3a + 新任务 3）：多行编辑 + 光标（反色块，闪烁）+ slash 候选列表。
  * 编辑逻辑全在 reducer（input/backspace/cursor/history/newline/send 动作），本组件只读 prompt 呈现。
- * 边界：输入区顶部边框线 + 面板底色，与消息区/状态行分隔；光标反色块高对比，光标紧跟光标前文本
- * （opentui 布局引擎按展示宽度排版，CJK 宽字符自动占 2 格）。
- * 候选列表：输入以 / 开头时按 query 匹配命令展示，选中项高亮（↑↓ 选择、Tab 补全由 reducer 处理）。
+ * 边界：输入区顶部边框线 + 面板底色，与消息区/状态行分隔。
+ * 渲染：**不用 <For>+条件**（opentui reconciler 下 For 子项不随非 each 依赖的标量刷新——历史 bug：
+ * 光标/选中态不随 curCol/curLine/selected 移动），改 createMemo 读整个 prompt 重算行列表；
+ * 光标反色块随编辑位置移动并 500ms 闪烁。
+ * 候选列表同此：memo 读 selected 重算，选中行 ▸ 高亮。
  */
-import { For } from "solid-js";
+import { createMemo, onCleanup, onMount, createSignal } from "solid-js";
 import type { JSX } from "@opentui/solid";
 import type { PromptState, SlashCandidate } from "../state.js";
 import { theme } from "./theme.js";
 
-/** slash 候选列表：query 与匹配项，选中项高亮 chip */
+/** slash 候选列表：memo 重算选中态（▸ 高亮随 ↑↓ 移动） */
 function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
+  const rows = createMemo(() =>
+    props.candidate.items.map((item, i) =>
+      i === props.candidate.selected ? (
+        <text>
+          <span style={{ bg: theme.foregroundAccent, fg: theme.text }}>▸ {item}</span>
+        </text>
+      ) : (
+        <text fg={theme.textMuted}>  {item}</text>
+      ),
+    ),
+  );
   return (
     <box flexDirection="column" flexShrink={0}>
-      <For each={props.candidate.items}>
-        {(item, i) => (
-          <box flexShrink={0}>
-            {i() === props.candidate.selected ? (
-              <text>
-                <span style={{ bg: theme.foregroundAccent, fg: theme.text }}>
-                  ▸ {item}
-                </span>
-              </text>
-            ) : (
-              <text fg={theme.textMuted}>  {item}</text>
-            )}
-          </box>
-        )}
-      </For>
+      {rows()}
       <text fg={theme.textMuted}>Tab 补全 · ↑↓ 选择 · Esc 收起</text>
     </box>
   );
 }
 
-export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate }): JSX.Element {
+export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate; blink?: boolean }): JSX.Element {
+  // 光标闪烁：500ms 切换一次「亮/灭」色（反色块由强调色 ⇄ 低对比）；测试可传 blink=false 关掉
+  const [cursorOn, setCursorOn] = createSignal(true);
+  onMount(() => {
+    if (props.blink === false) return;
+    const timer = setInterval(() => setCursorOn((c) => !c), 500);
+    onCleanup(() => clearInterval(timer));
+  });
+
+  // 行列表：读整个 prompt（lines/curLine/curCol），任何变化整体重算——光标位置必跟上
+  const rows = createMemo(() => {
+    const p = props.prompt;
+    return p.lines.map((line, i) => {
+      const prefix = i === 0 ? "❯ " : "  ";
+      if (i !== p.curLine) return <text>{prefix + line}</text>;
+      const chars = Array.from(line);
+      const before = chars.slice(0, p.curCol).join("");
+      const after = chars.slice(p.curCol).join("");
+      return (
+        <text>
+          {prefix}
+          {before}
+          {/* 反色块光标：亮=强调色底，灭=低对比底（闪烁），位置=实际编辑列 */}
+          <span style={{ bg: cursorOn() ? theme.foregroundAccent : theme.backgroundRaised, fg: theme.background }}>
+            {" "}
+          </span>
+          {after}
+        </text>
+      );
+    });
+  });
+
   return (
     <box
       flexDirection="column"
@@ -47,24 +77,7 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
       borderColor={theme.border}
     >
       {props.candidate ? <CandidateList candidate={props.candidate} /> : null}
-      <For each={props.prompt.lines}>
-        {(line, i) => {
-          const prefix = i() === 0 ? "❯ " : "  ";
-          if (i() !== props.prompt.curLine) return <text>{prefix + line}</text>;
-          const chars = Array.from(line);
-          const before = chars.slice(0, props.prompt.curCol).join("");
-          const after = chars.slice(props.prompt.curCol).join("");
-          return (
-            <text>
-              {prefix}
-              {before}
-              {/* 反色块光标：强调色底 + 深色字，编辑位置一眼可见 */}
-              <span style={{ bg: theme.foregroundAccent, fg: theme.background }}> </span>
-              {after}
-            </text>
-          );
-        }}
-      </For>
+      {rows()}
     </box>
   );
 }
