@@ -7,6 +7,7 @@
  * 非 each 依赖的标量刷新），改用 createMemo 直接读 selected 重算——高亮随 ←→ 移动。
  */
 import { createMemo } from "solid-js";
+import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { ModalState } from "../state.js";
 import { PERMISSION_OPTIONS } from "../state.js";
@@ -52,13 +53,21 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板：边框内标题 + 最近会话列表 + 新建入口（选中高亮随 ↑↓ 移动），键位提示 */
+/** 会话切换面板：边框内标题 + 最近会话列表 + 新建入口（选中高亮随 ↑↓ 移动），键位提示。
+ *  会话多于可视高度时按窗口渲染（选中项尽量居中，越界贴边），防列表溢出屏幕。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
-  // 列表行：memo 读 b.selected 重算（同权限弹窗，For+条件不刷新标量）
-  const rows = createMemo(() => [
-    ...b.sessions.map((s, i) =>
-      i === b.selected ? (
+  const dims = useTerminalDimensions();
+  // 列表行：窗口渲染（memo 读 selected/dims 重算）。标题框+提示约 6 行，会话条按剩余高度截断
+  const rows = createMemo(() => {
+    const total = b.sessions.length;
+    const avail = dims().height ?? 20;
+    const sessRows = Math.max(1, Math.min(total, avail - 7));
+    const start = Math.max(0, Math.min(b.selected - Math.floor((sessRows - 1) / 2), total - sessRows));
+    const visible = b.sessions.slice(start, start + sessRows);
+    const items = visible.map((s, i) => {
+      const sel = start + i === b.selected;
+      return sel ? (
         <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
           ▸ {s.id.slice(-6)} · {s.model}
         </text>
@@ -67,26 +76,33 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
           {"  "}
           {s.id.slice(-6)} · {s.model}
         </text>
+      );
+    });
+    const newSel = b.selected === total;
+    items.push(
+      newSel ? (
+        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+          ▸ ── 新建会话 ──
+        </text>
+      ) : (
+        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+          {"  "}── 新建会话 ──
+        </text>
       ),
-    ),
-    b.selected === b.sessions.length ? (
-      <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
-        ▸ ── 新建会话 ──
-      </text>
-    ) : (
-      <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
-        {"  "}── 新建会话 ──
-      </text>
-    ),
-  ]);
+    );
+    const overflow = total > sessRows ? `（${start + 1}-${Math.min(start + sessRows, total)}/${total}）` : "";
+    items.push(
+      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+        ↑↓ 选择 · Enter 切换/新建 · Esc 取消{overflow}
+      </text>,
+    );
+    return items;
+  });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
       <box border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
         title="切换会话" titleColor={theme.foregroundAccent}>
         {rows()}
-        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
-          ↑↓ 选择 · Enter 切换/新建 · Esc 取消
-        </text>
       </box>
     </box>
   );

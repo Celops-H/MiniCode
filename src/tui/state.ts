@@ -102,7 +102,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/compact", "/exit", "/help", "/session"] as const;
+export const COMMANDS = ["/clear", "/compact", "/exit", "/help", "/rename", "/session"] as const;
 
 /** 当前轮流式累积区：done 时并入消息块 */
 export interface Streaming {

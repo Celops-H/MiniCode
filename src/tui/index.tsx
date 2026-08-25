@@ -72,6 +72,14 @@ async function runTuiSession(
 ): Promise<{ switchTo?: string } | undefined> {
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
+  // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
+  // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
+  const compactConfig = buildCompactConfig(config, modelId, models) ?? {
+    contextWindow: models?.resolve(modelId)?.model?.contextWindow ?? 128_000,
+    maxOutputTokens: 8192,
+    safetyMargin: 4096,
+    keepRecentToolResults: 5,
+  };
   return runTui({
     store,
     session,
@@ -86,7 +94,7 @@ async function runTuiSession(
         initialMessages: session.getMessages(),
         agents,
         hooks,
-        compactConfig: buildCompactConfig(config, modelId, models),
+        compactConfig,
         // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
         onRootEvent: feedRoot,
         // 工具权限走用户审批：approver 渲染弹块等键盘决策（允许本次/全部/拒绝）

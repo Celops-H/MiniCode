@@ -167,13 +167,34 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/help") {
-      showToast("可用命令：/exit 退出 · /compact 压缩历史 · /session 切换会话 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       return;
     }
     if (command === "/session") {
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       void openSessionModal().catch(() => undefined);
+      return;
+    }
+    if (command.startsWith("/rename")) {
+      // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化）
+      const title = command.slice("/rename".length).trim();
+      if (!title) {
+        showToast("用法：/rename 会话名");
+      } else {
+        session.meta.title = title;
+        void store
+          .rewriteMessages(session, session.getMessages())
+          .then(() => showToast(`会话已重命名：${title}`))
+          .catch(() => showToast("重命名失败：写入会话文件出错"));
+      }
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+      return;
+    }
+    if (command === "/clear") {
+      // 清空消息区（新的一屏），历史仍在会话文件里可 /session 找回
+      commit({ ...state, blocks: [], streaming: undefined, toast: undefined, modal: undefined, candidate: undefined, focusIndex: -1 });
+      showToast("界面已清空");
       return;
     }
     showToast(`未知命令 ${command}（/help 查看可用命令）`);

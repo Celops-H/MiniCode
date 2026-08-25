@@ -62,3 +62,24 @@ it("会话面板：列表/新建入口/键位提示", async () => {
   expect(frame).toContain("deepseek-v4-flash");
   expect(frame).toContain("新建会话");
 });
+
+it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不溢出", async () => {
+  const sessions = Array.from({ length: 12 }, (_, i) => ({
+    id: `sxx-${String(i).padStart(2, "0")}`,
+    model: "m",
+    updatedAt: "now",
+  }));
+  const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 0 });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 50, height: 12 });
+  await setup.waitForVisualIdle();
+  let frame = setup.captureCharFrame();
+  // 选中第 0 项在视野，最末会话不显示（窗口渲染）
+  expect(frame).toContain("sxx-00");
+  expect(frame).not.toContain("sxx-11");
+  setModal({ kind: "session", sessions, selected: 8 });
+  await setup.waitForVisualIdle();
+  frame = setup.captureCharFrame();
+  // 导航到第 8 项后窗口滚动：8 号入视野、0 号脱离
+  expect(frame).toContain("sxx-08");
+  expect(frame).not.toContain("sxx-00");
+});
