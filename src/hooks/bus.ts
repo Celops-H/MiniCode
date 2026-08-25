@@ -37,7 +37,11 @@ export class HookBus {
     if (!handlers) return [];
     const results: (HookVerdict | void)[] = [];
     for (const handler of handlers) {
-      results.push(await handler(event));
+      try {
+        results.push(await handler(event));
+      } catch {
+        // 单个 handler 异常不影响同事件其余 handler（CONTRACTS §3 事件处理出错不影响业务）
+      }
     }
     return results;
   }

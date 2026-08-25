@@ -162,6 +162,14 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(events[0]).toMatchObject({ type: "error" });
   });
 
+  it("流意外结束（未收到 message_stop）报 error 标记异常轮", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(chunkGen())) {
+      events.push(e);
+    }
+    expect(events).toEqual([{ type: "error", message: expect.stringContaining("未收到 message_stop") }]);
+  });
+
   it("流中断异常：发 error 事件（观测）后原样抛出（控制流）", async () => {
     const events: StreamEvent[] = [];
     async function* throwingStream(): AsyncIterable<unknown> {

@@ -606,7 +606,7 @@ export class Agent {
     } catch (err) {
       // 前置阶段 hook 裁决 / 权限审批 / 参数校验的任何异常都转失败结果反馈模型，
       // 不让整个回合中断（保持观测闭合：调用开始后必有成功/失败事件）
-      const error = (err as Error).message ?? String(err);
+      const error = err instanceof Error ? err.message : String(err);
       await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
@@ -647,15 +647,17 @@ export class Agent {
         const result = await this.permission.check(request, hook);
         if (!result.allowed) {
           const reason = result.reason ?? "未授权";
+          // 未知工具被拒时附带「工具不存在 + 可用列表」，让模型能改选真实工具而非反复重试同一幻觉名
+          const unknownHint = available ? `（工具不存在，可用工具：${available}）` : "";
           await this.safeEmit({
             type: "PostToolUseFailure",
             toolCallId: call.id,
             toolName: call.name,
             input: call.input,
-            error: `权限拒绝：${reason}`,
+            error: `权限拒绝：${reason}${unknownHint}`,
             agentPath,
           });
-          return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true) };
+          return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}${unknownHint}`, true) };
         }
       } else if (hookRejects) {
         // 无管线时 hook 裁决直接生效（hook 拒绝优先于「未知工具」反馈）
@@ -796,7 +798,7 @@ export class Agent {
         contextModifier,
       };
     } catch (err) {
-      const error = (err as Error).message ?? String(err);
+      const error = err instanceof Error ? err.message : String(err);
       // PostToolUseFailure：工具执行抛错，供观测
       await this.safeEmit({
         type: "PostToolUseFailure",

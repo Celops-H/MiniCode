@@ -101,6 +101,8 @@ export class AnthropicMessagesProtocol implements Protocol {
       yield { type: "error", message: (err as Error).message ?? String(err) };
       throw err;
     }
+    // 迭代正常结束但未收到 message_stop（厂商提前断流）：报 error 标记异常轮
+    yield { type: "error", message: "流意外结束（未收到 message_stop）" };
   }
 }
 

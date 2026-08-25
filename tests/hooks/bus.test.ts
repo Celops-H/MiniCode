@@ -65,12 +65,20 @@ describe("HookBus 事件总线", () => {
     expect(results).toEqual([]);
   });
 
-  it("处理器抛错时向上抛出", async () => {
+  it("单个 handler 抛错不影响 emit：不向上抛，其余 handler 结果保留", async () => {
     const bus = new HookBus();
-    bus.on("Stop", () => {
+    bus.on("PreToolUse", () => {
       throw new Error("hook 失败");
     });
-    await expect(bus.emit({ type: "Stop" })).rejects.toThrow("hook 失败");
+    bus.on("PreToolUse", (): HookVerdict => "deny");
+    const results = await bus.emit({
+      type: "PreToolUse",
+      toolCallId: "t1",
+      toolName: "read",
+      input: {},
+      agentPath: "/root",
+    });
+    expect(results).toEqual(["deny"]); // 抛错 handler 不记结果，后序裁决保留
   });
 
   it("事件负载类型可收窄（PreToolUse 带工具信息）", async () => {

@@ -593,6 +593,58 @@ describe("Agent hook/approver 抛错不中断回合（⑭e）", () => {
     expect(result?.content).toContain("工具调用过程出错");
     expect(result?.isError).toBe(true);
   });
+
+  it("一个 hook handler 抛错不连带丢同事件后续 handler 的裁决", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", () => {
+      throw new Error("第一个 handler 崩");
+    });
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    let executed = false;
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(executed).toBe(false); // 后序 deny 裁决仍生效，工具被拒
+    const denied = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(denied?.content).toContain("权限拒绝");
+  });
+
+  it("approver 抛 null 时兜底不抛出 TypeError，回合照常", async () => {
+    const hooks = new HookBus();
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({
+        rules: [],
+        approver: async () => {
+          throw null;
+        },
+      }),
+      tools: [makeReadTool(() => "不应执行")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("工具调用过程出错");
+    expect(result?.isError).toBe(true);
+  });
 });
 
 describe("未知工具 + 权限管线裁决（⑭g）", () => {
@@ -639,6 +691,29 @@ describe("未知工具 + 权限管线裁决（⑭g）", () => {
     expect(failure).toHaveBeenCalledTimes(1);
     expect(failure).toHaveBeenCalledWith(
       expect.objectContaining({ error: expect.stringContaining("未知工具") }),
+    );
+  });
+
+  it("未知工具被权限拒绝时附带可用工具列表，提示模型改选", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "ask"); // 无 approver：ask 无审批者 → 拒绝
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: unknownToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({ rules: [] }),
+      tools: [makeReadTool(() => "不应执行")],
+    });
+    agent.start("调未知工具");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining("可用工具") }),
     );
   });
 });
