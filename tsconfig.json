@@ -12,7 +12,9 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid"
   },
   "include": ["src", "tests"]
 }

@@ -13,19 +13,26 @@
   "packageManager": "pnpm@11.21.0",
   "scripts": {
     "dev": "tsx src/cli/app.ts",
+    "dev:tui": "cross-env NODE_OPTIONS=--experimental-ffi vite-node src/tui/index.tsx",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "cross-env NODE_OPTIONS=--experimental-ffi vitest run"
   },
   "dependencies": {
+    "@opentui/core": "^0.5.8",
+    "@opentui/solid": "^0.5.8",
     "commander": "^15.0.0",
     "openai": "^7.4.0",
+    "solid-js": "^1.9.15",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "cross-env": "^10.1.0",
     "tsx": "^4.23.11",
     "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vite-node": "^6.0.0",
     "vitest": "^4.1.10"
   }
 }
