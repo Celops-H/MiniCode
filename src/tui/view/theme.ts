@@ -9,6 +9,10 @@ export const theme = {
   warning: "#f4b357",
   success: "#52d691",
   foregroundAccent: "#9886ff",
+  /** 界面背景（opencode 风格深色底） */
+  background: "#1a1a1c",
+  /** 面板/元素背景（弹块、工具卡等局部提亮） */
+  backgroundPanel: "#252527",
 } as const;
 
 export type ThemeColor = string;

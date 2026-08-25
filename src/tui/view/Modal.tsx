@@ -13,7 +13,7 @@ import { theme } from "./theme.js";
 function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission" }> }): JSX.Element {
   const b = props.modal;
   return (
-    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0} backgroundColor={theme.backgroundPanel}>
       <text fg={theme.warning}>⚠ 权限确认</text>
       <text>
         工具 {b.toolName}
@@ -39,7 +39,7 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   return (
-    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0} backgroundColor={theme.backgroundPanel}>
       <text fg={theme.foregroundAccent}>切换会话</text>
       <For each={b.sessions}>
         {(s, i) => (

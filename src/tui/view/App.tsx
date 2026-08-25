@@ -15,6 +15,7 @@ import { Messages } from "./Messages.js";
 import { PromptView } from "./Prompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { ModalView } from "./Modal.js";
+import { theme } from "./theme.js";
 
 export interface AppProps {
   /** 界面状态（Solid store proxy，属性访问即响应式） */
@@ -39,7 +40,7 @@ export function App(props: AppProps): JSX.Element {
   });
 
   return (
-    <box flexDirection="column" flexGrow={1}>
+    <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
       <Messages blocks={props.state.blocks} modelLabel={props.model} streaming={props.state.streaming} />
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />

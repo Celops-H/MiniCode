@@ -123,7 +123,7 @@ function blockView(b: BlockView, modelLabel: string): JSX.Element {
 
 export function Messages(props: { blocks: BlockView[]; modelLabel: string; streaming?: Streaming }): JSX.Element {
   return (
-    <scrollbox flexGrow={1} paddingX={1}>
+    <scrollbox flexGrow={1} paddingX={1} stickyScroll={true} stickyStart="bottom">
       <For each={props.blocks}>
         {(b) => (
           <box flexShrink={0}>
