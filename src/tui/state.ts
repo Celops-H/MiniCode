@@ -129,14 +129,13 @@ export interface TuiState {
   turnIndex: number;
 }
 
-/** 空输入框初始态 */
-const EMPTY_PROMPT: PromptState = {
-  lines: [""],
-  curLine: 0,
-  curCol: 0,
-  history: [],
-  historyIndex: -1,
-};
+/**
+ * 全新空输入态（每次新建：不共享模块常量数组）。共享引用会让 solid reconcile 把 lines 更新
+ * 当成「引用未变」而跳过 —— 表现即「发送后输入框不清空」（历史 bug，见 2026-08-26 定位）。
+ */
+function emptyPrompt(history: string[]): PromptState {
+  return { lines: [""], curLine: 0, curCol: 0, history, historyIndex: -1 };
+}
 
 /** 展示时间：HH:MM:SS */
 export function formatTime(date: Date = new Date()): string {
@@ -212,7 +211,7 @@ export function initState(messages: Message[]): TuiState {
   }
   return {
     blocks,
-    prompt: { ...EMPTY_PROMPT, history: [], historyIndex: -1 },
+    prompt: emptyPrompt([]),
     streaming: undefined,
     status: "idle",
     scrollOffset: 0,
@@ -602,18 +601,18 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       if (state.focusIndex >= 0) return { ...state, focusIndex: -1 };
       return { ...state, candidate: undefined };
     case "send": {
-      // 发送：输入记入历史供回溯，输入框清空进入运行态
+      // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）
       const sent = state.prompt.lines.join("\n").trim();
       const history = sent ? [...state.prompt.history, sent] : state.prompt.history;
       return {
         ...state,
-        prompt: { ...EMPTY_PROMPT, history },
+        prompt: emptyPrompt(history),
         status: "running",
         candidate: undefined,
       };
     }
     case "clear-input":
-      return { ...state, prompt: { ...EMPTY_PROMPT, history: state.prompt.history }, candidate: undefined };
+      return { ...state, prompt: emptyPrompt(state.prompt.history), candidate: undefined };
     case "scroll":
       return { ...state, scrollOffset: Math.max(0, state.scrollOffset + action.dir) };
     case "scroll-end":

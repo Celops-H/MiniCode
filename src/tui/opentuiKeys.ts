@@ -21,7 +21,12 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
   switch (name) {
     case "return":
     case "linefeed":
-      return { kind: shift ? "shift-enter" : "enter" };
+      // Enter 发送；Shift+Enter 或 Ctrl+Enter/Ctrl+J 走软换行（主流编辑器习惯）
+      return { kind: ctrl || shift ? "shift-enter" : "enter" };
+    case "j":
+      // Ctrl+J 换行（kitty 键盘协议下 ctrl+j 带 ctrl 标志独立到达）
+      if (ctrl) return { kind: "shift-enter" };
+      return { kind: "char", char: "j" };
     case "tab":
       return { kind: "tab" };
     case "escape":

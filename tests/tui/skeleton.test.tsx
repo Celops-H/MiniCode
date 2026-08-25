@@ -47,6 +47,16 @@ it("键盘特殊解析：空格、大写还原、linefeed 回车（opentui 实�
   expect(opentuiKeyToKey({ name: "c", ctrl: true, shift: true })).toEqual({ kind: "ignore" });
 });
 
+it("Ctrl+J 换行（主流编辑习惯），映射到软换行 newline", () => {
+  // kitty 键盘协议下 ctrl+j 带 ctrl 标志独立到达 → 软换行（非 Enter 发送）
+  expect(opentuiKeyToKey({ name: "j", ctrl: true })).toEqual({ kind: "shift-enter" });
+  expect(mapKey({ kind: "shift-enter" })).toEqual({ type: "newline" });
+  // 普通 j 仍是字符
+  expect(opentuiKeyToKey({ name: "j" })).toEqual({ kind: "char", char: "j" });
+  // Ctrl+Enter 也走软换行
+  expect(opentuiKeyToKey({ name: "return", ctrl: true })).toEqual({ kind: "shift-enter" });
+});
+
 it("channel.onAction 走 store 整树替换（不依赖渲染）", () => {
   const channel = createChannel([]);
   channel.onAction({ type: "input", text: "hi" });
@@ -65,4 +75,17 @@ it("回车 send：清空输入、记历史、进入运行态（真实发送待 R
   expect(state.status).toBe("running");
   expect(state.prompt.lines).toEqual([""]);
   expect(state.prompt.history).toContain("go");
+});
+
+it("发送后输入框清空（channel 走 reconcile：空 prompt 必须换新数组，曾共享引用跳过更新）", () => {
+  const channel = createChannel([]);
+  channel.onAction({ type: "input", text: "hi" });
+  expect(channel.state.prompt.lines).toEqual(["hi"]);
+  channel.onAction({ type: "send" });
+  // 清空到首行首列、文本为空、历史记入
+  expect(channel.state.prompt.lines).toEqual([""]);
+  expect(channel.state.prompt.curLine).toBe(0);
+  expect(channel.state.prompt.curCol).toBe(0);
+  expect(channel.state.status).toBe("running");
+  expect(channel.state.prompt.history).toContain("hi");
 });

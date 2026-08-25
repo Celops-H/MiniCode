@@ -342,6 +342,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     openConsoleOnError: false,
     // 鼠标：开启后滚动条拖拽/滚轮滚动由 opentui 原生承担，点击折叠等由视图 onMouseUp 接线
     useMouse: true,
+    // kitty 键盘协议：让 Ctrl+J（换行）等组合键带修饰标志独立到达（主流终端 Deggrade 回退）
+    useKittyKeyboard: {},
   });
   win32DisableProcessedInput();
 
