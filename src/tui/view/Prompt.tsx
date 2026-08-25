@@ -30,7 +30,14 @@ function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
 
 export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate }): JSX.Element {
   return (
-    <box flexDirection="column" flexShrink={0} paddingX={1}>
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      paddingX={1}
+      paddingTop={1}
+      border={["top"]}
+      borderColor={theme.backgroundPanel}
+    >
       {props.candidate ? <CandidateList candidate={props.candidate} /> : null}
       <For each={props.prompt.lines}>
         {(line, i) => {

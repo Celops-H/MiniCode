@@ -13,6 +13,7 @@ import type { TuiAction } from "./keymap.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, isFoldable, NEW_SESSION_ID, type TuiState } from "./state.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
+import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
 import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
@@ -297,6 +298,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         commit(reduceAction(state, action));
     }
   };
+
+  // Windows 终端输入初始化（opencode 同款）：清 PROCESSED_INPUT + 清缓冲，进 TUI 前调用
+  win32DisableProcessedInput();
+  win32FlushInputBuffer();
 
   // 渲染挂载（render 立即返回，渲染器持续；退出时 destroy 还原终端）。
   // exitOnCtrlC 必须 false：Ctrl+C 语义由 loop 的 interrupt/退出接管（M4.3 交互经验，非渲染器自毁）
