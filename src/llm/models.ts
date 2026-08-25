@@ -102,6 +102,9 @@ export class Models {
         return;
       } catch (err) {
         lastError = err;
+        // 用户打断（signal 已中止）：控制流而非模型故障，直接上抛——不切备选不标冷却
+        // （否则会带着已中止的 signal 挨个真实请求备选链，白白计费）
+        if (options?.signal?.aborted) throw err;
         // 确定性错误或流已开始响应：直接上抛，切换无意义或会混流
         if (!isSwitchableError(err) || started) throw err;
         router.recordFailure(selected);

@@ -147,4 +147,30 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(received).toEqual([{ type: "text_delta", text: "partial" }]); // 保留已产出部分
     expect(router.isHealthy("main-1")).toBe(true); // 流中断不计数
   });
+
+  it("用户打断（signal 已中止）直接上抛，不切备选不标冷却", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    // 无 HTTP 状态的可切换类错误；abort 在请求前已触发（Ctrl+C 一个 token 都没回的场景）
+    const networkProvider: Provider = {
+      id: "main",
+      name: "main",
+      baseUrl: "https://main.example.com",
+      auth: { configured: true },
+      getModels: () => [{ id: "main-1", name: "main-1", api: "openai-chat-completions", providerId: "main" }],
+      async *stream() {
+        throw new Error("network down");
+      },
+    };
+    models.register(networkProvider);
+    models.register(makeFaultyProvider("backup", "backup-1")); // 若被切换会成功，证明未切
+    const controller = new AbortController();
+    controller.abort();
+    await expect(async () => {
+      for await (const _ of models.stream("main-1", createContext("s"), { signal: controller.signal })) {
+        // 消费流触发路由
+      }
+    }).rejects.toThrow("network down");
+    expect(router.isHealthy("main-1")).toBe(true); // 打断不计数，主模型不误标冷却
+  });
 });
