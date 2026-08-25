@@ -109,6 +109,31 @@ describe("CLI 多 Agent 组装", () => {
     expect(toolsSeen).toContain("wait_agent");
     expect(systemPrompt).toContain("团队协调者");
   });
+
+  it("省略 agents：默认启用多 Agent 协作（与显式 true 一致，防默认值被误改回 off）", async () => {
+    let toolsSeen: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        toolsSeen = context.tools.map((t) => t.name);
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    // 不传 agents（走默认分支，本次提交改动的点）
+    const { agent, team } = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+    expect(team).toBeDefined();
+    agent.start("hi");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    // 默认开启：协作工具对模型可见
+    expect(toolsSeen).toContain("spawn_agent");
+  });
 });
 
 describe("CLI Hook 接入", () => {

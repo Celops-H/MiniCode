@@ -20,7 +20,7 @@ import { buildModelClient, resolveMainModel } from "./models.js";
 
 const SYSTEM_PROMPT = "你是 MiniCode，一个 AI 编程助手，通过工具帮助用户完成任务。";
 
-/** --agents 开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
+/** 多 agent 协作开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
 const COORDINATOR_PROMPT = "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。";
 
 export const program = new Command();
@@ -30,7 +30,7 @@ program
   .command("new")
   .description("新建会话并开始对话")
   .option("-m, --model <id>", "模型 id")
-  .option("--agents", "启用多 Agent 协作（模型可自主派生子 agent）")
+  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
   .action(async (options: { model?: string; agents?: boolean }) => {
     await startSession(options.model, undefined, options.agents);
   });
@@ -38,7 +38,7 @@ program
 program
   .command("continue <sessionId>")
   .description("继续指定会话")
-  .option("--agents", "启用多 Agent 协作（模型可自主派生子 agent）")
+  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
   .action(async (sessionId: string, options: { agents?: boolean }) => {
     await startSession(undefined, sessionId, options.agents);
   });
@@ -77,7 +77,7 @@ async function loadDotEnv(): Promise<void> {
 }
 
 /** 新建或继续会话，进入交互循环 */
-async function startSession(modelId?: string, sessionId?: string, agents = false): Promise<void> {
+async function startSession(modelId?: string, sessionId?: string, agents = true): Promise<void> {
   const config = await loadConfig();
   const logger = new Logger({ level: config.logLevel });
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
@@ -174,9 +174,9 @@ export function buildCompactConfig(
 }
 
 /**
- * 按 agents 开关组装会话 agent（DESIGN 11.4）：
+ * 按 agents 开关组装会话 agent（DESIGN 11.4，默认开启）：
  * 开启时创建 Team 并注册 root、传入 agent（协作工具随 team 注册，模型可自主 spawn）；
- * 关闭时保持单 agent 会话（协作工具对模型不可见）。
+ * 显式传 false 时保持单 agent 会话（协作工具对模型不可见）。
  * 子 agent 由模型 spawn_agent 派生，继承运行时；团队不持久化（DESIGN 11），随会话结束消失。
  */
 export function createSessionAgent(options: {
@@ -192,7 +192,7 @@ export function createSessionAgent(options: {
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
   onRootEvent?: (event: StreamEvent) => void;
 }): { agent: Agent; team?: Team } {
-  if (!options.agents) {
+  if (options.agents === false) {
     return { agent: new Agent(options) };
   }
   const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks });
