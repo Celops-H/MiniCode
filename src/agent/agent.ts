@@ -36,7 +36,7 @@ import {
   type Tool,
 } from "../tools/index.js";
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
-import type { HookBus } from "../hooks/index.js";
+import type { HookBus, HookEvent } from "../hooks/index.js";
 import { FileState, withCwd, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
@@ -398,7 +398,7 @@ export class Agent {
     if (calls.length === 0) {
       // Stop：模型回复无工具调用，本轮对话准备结束
       this.stopped = true;
-      await this.hooks?.emit({ type: "Stop" });
+      await this.safeEmit({ type: "Stop" });
       // 会话记忆（DESIGN 9.7）：每轮结束后增量维护记忆，压缩时用记忆替代现场摘要省模型调用
       if (this.memoryEnabled) {
         await this.maybeUpdateMemory();
@@ -583,13 +583,44 @@ export class Agent {
     }
   }
 
+  /** 发 Hook 事件但 handler 抛错不影响业务（CONTRACTS §3：事件处理出错不影响业务） */
+  private async safeEmit(event: HookEvent): Promise<void> {
+    if (!this.hooks) return;
+    try {
+      await this.hooks.emit(event);
+    } catch {
+      // hook 处理器异常被吞，最多漏该条观测，不中断回合
+    }
+  }
+
   /**
    * 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌。
+   * 前置（hook 裁决 / 权限审批 / 参数校验）异常由外层兜底转失败结果，不抛断回合。
    * 返回工具结果消息与执行产出的上下文修改（供批末统一应用）。
    * @param call 工具调用（含工具名、调用 id 与参数）
    * @returns 工具结果消息与上下文修改
    */
   private async executeTool(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
+    try {
+      return await this.executeToolInner(call);
+    } catch (err) {
+      // 前置阶段 hook 裁决 / 权限审批 / 参数校验的任何异常都转失败结果反馈模型，
+      // 不让整个回合中断（保持观测闭合：调用开始后必有成功/失败事件）
+      const error = (err as Error).message ?? String(err);
+      await this.safeEmit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error: `工具调用过程出错：${error}`,
+        agentPath: this.agentPath?.toString() ?? "/root",
+      });
+      return { message: toolResultMessage(call.id, call.name, `工具调用过程出错：${error}`, true) };
+    }
+  }
+
+  /** executeTool 主体：前置校验/审批 → 中断检查 → 执行 → 回灌（异常由外层 executeTool 兜底转失败结果） */
+  private async executeToolInner(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
     // PreToolUse 在每次工具调用前无条件触发（DESIGN 13.1）——未知工具/参数校验失败也先发，
     // 配对闭合（调用开始后必有成功/失败事件）；hook 裁决对任何工具名生效
     const request: PermissionRequest = {
@@ -611,7 +642,7 @@ export class Agent {
         .join("、");
       if (!this.permission && hookRejects) {
         const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
-        await this.hooks?.emit({
+        await this.safeEmit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
           toolName: call.name,
@@ -625,7 +656,7 @@ export class Agent {
       }
       // 未知工具：发失败事件（观测闭合：调用开始后必有成功/失败结果，此前确认）
       const error = `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`;
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
@@ -641,7 +672,7 @@ export class Agent {
       const error = formatInputError(call.name, parsed.error);
       if (!this.permission && hookRejects) {
         const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
-        await this.hooks?.emit({
+        await this.safeEmit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
           toolName: call.name,
@@ -653,7 +684,7 @@ export class Agent {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
         };
       }
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
@@ -677,7 +708,7 @@ export class Agent {
       if (!result.allowed) {
         const reason = result.reason ?? "未授权";
         // 权限拒绝：发失败事件（观测闭合，此前确认）
-        await this.hooks?.emit({
+        await this.safeEmit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
           toolName: call.name,
@@ -693,7 +724,7 @@ export class Agent {
       // 免审批工具（skipsPermission）的 ask 不升级用户审批、视为放行（与管线 checkSkipsPermission 一致）；
       // 普通工具无审批者时 fail 保守拒绝
       const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
@@ -709,7 +740,7 @@ export class Agent {
     // 补失败结果保持观测闭合（PreToolUse 已发，后有 PostToolUseFailure）
     if (this.interruptController.signal.aborted) {
       const error = "执行中断：用户打断，工具未执行";
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
@@ -733,7 +764,7 @@ export class Agent {
       const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
       const finalOutput = truncated.content;
       // PostToolUse：工具执行完成（含标记失败的结果），供观测
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUse",
         toolCallId: call.id,
         toolName: call.name,
@@ -749,7 +780,7 @@ export class Agent {
     } catch (err) {
       const error = (err as Error).message ?? String(err);
       // PostToolUseFailure：工具执行抛错，供观测
-      await this.hooks?.emit({
+      await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
@@ -774,13 +805,19 @@ export class Agent {
     toolCallId: string,
     request: PermissionRequest,
   ): Promise<PermissionBehavior | undefined> {
-    const results = await this.hooks?.emit({
+    const event: HookEvent = {
       type: "PreToolUse",
       toolCallId,
       toolName: request.toolName,
       input: request.input ?? {},
       agentPath: this.agentPath?.toString() ?? "/root",
-    });
+    };
+    let results: (PermissionBehavior | void)[] | undefined;
+    try {
+      results = await this.hooks?.emit(event);
+    } catch {
+      // hook 处理器异常视为无裁决（事件处理出错不影响业务），走后续管线/无管线语义
+    }
     if (results?.includes("deny")) return "deny";
     if (results?.includes("ask")) return "ask";
     if (results?.includes("allow")) return "allow";

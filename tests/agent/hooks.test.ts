@@ -514,3 +514,83 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "PostToolUse", toolCallId: "c1" }));
   });
 });
+
+describe("Agent hook/approver 抛错不中断回合（⑭e）", () => {
+  it("PreToolUse handler 抛错：视为无裁决，工具照常执行、回合不抛错", async () => {
+    let executed = false;
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", () => {
+      throw new Error("hook 内部故障");
+    });
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "文件内容";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费；若回合中途抛错会沿 for-await 传播，测试自然失败
+    }
+    expect(executed).toBe(true);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("文件内容");
+  });
+
+  it("PostToolUse handler 抛错：工具结果仍算成功、回合不抛错", async () => {
+    const hooks = new HookBus();
+    hooks.on("PostToolUse", () => {
+      throw new Error("观测层故障");
+    });
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [makeReadTool(() => "文件内容")],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费；若回合中途抛错会沿 for-await 传播，测试自然失败
+    }
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("文件内容");
+  });
+
+  it("approver 抛错：转失败结果反馈模型、回合继续不中断", async () => {
+    let executed = false;
+    const hooks = new HookBus();
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      permission: new PermissionPipeline({
+        rules: [],
+        approver: async () => {
+          throw new Error("审批进程崩溃");
+        },
+      }),
+      tools: [
+        makeReadTool(() => {
+          executed = true;
+          return "不应执行";
+        }),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费；若回合中途抛错会沿 for-await 传播，测试自然失败
+    }
+    expect(executed).toBe(false);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("工具调用过程出错");
+    expect(result?.isError).toBe(true);
+  });
+});
