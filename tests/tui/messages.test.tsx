@@ -84,3 +84,15 @@ it("错误块标红警示", async () => {
   expect(setup.captureCharFrame()).toContain("模型响应超时");
   expect(setup.captureCharFrame()).toContain("⚠");
 });
+
+it("每块首行圆点标记 + 内容缩进到第 3 列（后续行只空不标）", async () => {
+  const setup = await app([
+    { kind: "message", id: "u1", role: "user", text: "第一行\n第二行也缩进", time: "14:00:01", thinkingCollapsed: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 首行标记：● 后内容（点列 = 前面 ●，内容从第 3 列起）
+  expect(frame).toContain("●");
+  // 多行文本后续行也缩进（在 ● 所在行之后能找到「  第二行也缩进」—— 缩进到第 3 列）
+  expect(frame).toMatch(/\n\s{3,}第二行也缩进/);
+});

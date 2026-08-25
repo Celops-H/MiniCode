@@ -1,9 +1,10 @@
 /**
- * 消息流：按 opencode 观感渲染 state.blocks 与流式尾（M4.4 收尾打磨批）。
- * 用户消息带头部「你 + 时间」；助手文本 + 思考折叠（默认收起一行，Enter 切换由 reducer 驱动）；
- * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出可折叠；
+ * 消息流：按 opencode 观感渲染 state.blocks 与流式尾（M4.4 收尾打磨批 + 新任务 5）。
+ * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你=强调紫、模型=灰、工具=警示橙），
+ * 后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
+ * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
  * 子 agent 活动行带结论/合并；错误块红色标记。
- * 块与块之间以一行空行分隔（marginTop，无多余内边距）；消息区滑动条显式可见。
+ * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
  * 所有展示状态在 state，本组件只读呈现。
  */
 import { For, Show } from "solid-js";
@@ -23,6 +24,27 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
     default:
       return { icon: "…", fg: theme.textMuted };
   }
+}
+
+/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型/子agent=灰、工具=警示橙） */
+function markerFor(b: BlockView): string {
+  if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.textMuted;
+  if (b.kind === "tool") return theme.warning;
+  return theme.textMuted;
+}
+
+/** 块衬线：左侧 3 列「●  」+ 内容列（内容整体缩进到第 3 列，后续行只空不标） */
+function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX.Element {
+  return (
+    <box flexDirection="row">
+      <box width={3} flexShrink={0}>
+        <text fg={props.markerColor}>●</text>
+      </box>
+      <box flexDirection="column" flexGrow={1} flexShrink={0}>
+        {props.children}
+      </box>
+    </box>
+  );
 }
 
 /** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；点击折叠头切换（onFold=鼠标展开/收起） */
@@ -171,13 +193,17 @@ export function Messages(props: {
       <For each={props.blocks}>
         {(b, i) => (
           <box flexShrink={0} marginTop={1}>
-            {blockView(b, props.modelLabel, () => props.onFoldAt?.(i()))}
+            <MarkedBlock markerColor={markerFor(b)}>
+              {blockView(b, props.modelLabel, () => props.onFoldAt?.(i()))}
+            </MarkedBlock>
           </box>
         )}
       </For>
       {props.streaming ? (
         <box flexShrink={0} marginTop={1}>
-          <StreamingView s={props.streaming} />
+          <MarkedBlock markerColor={theme.textMuted}>
+            <StreamingView s={props.streaming} />
+          </MarkedBlock>
         </box>
       ) : null}
       {props.blocks.length === 0 && !props.streaming ? (
