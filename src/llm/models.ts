@@ -93,12 +93,15 @@ export class Models {
         throw new Error(`未知模型：${selected}`);
       }
       let started = false;
+      let streamFailed = false;
       try {
         for await (const event of resolved.provider.stream(selected, context, options)) {
           started = true;
+          // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标
+          if (event.type === "error") streamFailed = true;
           yield event;
         }
-        router.recordSuccess(selected);
+        if (!streamFailed) router.recordSuccess(selected);
         return;
       } catch (err) {
         lastError = err;

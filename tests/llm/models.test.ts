@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createContext } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import { ModelRouter, Models } from "../../src/llm/index.js";
 import type { Provider, ModelInfo } from "../../src/llm/index.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function makeProvider(id: string, modelIds: string[], reply: string): Provider {
   return {
@@ -172,5 +176,32 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
       }
     }).rejects.toThrow("network down");
     expect(router.isHealthy("main-1")).toBe(true); // 打断不计数，主模型不误标冷却
+  });
+
+  it("流以 error 事件结束不记路由成功（健康度不虚标）", async () => {
+    vi.useFakeTimers();
+    const router = new ModelRouter({ cooldownMs: 5_000, confirmCount: 2 });
+    const models = new Models({ router, chain: ["main-1"] });
+    const errorProvider: Provider = {
+      id: "main",
+      name: "main",
+      baseUrl: "https://main.example.com",
+      auth: { configured: true },
+      getModels: () => [{ id: "main-1", name: "main-1", api: "openai-chat-completions", providerId: "main" }],
+      async *stream() {
+        yield { type: "error", message: "厂商报错" };
+      },
+    };
+    models.register(errorProvider);
+    // 先制造一次失败进入冷却，冷却到期后半开放行（真实请求试探）
+    router.recordFailure("main-1");
+    vi.advanceTimersByTime(5_001);
+    // 半开放行后跑两次错误流：若误记成功会推进成功连击，达 confirm 阈值即恢复健康
+    for (let i = 0; i < 2; i++) {
+      const events: StreamEvent[] = [];
+      for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+      expect(events[0]).toMatchObject({ type: "error" });
+    }
+    expect(router.isHealthy("main-1")).toBe(false); // error 流不计成功，仍不健康
   });
 });
