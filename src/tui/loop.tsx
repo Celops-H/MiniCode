@@ -11,6 +11,7 @@ import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
+import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, type TuiState } from "./state.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -55,8 +56,8 @@ export interface TuiLoopOptions {
   modelLabel: string;
 }
 
-/** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换信号或 undefined 正常退出 */
-export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: string } | undefined> {
+/** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
+export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
   const { store, session, modelLabel } = options;
   const hooks: HookBusType = options.hooks ?? new HookBus();
   const [state, setState] = createStore<TuiState>(initState(session.getMessages()));
@@ -70,6 +71,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   let pendingPerms: Array<{ resolve: (d: PermissionDecision) => void }> = [];
   /** /session 面板选中切换目标（选定后退出循环由装配层重建） */
   let pendingSwitch: string | undefined;
+  /** /connect 成功后请求装配层重读配置并重建会话（reconfigure 信号） */
+  let pendingReconfigure = false;
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
@@ -176,6 +179,25 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       void openSessionModal().catch(() => undefined);
       return;
     }
+    if (command === "/connect") {
+      // 运行中拒绝（重建链会把当前回合作废）；否则打开供应商选择弹窗
+      if (state.status === "running") {
+        showToast("运行中不可切换供应商，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        return;
+      }
+      commit({
+        ...state,
+        modal: {
+          kind: "connect",
+          providers: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, defaultModel: p.defaultModel })),
+          selected: 0,
+        },
+        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
+        candidate: undefined,
+      });
+      return;
+    }
     if (command.startsWith("/rename")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化）
       const title = command.slice("/rename".length).trim();
@@ -199,6 +221,25 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
     showToast(`未知命令 ${command}（/help 查看可用命令）`);
     commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+  };
+
+  /** /connect 关键一步：读输入区内容作 API Key → 写全局 config + 项目 .env；成功则请求装配层重建会话 */
+  const submitConnectKey = async (): Promise<void> => {
+    const conn = state.connect;
+    if (!conn) return;
+    const preset = PROVIDER_PRESETS.find((p) => p.id === conn.providerId);
+    if (!preset) return;
+    const key = state.prompt.lines.join("\n").trim();
+    const result = await connectProvider(preset, key);
+    if (result.ok) {
+      showToast(`${conn.providerName} 已连接，正在重建会话…`);
+      pendingReconfigure = true;
+      pendingSwitch = NEW_SESSION_ID;
+      exitLoop();
+      return;
+    }
+    showToast(result.error ?? "连接失败");
+    commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 } });
   };
 
   /** /compact：强制压缩 + 历史重写落盘 */
@@ -244,6 +285,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   const handleAction = (action: TuiAction): void => {
     switch (action.type) {
       case "send": {
+        // /connect 输入态：Enter 提交 API Key（不发送给模型）
+        if (state.connect) {
+          void submitConnectKey();
+          return;
+        }
         // 空输入 Enter：不再折叠最后一个可折叠块（展开/收起已改鼠标点击，Enter 保留发送）
         if (promptEmpty(state.prompt)) return;
         const text = state.prompt.lines.join("\n");
@@ -261,6 +307,24 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           if (state.modal.kind === "permission") {
             const option = ["allow", "allow-all", "deny"][state.modal.selected] as "allow" | "allow-all" | "deny";
             resolvePermission(option);
+          } else if (state.modal.kind === "connect") {
+            // 选定供应商 → 关弹窗进入 key 输入态（输入区输 key，Enter 确认）
+            const connModal = state.modal;
+            const preset = PROVIDER_PRESETS.find((p) => p.id === connModal.providers[connModal.selected]?.id);
+            if (preset) {
+              commit({
+                ...state,
+                modal: undefined,
+                connect: {
+                  providerId: preset.id,
+                  providerName: preset.name,
+                  apiKeyEnv: preset.apiKeyEnv,
+                  defaultModel: preset.defaultModel,
+                },
+                prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
+                candidate: undefined,
+              });
+            }
           } else {
             const targetIndex = state.modal.selected;
             pendingSwitch =
@@ -288,6 +352,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           if (state.modal.kind === "permission") {
             const selected = Math.max(0, Math.min(2, state.modal.selected + action.dir));
             commit({ ...state, modal: { ...state.modal, selected } });
+          } else if (state.modal.kind === "connect") {
+            const max = state.modal.providers.length - 1;
+            commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
           } else {
             const max = state.modal.sessions.length;
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
@@ -307,6 +374,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "esc": {
+        // /connect 输入态 Esc = 取消连接
+        if (state.connect) {
+          commit({ ...state, connect: undefined, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 } });
+          return;
+        }
         // Esc：有折叠聚焦先取消聚焦；运行中打断；空闲第一次 arm、窗口内第二次退出（decideEsc 纯判定）
         const verdict = decideEsc({
           hasFocus: state.focusIndex >= 0,
@@ -439,5 +511,5 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       // 会话结束事件处理失败不阻断退出
     }
   }
-  return pendingSwitch ? { switchTo: pendingSwitch } : undefined;
+  return pendingSwitch ? { switchTo: pendingSwitch, reconfigure: pendingReconfigure } : undefined;
 }

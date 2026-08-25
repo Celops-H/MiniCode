@@ -83,3 +83,22 @@ it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不�
   expect(frame).toContain("sxx-08");
   expect(frame).not.toContain("sxx-00");
 });
+
+it("/connect 供应商选择：列出厂商与键位提示，选中高亮", async () => {
+  const modal: ModalState = {
+    kind: "connect",
+    providers: [
+      { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" },
+      { id: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("连接供应商");
+  expect(frame).toContain("DeepSeek");
+  expect(frame).toContain("OpenAI");
+  expect(frame).toContain("▸");
+  expect(frame).toContain("输入 API Key");
+});

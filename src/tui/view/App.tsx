@@ -54,6 +54,13 @@ export function App(props: AppProps): JSX.Element {
         </box>
       ) : null}
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
+      {props.state.connect ? (
+        <box flexShrink={0} paddingX={1} paddingY={1}>
+          <text fg={theme.success}>
+            连接 {props.state.connect.providerName}：输入 API Key（Enter 确认 · Esc 取消）
+          </text>
+        </box>
+      ) : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} />
     </box>

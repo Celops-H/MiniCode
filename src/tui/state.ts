@@ -88,11 +88,26 @@ export interface SessionModalState {
   selected: number;
 }
 
+/** /connect 供应商选择弹窗：横向可选供应商列表（选中即默认模型打头 modelChain） */
+export interface ConnectPickModalState {
+  kind: "connect";
+  providers: Array<{ id: string; name: string; defaultModel: string }>;
+  selected: number;
+}
+
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
 
-/** 嵌入弹层：权限确认 / 会话切换 */
-export type ModalState = PermissionModalState | SessionModalState;
+/** /connect 连接中输入态：选定供应商、等待用户在输入区输 API Key（Enter 确认 / Esc 取消） */
+export interface ConnectState {
+  providerId: string;
+  providerName: string;
+  apiKeyEnv: string;
+  defaultModel: string;
+}
+
+/** 嵌入弹层：权限确认 / 会话切换 / 供应商选择 */
+export type ModalState = PermissionModalState | SessionModalState | ConnectPickModalState;
 
 /** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
@@ -102,7 +117,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/exit", "/help", "/rename", "/session"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/rename", "/session"] as const;
 
 /** 当前轮流式累积区：done 时并入消息块 */
 export interface Streaming {
@@ -123,8 +138,10 @@ export interface TuiState {
   toast?: { text: string; key: number };
   /** slash 命令候选（输入以 / 开头时出现） */
   candidate?: SlashCandidate;
-  /** 嵌入弹层（权限确认等）：出现时输入禁用、消息区让位 */
+  /** 嵌入弹层（权限确认 / 会话切换 / /connect 供应商）：出现时输入禁用、消息区让位 */
   modal?: ModalState;
+  /** /connect 连接中输入态（选定供应商、待输 API Key）：占用输入区输 key，Enter 确认 */
+  connect?: ConnectState;
   /** 回合计数：done 递增，工具卡片按它隔离所属回合 */
   turnIndex: number;
 }
@@ -217,6 +234,7 @@ export function initState(messages: Message[]): TuiState {
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
+    connect: undefined,
   };
 }
 

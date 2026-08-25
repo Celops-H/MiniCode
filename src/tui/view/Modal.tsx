@@ -108,7 +108,47 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   );
 }
 
+/** /connect 供应商选择：边框内标题 + 厂商列表（选中高亮随导航移动）+ 键位提示 */
+function ConnectModal(props: { modal: Extract<ModalState, { kind: "connect" }> }): JSX.Element {
+  const b = props.modal;
+  const dims = useTerminalDimensions();
+  const rows = createMemo(() => {
+    const total = b.providers.length;
+    const avail = dims().height ?? 20;
+    const visible = Math.max(1, Math.min(total, avail - 6));
+    const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
+    const items = b.providers.slice(start, start + visible).map((p, i) =>
+      start + i === b.selected ? (
+        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+          ▸ {p.name}（{p.defaultModel}）
+        </text>
+      ) : (
+        <text paddingX={1} paddingTop={1} fg={theme.text}>
+          {"  "}
+          {p.name}（{p.defaultModel}）
+        </text>
+      ),
+    );
+    const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
+    items.push(
+      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+        ↑↓/←→ 选择 · Enter 输入 API Key · Esc 取消{overflow}
+      </text>,
+    );
+    return items;
+  });
+  return (
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+        title="连接供应商" titleColor={theme.success}>
+        {rows()}
+      </box>
+    </box>
+  );
+}
+
 export function ModalView(props: { modal: ModalState }): JSX.Element {
   if (props.modal.kind === "permission") return <PermissionModal modal={props.modal} />;
+  if (props.modal.kind === "connect") return <ConnectModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

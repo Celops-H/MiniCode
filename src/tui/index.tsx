@@ -42,19 +42,32 @@ export const SYSTEM_PROMPT = [
   "8. 复杂任务可拆子任务并行派给子 agent；等结论齐全后汇总成一份完整回复，不要只汇报「已派发」",
 ].join("\n");
 
-/** TUI 入口：新建/继续会话后进入会话循环；/session 切换在此重建会话与 agent */
+/** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: { sessionId?: string; agents?: boolean }): Promise<void> {
-  const config = await loadConfig();
+  let config: Config = await loadConfig();
   await loadDotEnv();
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
-  const models = buildModelClient(config);
-  const modelId = resolveMainModel(config);
+  let models: Models = buildModelClient(config);
+  let modelId: string = resolveMainModel(config);
   let session = options.sessionId
     ? await store.loadSession(options.sessionId)
     : await store.createSession({ model: modelId });
   for (;;) {
     const result = await runTuiSession(store, models, config, session, options.agents ?? true);
-    if (!result?.switchTo) break;
+    if (!result) break;
+    // /connect 成功后重建配置链：重读 config + .env，重建模型客户端与主模型（新会话落新模型）
+    if (result.reconfigure) {
+      config = await loadConfig();
+      await loadDotEnv();
+      models = buildModelClient(config);
+      modelId = resolveMainModel(config);
+      session =
+        result.switchTo === NEW_SESSION_ID
+          ? await store.createSession({ model: modelId })
+          : await store.loadSession(result.switchTo ?? session.meta.id);
+      continue;
+    }
+    if (!result.switchTo) break;
     session =
       result.switchTo === NEW_SESSION_ID
         ? await store.createSession({ model: modelId })
@@ -69,7 +82,7 @@ async function runTuiSession(
   config: Config,
   session: Session,
   agents: boolean,
-): Promise<{ switchTo?: string } | undefined> {
+): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
