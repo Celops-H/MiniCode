@@ -10,6 +10,7 @@ import { render } from "@opentui/solid";
 import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
+import { decideEsc } from "./keymap.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, isFoldable, NEW_SESSION_ID, type TuiState } from "./state.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -71,6 +72,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   let pendingSwitch: string | undefined;
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
+  /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
+  const ESC_EXIT_WINDOW_MS = 800;
+  let lastEscAt = 0;
 
   const commit = (next: TuiState): void => setState(reconcile(next));
 
@@ -163,7 +167,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/help") {
-      showToast("可用命令：/exit 退出 · /compact 压缩历史 · /session 切换会话 · /help 帮助");
+      showToast("可用命令：/exit 退出 · /compact 压缩历史 · /session 切换会话 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       return;
     }
@@ -204,6 +208,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     runningLoop = false;
     wake?.();
     wake = undefined;
+  };
+
+  /** 打断当前轮：中断 agent + 拒绝待批权限 + 忽略迟到增量 + 界面收尾（运行态 Esc 走这里） */
+  const doInterrupt = (): void => {
+    agent.interrupt();
+    resolvePermission("deny", "用户打断");
+    ignoreStream = true;
+    commit(interruptTurn(state));
+    lastEscAt = 0;
   };
 
   /** 键盘/动作 → reducer + 副作用（App onAction 接这里） */
@@ -282,15 +295,34 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         }
         return;
       }
-      case "interrupt": {
-        if (state.status === "running") {
-          agent.interrupt();
-          resolvePermission("deny", "用户打断");
-          ignoreStream = true;
-          commit(interruptTurn(state));
-        } else {
-          exitLoop();
+      case "esc": {
+        // Esc：有折叠聚焦先取消聚焦；运行中打断；空闲第一次 arm、窗口内第二次退出（decideEsc 纯判定）
+        const verdict = decideEsc({
+          hasFocus: state.focusIndex >= 0,
+          running: state.status === "running",
+          lastEscAt,
+          now: Date.now(),
+          windowMs: ESC_EXIT_WINDOW_MS,
+        });
+        if (verdict === "focus-clear") {
+          commit({ ...state, focusIndex: -1 });
+          return;
         }
+        if (verdict === "interrupt") {
+          doInterrupt();
+          return;
+        }
+        if (verdict === "exit") {
+          exitLoop();
+          return;
+        }
+        lastEscAt = Date.now();
+        showToast("再按一次 Esc 退出");
+        return;
+      }
+      case "interrupt": {
+        if (state.status === "running") doInterrupt();
+        else exitLoop();
         return;
       }
       case "exit": {

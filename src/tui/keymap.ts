@@ -23,8 +23,12 @@ export type TuiAction =
   | { type: "cancel" }
   | { type: "toggle-focus" }
   | { type: "toggle-fold" }
+  /** 鼠标点击指定块（下标）的折叠头：直接翻该块折叠态，不走聚焦链 */
+  | { type: "fold-at"; index: number }
   | { type: "interrupt" }
   | { type: "exit" }
+  /** Esc：运行中打断；空闲连按两次退出（loop 层处理计时与状态） */
+  | { type: "esc" }
   | { type: "noop" };
 
 /** 键位上下文：当前有没有弹层、输入是否为空、是否在历史浏览 */
@@ -81,18 +85,20 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
     case "home":
       return { type: "noop" };
     case "ctrl-c":
-      return { type: "interrupt" };
+      // Ctrl+C 弃用作打断/退出：与终端复制快捷键冲突（用户决定），改由 Esc 承担（见 esc 分支）
+      return { type: "noop" };
     case "ctrl-d":
       return { type: "exit" };
     case "esc":
-      return { type: "cancel" };
+      // 运行中打断；空闲时连按两次退出（loop 层处理状态与计时）
+      return { type: "esc" };
     case "ignore":
       return { type: "noop" };
   }
 }
 
 /** modal 态（权限确认 / 会话面板）：方向键导航、Enter 确认、Esc 取消、1/a/d 权限决策；
- *  Ctrl+C/D 仍响应（打断/退出作用到待批审批——否则审批弹窗会吞掉打断键，卡死的工具救不了） */
+ *  Ctrl+D 保留退出；Ctrl+C 弃用（与终端复制冲突，改 Esc 语义）。 */
 function mapModalKey(key: Key): TuiAction {
   switch (key.kind) {
     case "up":
@@ -106,7 +112,7 @@ function mapModalKey(key: Key): TuiAction {
     case "esc":
       return { type: "cancel" };
     case "ctrl-c":
-      return { type: "interrupt" };
+      return { type: "noop" };
     case "ctrl-d":
       return { type: "exit" };
     case "pageup":
@@ -143,4 +149,19 @@ function mapCandidateKey(key: Key): TuiAction {
     default:
       return { type: "noop" };
   }
+}
+
+/** Esc 按键的落地判定（纯函数，loop 层调用）：有折叠聚焦先取消；运行中打断；空闲双击退出 */
+export function decideEsc(c: {
+  hasFocus: boolean;
+  running: boolean;
+  lastEscAt: number;
+  now: number;
+  windowMs?: number;
+}): "focus-clear" | "interrupt" | "arm-exit" | "exit" {
+  if (c.hasFocus) return "focus-clear";
+  if (c.running) return "interrupt";
+  const windowMs = c.windowMs ?? 800;
+  if (c.lastEscAt !== 0 && c.now - c.lastEscAt <= windowMs) return "exit";
+  return "arm-exit";
 }

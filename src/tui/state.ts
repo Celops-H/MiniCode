@@ -596,6 +596,13 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       const blocks = state.blocks.map((b, i) => (i === state.focusIndex ? flipFold(b) : b));
       return { ...state, blocks };
     }
+    case "fold-at": {
+      // 鼠标点折叠头：直接翻转指定块的折叠态（无论聚焦与否）
+      const target = state.blocks[action.index];
+      if (!target || !isFoldable(target)) return state;
+      const blocks = state.blocks.map((b, i) => (i === action.index ? flipFold(b) : b));
+      return { ...state, blocks };
+    }
     case "cancel":
       // 依次收起：聚焦 → slash 候选
       if (state.focusIndex >= 0) return { ...state, focusIndex: -1 };
@@ -621,6 +628,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "exit":
     case "permission":
     case "modal-confirm":
+    case "esc":
     case "noop":
       return state;
   }
