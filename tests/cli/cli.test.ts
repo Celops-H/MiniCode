@@ -178,6 +178,66 @@ describe("CLI Hook 接入", () => {
     expect(events).toEqual(["回复内容"]);
   });
 
+  it("后台续跑活跃时输入等待其结束再开新轮（防 start 复位中断信号与落盘游标错位）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    let releaseBackground: () => void = () => {};
+    const backgroundHeld = new Promise<void>((resolve) => {
+      releaseBackground = resolve;
+    });
+    let calls = 0;
+    const client: ModelClient = {
+      async *stream() {
+        calls++;
+        if (calls === 1) {
+          // 后台轮：产出一段结论后挂起（模拟子 agent 完成唤醒的续跑流）
+          yield { type: "text_delta", text: "后台结论" };
+          await backgroundHeld;
+          yield { type: "done", stopReason: "end_turn" };
+        } else {
+          yield { type: "text_delta", text: "用户轮回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        }
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [] });
+
+    // 后台驱动 root 续跑（模拟 Team.driveAgent）：部分消费使其保持活跃
+    agent.start("后台轮任务");
+    const gen = agent.resume();
+    const backgroundDone = (async () => {
+      for await (const _ of gen) {
+        // 消费全部事件（挂起在流内）
+      }
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 50)); // 推进到挂起点，active=true
+    expect(agent.isActive()).toBe(true);
+
+    // 用户在后台活跃时输入：interact 应等待后台轮结束，不立刻 start（防中断信号被复位）
+    async function* inputs(): AsyncIterable<string> {
+      yield "用户输入";
+      yield "/exit";
+    }
+    const interacting = interact({ agent, store, session, inputs: inputs(), write: () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // 后台轮还没结束：用户消息尚未入历史（等待而非 start）
+    const humans = agent.getMessages().filter((m) => m.role === "user" && m.source !== "system");
+    expect(humans).toHaveLength(1);
+    expect(humans[0]).toMatchObject({ content: "后台轮任务" });
+
+    // 释放后台轮：resume 收尾、active 复位，interact 随即处理用户输入
+    releaseBackground();
+    await backgroundDone;
+    await interacting;
+
+    // 后台轮结论与用户输入轮都完整落历史
+    const messages = agent.getMessages();
+    expect(messages.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "text" && b.text === "后台结论"))).toBe(true);
+    expect(messages.some((m) => m.role === "user" && m.source !== "system" && m.content === "用户输入")).toBe(true);
+    expect(messages.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "text" && b.text === "用户轮回复"))).toBe(true);
+  });
+
   it("buildHookBus：config.hooks 装配成事件 → 命令映射（空配置不启用）", () => {
     expect(buildHookBus(undefined)).toBeUndefined();
     const bus = buildHookBus({ PreToolUse: ["echo {}"], SessionStart: ["echo start"] });

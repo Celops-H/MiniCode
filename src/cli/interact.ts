@@ -85,6 +85,12 @@ export async function interact(options: InteractOptions): Promise<void> {
       continue;
     }
     await hooks?.emit({ type: "UserPromptSubmit", input });
+    // 后台续跑活跃（子 agent 完成唤醒 root 正在跑）时等它结束再开新轮——
+    // 此时 start 会复位中断信号污染后台轮、run() 因防重入空返回导致落盘游标错位；
+    // 后台轮有看门狗/超时兜底必然收尾，用户输入在此排队不丢
+    while (agent.isActive()) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
     agent.start(input);
