@@ -9,6 +9,17 @@
  */
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
+import path from "node:path";
+
+/**
+ * 统一 solid-js 到客户端单实例：dev:tui（vite-node）走 SSR（node 条件），"solid-js" 会解析到
+ * dist/server.js（SSR 版，signal 不调度），而 opentui/solid import "solid-js/dist/solid.js"
+ * （客户端版）——两套实例导致 createSignal 与 reconciler 的 render-effect 不互通，界面不刷新。
+ * opencode 的 bun preload 也是把 server.js 替换成 solid.js（同因）。这里 alias 全部指向
+ * 客户端版（solid.js / store.js），保证组件与 opentui reconciler 共享同一实例。
+ */
+const solidJsEntry = path.resolve(import.meta.dirname, "node_modules/solid-js/dist/solid.js");
+const solidStoreEntry = path.resolve(import.meta.dirname, "node_modules/solid-js/store/dist/store.js");
 
 export default defineConfig({
   plugins: [
@@ -19,9 +30,19 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: [
+      { find: /^solid-js\/store(\/.*)?$/, replacement: solidStoreEntry },
+      { find: /^solid-js(\/.*)?$/, replacement: solidJsEntry },
+    ],
+  },
   // node:ffi 是 Node 26 新增实验内建，vite 8 解析器未把它当 node 内建 external，
   // 需显式标注，否则 dev:tui（vite-node）加载 win32.ts 报 Cannot find package 'node:ffi'
   ssr: {
     external: ["node:ffi"],
+    // noExternal solid-js 与 @opentui/solid：vite-node 默认把 node_modules 外置给 Node 原生加载，
+    // 造成「组件 alias 加载的 solid-js」与「@opentui/solid 原生加载的 solid-js」两个实例不互通，
+    // store 更新不驱动界面重渲。一起进 vite 转换 = 同一模块注册表 = 单实例。
+    noExternal: ["solid-js", "@opentui/solid"],
   },
 });

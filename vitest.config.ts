@@ -6,6 +6,17 @@
  */
 import { defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
+import path from "node:path";
+
+/**
+ * 统一 solid-js 到客户端单实例：vite-node/vitest 走 SSR（node 条件），"solid-js" 会解析到
+ * dist/server.js（SSR 版，signal 不调度），而 opentui/solid import "solid-js/dist/solid.js"
+ * （客户端版）——两套实例导致 createSignal 与 reconciler 的 render-effect 不互通，界面不刷新。
+ * opencode 的 bun preload 也是把 server.js 替换成 solid.js（同因）。这里 alias 全部指向
+ * 客户端版（solid.js / store.js），保证组件与 opentui reconciler 共享同一实例。
+ */
+const solidJsEntry = path.resolve(import.meta.dirname, "node_modules/solid-js/dist/solid.js");
+const solidStoreEntry = path.resolve(import.meta.dirname, "node_modules/solid-js/store/dist/store.js");
 
 export default defineConfig({
   plugins: [
@@ -16,8 +27,18 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: [
+      { find: /^solid-js\/store(\/.*)?$/, replacement: solidStoreEntry },
+      { find: /^solid-js(\/.*)?$/, replacement: solidJsEntry },
+    ],
+  },
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
+  },
+  // [临时验证] 与 vite.config 的 noExternal 保持一致，确认统一 solid-js 实例不影响现有测试
+  ssr: {
+    noExternal: ["solid-js", "@opentui/solid"],
   },
 });

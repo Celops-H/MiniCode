@@ -306,13 +306,21 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
   };
 
-  // Windows 终端输入初始化（opencode 同款）：清 PROCESSED_INPUT + 清缓冲，进 TUI 前调用
-  win32DisableProcessedInput();
+  // Windows 终端输入初始化（对齐 opencode）：清输入缓冲在进 TUI 前，PROCESSED_INPUT
+  // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
   win32FlushInputBuffer();
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: false,
+    // 强制 JS 渲染（useThread false）：与测试/headless 路径一致，渲染输出经 stdout.write 直达终端
+    // （headless 下已实测：store 更新后的帧内容确实写出，含输入字符）。原生线程路径此前在真机
+    // 与诊断期 stderr 噪声叠加时未验证成功，先保持 JS 路径可靠。
+    useThread: false,
+    targetFps: 60,
+    autoFocus: false,
+    openConsoleOnError: false,
+  });
+  win32DisableProcessedInput();
 
-  // 渲染挂载（render 立即返回，渲染器持续；退出时 destroy 还原终端）。
-  // exitOnCtrlC 必须 false：Ctrl+C 语义由 loop 的 interrupt/退出接管（M4.3 交互经验，非渲染器自毁）
-  const renderer = await createCliRenderer({ exitOnCtrlC: false });
   await render(
     () => <App state={state} model={modelLabel} sessionId={session.meta.id} onAction={handleAction} />,
     renderer,
