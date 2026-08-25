@@ -4,11 +4,14 @@
  */
 import type { JSX } from "@opentui/solid";
 import { theme } from "./theme.js";
+import { permissionModeLabel } from "../state.js";
+import type { PermissionMode } from "../../permission/index.js";
 
 export interface StatusBarProps {
   model: string;
   sessionId: string;
   status: "idle" | "running";
+  permissionMode?: PermissionMode;
 }
 
 export function StatusBar(props: StatusBarProps): JSX.Element {
@@ -17,6 +20,9 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
       <box flexDirection="row" gap={1} flexShrink={0}>
         <text fg={theme.text}>{props.model}</text>
         <text fg={theme.textMuted}>· 会话 {props.sessionId.slice(-6)}</text>
+        {props.permissionMode ? (
+          <text fg={theme.foregroundAccent}>· 模式[{permissionModeLabel(props.permissionMode)}]</text>
+        ) : null}
       </box>
       <text fg={theme.textMuted} flexShrink={0}>
         {props.status === "running" ? (

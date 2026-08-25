@@ -7,6 +7,7 @@ export type Key =
   | { kind: "enter" }
   | { kind: "shift-enter" }
   | { kind: "tab" }
+  | { kind: "shift-tab" }
   | { kind: "esc" }
   | { kind: "backspace" }
   | { kind: "delete" }

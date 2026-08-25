@@ -28,6 +28,8 @@ export type TuiAction =
   | { type: "exit" }
   /** Esc：运行中打断；空闲连按两次退出（loop 层处理计时与状态） */
   | { type: "esc" }
+  /** Shift+Tab 切换权限模式（一般/plan/auto） */
+  | { type: "mode-cycle" }
   | { type: "noop" };
 
 /** 键位上下文：当前有没有弹层、输入是否为空、是否在历史浏览 */
@@ -41,6 +43,8 @@ export interface KeymapContext {
 }
 
 export function mapKey(key: Key, ctx: KeymapContext = {}): TuiAction {
+  // Shift+Tab 全局切换权限模式（正常/候选/弹窗态都生效）
+  if (key.kind === "shift-tab") return { type: "mode-cycle" };
   switch (ctx.popup) {
     case "modal":
       return mapModalKey(key);
@@ -92,6 +96,9 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       // 运行中打断；空闲时连按两次退出（loop 层处理状态与计时）
       return { type: "esc" };
     case "ignore":
+      return { type: "noop" };
+    default:
+      // shift-tab 等由 mapKey 全局拦截、或未映射键：消费不产生动作
       return { type: "noop" };
   }
 }

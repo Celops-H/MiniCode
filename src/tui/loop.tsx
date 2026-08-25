@@ -12,7 +12,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, type TuiState } from "./state.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
@@ -20,7 +20,7 @@ import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import type { HookBus as HookBusType } from "../hooks/index.js";
-import type { PermissionApprover, PermissionDecision, PermissionRequest } from "../permission/index.js";
+import type { PermissionApprover, PermissionDecision, PermissionRequest, PermissionMode } from "../permission/index.js";
 
 /** 纯 reducer 通道（测试/简单装配用）：动作 → state 整树替换，无副作用 */
 export interface TuiChannel {
@@ -54,6 +54,8 @@ export interface TuiLoopOptions {
   hooks?: HookBusType;
   /** 状态行模型名 */
   modelLabel: string;
+  /** 权限模式的可变盒子（装配层用它把模式回灌 PermissionPipeline；Shift+Tab 在这里同步） */
+  permissionMode?: { value: PermissionMode };
 }
 
 /** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
@@ -78,6 +80,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
   const ESC_EXIT_WINDOW_MS = 800;
   let lastEscAt = 0;
+  /** 权限模式盒子（Shift+Tab 切换；装配层 PermissionPipeline 用它做活引用，见 assemble） */
+  const modeBox: { value: PermissionMode } = options.permissionMode ?? { value: "default" };
 
   const commit = (next: TuiState): void => setState(reconcile(next));
 
@@ -422,6 +426,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           resolvePermission("deny", "用户打断");
         }
         exitLoop();
+        return;
+      }
+      case "mode-cycle": {
+        // Shift+Tab 切换权限模式：一般(正常审批) → plan(只读放行) → auto(自动放行)
+        const next = cyclePermissionMode(state.permissionMode);
+        modeBox.value = next;
+        commit({ ...state, permissionMode: next });
+        const note =
+          next === "plan"
+            ? "（plan：只放行只读工具）"
+            : next === "bypassPermissions"
+              ? "（auto：自动放行，保留危险命令检查）"
+              : "（一般：正常审批）";
+        showToast(`权限模式：${permissionModeLabel(next)}${note}`);
         return;
       }
       default:

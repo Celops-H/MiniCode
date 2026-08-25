@@ -28,7 +28,7 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
       if (ctrl) return { kind: "shift-enter" };
       return { kind: "char", char: "j" };
     case "tab":
-      return { kind: "tab" };
+      return { kind: shift ? "shift-tab" : "tab" };
     case "escape":
       return { kind: "esc" };
     case "backspace":

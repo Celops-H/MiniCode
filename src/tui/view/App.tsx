@@ -62,7 +62,7 @@ export function App(props: AppProps): JSX.Element {
         </box>
       ) : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
-      <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} />
+      <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} permissionMode={props.state.permissionMode} />
     </box>
   );
 }

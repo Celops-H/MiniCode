@@ -8,7 +8,7 @@ import { it, expect } from "vitest";
 import { createChannel } from "../../src/tui/loop.js";
 import { opentuiKeyToKey } from "../../src/tui/opentuiKeys.js";
 import { mapKey } from "../../src/tui/keymap.js";
-import { initState, reduceAction, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, cyclePermissionMode, type TuiState } from "../../src/tui/state.js";
 
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   const base = initState([]);
@@ -35,6 +35,18 @@ it("connect 输入态不弹 slash 候选（防止候选态 Enter 执行命令而
   const s = reduceAction(base, { type: "input", text: "/" });
   // 输 / 在 connect 态不应算成命令候选（输入区是输 API Key）
   expect(s.candidate).toBeUndefined();
+});
+
+it("Shift+Tab 切换权限模式（一般→plan→auto 循环）", () => {
+  // opentui tab+shift → shift-tab → mode-cycle（任何 popup 态）
+  expect(opentuiKeyToKey({ name: "tab", shift: true })).toEqual({ kind: "shift-tab" });
+  expect(mapKey({ kind: "shift-tab" })).toEqual({ type: "mode-cycle" });
+  expect(mapKey({ kind: "shift-tab" }, { popup: "modal" as const })).toEqual({ type: "mode-cycle" });
+  expect(mapKey({ kind: "shift-tab" }, { popup: "candidate" as const })).toEqual({ type: "mode-cycle" });
+  // 纯 cycle：default→plan→bypassPermissions→default
+  expect(cyclePermissionMode("default")).toBe("plan");
+  expect(cyclePermissionMode("plan")).toBe("bypassPermissions");
+  expect(cyclePermissionMode("bypassPermissions")).toBe("default");
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

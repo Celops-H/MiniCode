@@ -7,7 +7,7 @@ import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js"
 import path from "node:path";
 import { SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
-import { PermissionPipeline } from "../permission/index.js";
+import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
 import { buildCompactConfig, buildHookBus, createSessionAgent } from "../cli/app.js";
 import { buildModelClient, resolveMainModel } from "../cli/models.js";
@@ -93,17 +93,31 @@ async function runTuiSession(
     safetyMargin: 4096,
     keepRecentToolResults: 5,
   };
+  // 权限模式盒子：Shift+Tab 在 loop 侧改这里，PermissionPipeline 经 options.mode getter 活读（plan/auto 即时生效）
+  const permissionModeBox: { value: PermissionMode } = { value: "default" };
   return runTui({
     store,
     session,
     hooks,
     modelLabel: modelId,
+    permissionMode: permissionModeBox,
     assemble: ({ approver, feedRoot }) => {
+      const tools = createBuiltinTools();
+      const pipelineOptions: PermissionPipelineOptions = {
+        rules: [],
+        approver,
+        // plan 模式放行的只读工具集合（Tool.isReadOnly 收集）
+        readOnlyTools: new Set(tools.filter((t) => t.isReadOnly).map((t) => t.name)),
+        // mode 用 getter 活读 modeBox：Shift+Tab 切换即时作用于后续工具审批
+        get mode() {
+          return permissionModeBox.value;
+        },
+      };
       const { agent } = createSessionAgent({
         modelClient: models,
         modelId,
         systemPrompt: SYSTEM_PROMPT,
-        tools: createBuiltinTools(),
+        tools,
         initialMessages: session.getMessages(),
         agents,
         hooks,
@@ -111,7 +125,7 @@ async function runTuiSession(
         // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
         onRootEvent: feedRoot,
         // 工具权限走用户审批：approver 渲染弹块等键盘决策（允许本次/全部/拒绝）
-        permission: new PermissionPipeline({ rules: [], approver }),
+        permission: new PermissionPipeline(pipelineOptions),
         // checkpoint（同 CLI）：工具副作用前把已产生消息落盘
         checkpoint: async (messages) => {
           const newOnes = messages.slice(session.getMessages().length);

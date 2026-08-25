@@ -7,6 +7,7 @@ import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
+import type { PermissionMode } from "../permission/index.js";
 
 /** 消息块：用户/助手文本，思考折叠保存于 thinkingCollapsed（默认收起一行） */
 export interface MessageBlock {
@@ -119,6 +120,20 @@ export const PERMISSION_OPTIONS = [
 /** 内置 slash 命令（输入 / 时候选加载） */
 export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/rename", "/session"] as const;
 
+/** 权限模式循环序（Shift+Tab 切换）：一般(正常审批) → plan(只读放行) → auto(自动放行) → 一般 */
+export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
+
+/** 下一个权限模式（纯函数，shortcut 用） */
+export function cyclePermissionMode(mode: PermissionMode): PermissionMode {
+  const idx = PERMISSION_MODES.indexOf(mode);
+  return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length]!;
+}
+
+/** 权限模式显示名：default=一般 / plan=plan / bypassPermissions=auto */
+export function permissionModeLabel(mode: PermissionMode): string {
+  return mode === "default" ? "一般" : mode === "plan" ? "plan" : "auto";
+}
+
 /** 当前轮流式累积区：done 时并入消息块 */
 export interface Streaming {
   text: string;
@@ -131,6 +146,8 @@ export interface TuiState {
   prompt: PromptState;
   streaming: Streaming | undefined;
   status: "idle" | "running";
+  /** 当前权限模式（一般/plan/auto）：Shift+Tab 切换，回灌后端 PermissionPipeline */
+  permissionMode: PermissionMode;
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
   /** 可折叠块聚焦（Tab 切换、Enter 翻折）：-1 无聚焦（Enter 发送） */
@@ -231,6 +248,7 @@ export function initState(messages: Message[]): TuiState {
     prompt: emptyPrompt([]),
     streaming: undefined,
     status: "idle",
+    permissionMode: "default",
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
@@ -641,6 +659,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "permission":
     case "modal-confirm":
     case "esc":
+    case "mode-cycle":
     case "noop":
       return state;
   }

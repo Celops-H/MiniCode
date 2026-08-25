@@ -15,7 +15,7 @@ describe("view/App 渲染链", () => {
       () => (
         <App state={channel.state} model="test-model" sessionId="abc123" onAction={channel.onAction} />
       ),
-      { width: 40, height: 8 },
+      { width: 64, height: 8 },
     );
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
@@ -23,7 +23,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("● 空闲");
   });
 
-  it("窄屏（44 列）：状态行不折行、模型名完整", async () => {
+  it("窄屏（44 列）：状态行不折行、模型名与模式保留", async () => {
     const channel = createChannel([]);
     const setup = await testRender(
       () => (
@@ -33,10 +33,8 @@ describe("view/App 渲染链", () => {
     );
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
-    // 模型名完整保留在同一行
+    // 模型名与权限模式 chip 保留在同一行（flexShrink:0 右侧溢出被截而非换行）
     expect(frame).toContain("test-model");
-    // 状态行所在行不应出现「▼/…」等折行痕迹（行数：8 行窗口内含状态行，折行会让内容多行
-    // 干扰输入框 —— 这里只断言模型名与状态图标仍同屏出现即可，折行回归由 flexShrink 控制）
-    expect(frame).toContain("●");
+    expect(frame).toContain("模式[一般]");
   });
 });
