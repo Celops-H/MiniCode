@@ -28,8 +28,12 @@ export class OpenAICompletionsProtocol implements Protocol {
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
   buildRequest(context: Context): unknown {
+    const converted = context.messages.map(toOpenAIMessage);
     return {
-      messages: context.messages.map(toOpenAIMessage),
+      // 系统提示词作为首条 system 消息进请求体（空则不占位，厂商拒空 system）
+      messages: context.systemPrompt
+        ? [{ role: "system", content: context.systemPrompt }, ...converted]
+        : converted,
       ...(context.tools.length > 0 ? { tools: context.tools.map(toOpenAITool) } : {}),
     };
   }

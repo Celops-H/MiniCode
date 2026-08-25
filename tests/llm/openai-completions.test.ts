@@ -32,19 +32,33 @@ describe("buildRequest：消息与工具转换", () => {
       messages: Array<Record<string, unknown>>;
     };
 
-    expect(req.messages[0]).toEqual({ role: "user", content: "你好" });
-    expect(req.messages[1]).toEqual({
+    expect(req.messages[0]).toEqual({ role: "system", content: "助手" });
+    expect(req.messages[1]).toEqual({ role: "user", content: "你好" });
+    expect(req.messages[2]).toEqual({
       role: "assistant",
       content: [{ type: "text", text: "回复" }],
       tool_calls: [
         { id: "call_1", type: "function", function: { name: "glob", arguments: '{"pattern":"*.ts"}' } },
       ],
     });
-    expect(req.messages[2]).toEqual({
+    expect(req.messages[3]).toEqual({
       role: "tool",
       tool_call_id: "call_1",
       content: "结果",
     });
+  });
+
+  it("systemPrompt 转为首条 system 消息；为空时不占位", () => {
+    const withSys = protocol.buildRequest(
+      createContext("你是助手", [userMessage("hi")]),
+    ) as { messages: Array<Record<string, unknown>> };
+    expect(withSys.messages[0]).toEqual({ role: "system", content: "你是助手" });
+    expect(withSys.messages[1]).toEqual({ role: "user", content: "hi" });
+
+    const noSys = protocol.buildRequest(
+      createContext("", [userMessage("hi")]),
+    ) as { messages: Array<Record<string, unknown>> };
+    expect(noSys.messages[0]).toEqual({ role: "user", content: "hi" });
   });
 
   it("thinking 块退化为 <thinking> 文本", () => {
@@ -52,7 +66,7 @@ describe("buildRequest：消息与工具转换", () => {
       assistantMessage([{ type: "thinking", thinking: "内部推理" }]),
     ]);
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
-    expect(req.messages[0]).toEqual({
+    expect(req.messages[1]).toEqual({
       role: "assistant",
       content: [{ type: "text", text: "<thinking>内部推理</thinking>" }],
     });

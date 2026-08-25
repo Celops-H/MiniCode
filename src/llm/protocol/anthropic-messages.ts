@@ -25,6 +25,8 @@ export class AnthropicMessagesProtocol implements Protocol {
    */
   buildRequest(context: Context): unknown {
     return {
+      // 系统提示词放顶层 system 字段（Anthropic 约定；空串不占位，厂商拒空 system）
+      ...(context.systemPrompt ? { system: context.systemPrompt } : {}),
       messages: toAnthropicMessages(context.messages),
       ...(context.tools.length > 0 ? { tools: context.tools.map(toAnthropicTool) } : {}),
     };

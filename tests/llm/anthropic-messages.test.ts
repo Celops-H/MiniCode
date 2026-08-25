@@ -69,6 +69,18 @@ describe("buildRequest：消息与工具转换", () => {
     ]);
   });
 
+  it("systemPrompt 放顶层 system 字段；为空时不带", () => {
+    const req = protocol.buildRequest(
+      createContext("你是助手", [userMessage("hi")]),
+    ) as Record<string, unknown>;
+    expect(req.system).toBe("你是助手");
+
+    const noSys = protocol.buildRequest(
+      createContext("", [userMessage("hi")]),
+    ) as Record<string, unknown>;
+    expect("system" in noSys).toBe(false);
+  });
+
   it("无工具时不带 tools 字段", () => {
     const req = protocol.buildRequest(createContext("s")) as Record<string, unknown>;
     expect("tools" in req).toBe(false);
