@@ -536,10 +536,11 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "input": {
       // 单字符插入（IME 上送的成串字符也一次插入，不含换行）
       const prompt = insertText(state.prompt, action.text);
+      // connect 输入态是输 API Key：不弹 slash 候选（否则候选态 Enter 会执行命令而非提交 key）
       return {
         ...state,
         prompt,
-        candidate: recomputeCandidate(prompt, state.candidate),
+        candidate: state.connect ? undefined : recomputeCandidate(prompt, state.candidate),
       };
     }
     case "newline": {

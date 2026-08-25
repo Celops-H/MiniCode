@@ -170,7 +170,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/help") {
-      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       return;
     }
@@ -198,7 +198,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       });
       return;
     }
-    if (command.startsWith("/rename")) {
+    if (command === "/rename" || command.startsWith("/rename ")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化）
       const title = command.slice("/rename".length).trim();
       if (!title) {
@@ -214,6 +214,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/clear") {
+      // 运行守卫：运行中清屏会抹掉当前回合用户消息块与进行中的工具卡，破坏视图连续性
+      if (state.status === "running") {
+        showToast("运行中不可清空，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        return;
+      }
       // 清空消息区（新的一屏），历史仍在会话文件里可 /session 找回
       commit({ ...state, blocks: [], streaming: undefined, toast: undefined, modal: undefined, candidate: undefined, focusIndex: -1 });
       showToast("界面已清空");
@@ -231,6 +237,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     if (!preset) return;
     const key = state.prompt.lines.join("\n").trim();
     const result = await connectProvider(preset, key);
+    // await 期间用户可能已按 Esc 取消（connect 置空）：取消后不再重建、不再动输入
+    if (!state.connect) return;
     if (result.ok) {
       showToast(`${conn.providerName} 已连接，正在重建会话…`);
       pendingReconfigure = true;
@@ -435,7 +443,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     openConsoleOnError: false,
     // 鼠标：开启后滚动条拖拽/滚轮滚动由 opentui 原生承担，点击折叠等由视图 onMouseUp 接线
     useMouse: true,
-    // kitty 键盘协议：让 Ctrl+J（换行）等组合键带修饰标志独立到达（主流终端 Deggrade 回退）
+    // kitty 键盘协议：让 Ctrl+J（换行）等组合键带修饰标志独立到达；不支持的终端自动回退（Ctrl+J 退化为 Enter）
     useKittyKeyboard: {},
   });
   win32DisableProcessedInput();

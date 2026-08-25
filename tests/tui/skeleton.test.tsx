@@ -8,10 +8,9 @@ import { it, expect } from "vitest";
 import { createChannel } from "../../src/tui/loop.js";
 import { opentuiKeyToKey } from "../../src/tui/opentuiKeys.js";
 import { mapKey } from "../../src/tui/keymap.js";
-import { initState, reduceAction } from "../../src/tui/state.js";
+import { initState, reduceAction, type TuiState } from "../../src/tui/state.js";
 
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
-  // 塞一个带思考的助手块（可折叠）+ 一个不可折叠块
   const base = initState([]);
   const withBlocks = {
     ...base,
@@ -26,6 +25,16 @@ it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   // index 1 不可折叠（无 thinking）：原样
   const unchanged = reduceAction(withBlocks, { type: "fold-at", index: 1 });
   expect(unchanged.blocks[1]).toBe(withBlocks.blocks[1]);
+});
+
+it("connect 输入态不弹 slash 候选（防止候选态 Enter 执行命令而非提交 key）", () => {
+  const base: TuiState = {
+    ...initState([]),
+    connect: { providerId: "deepseek", providerName: "DeepSeek", apiKeyEnv: "DEEPSEEK_API_KEY", defaultModel: "deepseek-chat" },
+  };
+  const s = reduceAction(base, { type: "input", text: "/" });
+  // 输 / 在 connect 态不应算成命令候选（输入区是输 API Key）
+  expect(s.candidate).toBeUndefined();
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

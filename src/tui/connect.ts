@@ -15,7 +15,8 @@ import { resolveConfigPaths } from "../config/paths.js";
 export interface ProviderPreset {
   id: string;
   name: string;
-  baseUrl?: string;
+  /** OpenAI 兼容 API 端点（必填：后端模型客户端只走 openai-chat-completions 协议） */
+  baseUrl: string;
   apiKeyEnv: string;
   models: string[];
   defaultModel: string;
@@ -104,7 +105,7 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset): P
     ...kept,
     {
       id: preset.id,
-      baseUrl: preset.baseUrl ?? "https://api.openai.com/v1",
+      baseUrl: preset.baseUrl,
       apiKeyEnv: preset.apiKeyEnv,
       models: preset.models.map((id) => ({ id })),
     },
