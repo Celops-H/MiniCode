@@ -775,12 +775,17 @@ export class Agent {
       return { message: toolResultMessage(call.id, call.name, error, true) };
     }
     try {
-      const result = await withCwd(this.cwd, () =>
-        withFileState(
-          this.fileState,
-          () => tool.execute(call.input, { signal: this.interruptController.signal }),
+      // 工具中断看门狗：interrupt 后工具若不响应 signal（非 bash 类挂起）3s 强制转失败，
+      // 与 withInterruptTimeout 配套保证打断后本轮必然收尾
+      const result = await Promise.race([
+        withCwd(this.cwd, () =>
+          withFileState(
+            this.fileState,
+            () => tool.execute(call.input, { signal: this.interruptController.signal }),
+          ),
         ),
-      );
+        interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS),
+      ]);
       const { output, contextModifier, isError } =
         typeof result === "string"
           ? { output: result, contextModifier: undefined, isError: undefined }
@@ -906,6 +911,28 @@ function toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
 
 /** 中断看门狗超时：signal 中止后流仍未结束的容忍窗口（ms） */
 const INTERRUPT_STREAM_TIMEOUT_MS = 3_000;
+
+/** 工具中断看门狗超时：signal 中止后工具仍未返回的容忍窗口（ms） */
+const TOOL_INTERRUPT_TIMEOUT_MS = 3_000;
+
+/**
+ * 中断截止信号：signal 中止后 timeoutMs 内未完成则 reject（AbortError），
+ * 与 withInterruptTimeout 配套——interrupt 后工具若不响应 signal（非 bash 类挂起），
+ * 强制转失败结果，宿主输入循环不被卡死。
+ * @param signal 中断信号
+ * @param timeoutMs 中止后的容忍窗口
+ * @returns 永不 resolve 的 promise（中止超时后 reject）
+ */
+function interruptDeadline(signal: AbortSignal, timeoutMs: number): Promise<never> {
+  const promise = new Promise<never>((_resolve, reject) => {
+    const rejectNow = (): void => reject(new DOMException("Aborted", "AbortError"));
+    if (signal.aborted) rejectNow();
+    else signal.addEventListener("abort", () => setTimeout(rejectNow, timeoutMs), { once: true });
+  });
+  // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
+  promise.catch(() => undefined);
+  return promise;
+}
 
 /**
  * 中断看门狗：signal 中止后，流若在 timeoutMs 内仍未产出/结束（SDK 或厂商不响应 abort），

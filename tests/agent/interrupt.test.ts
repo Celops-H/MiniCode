@@ -308,4 +308,49 @@ describe("Agent 主循环：turn 内真打断", () => {
     expect(events).toEqual([{ type: "text_delta", text: "开头段" }]);
     expect(agent.getMessages()).toHaveLength(2); // user + 半截 assistant
   });
+
+  it("工具忽略 signal 挂起：中断看门狗 3s 强制失败结果，回合不被卡死", async () => {
+    vi.useFakeTimers();
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    // 忽略 signal 的挂起工具（模拟非 bash 类工具不响应 abort）
+    const hungTool: Tool = {
+      name: "bash",
+      description: "挂起工具",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute() {
+        markStarted!();
+        return new Promise<string>(() => {}); // 永不 resolve
+      },
+    };
+    const client: ModelClient = {
+      async *stream() {
+        yield { type: "toolcall_start", index: 0, id: "call_1", name: "bash" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_use" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [hungTool],
+    });
+    agent.start("工具看门狗");
+    const runPromise = run(agent);
+    await started; // 工具已开始执行（挂起）
+    agent.interrupt();
+    await vi.advanceTimersByTimeAsync(3_001); // 工具看门狗超时
+    await runPromise;
+    // 挂起工具被强制转失败结果（配对闭合），回合收尾
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({ toolCallId: "call_1", isError: true });
+    expect(result?.content).toContain("工具 bash 执行失败");
+  });
 });
