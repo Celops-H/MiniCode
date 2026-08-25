@@ -583,18 +583,12 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, candidate: { ...state.candidate, selected } };
     }
     case "toggle-focus": {
-      // 在可折叠块间移动聚焦（无聚焦时选最近一个；已聚焦移到下一个）
+      // 在可折叠块间移动聚焦（Tab 高亮当前块，供键盘用户定位）
       const foldables = state.blocks.map((b, i): number => (isFoldable(b) ? i : -1)).filter((i) => i >= 0);
       if (foldables.length === 0) return state;
       const current = state.focusIndex;
       const next = current >= 0 ? foldables.find((i) => i > current) : foldables[0];
       return { ...state, focusIndex: next ?? current };
-    }
-    case "toggle-fold": {
-      // 翻转聚焦块的折叠态（Enter）
-      if (state.focusIndex < 0) return state;
-      const blocks = state.blocks.map((b, i) => (i === state.focusIndex ? flipFold(b) : b));
-      return { ...state, blocks };
     }
     case "fold-at": {
       // 鼠标点折叠头：直接翻转指定块的折叠态（无论聚焦与否）

@@ -42,7 +42,12 @@ export function App(props: AppProps): JSX.Element {
 
   return (
     <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
-      <Messages blocks={props.state.blocks} modelLabel={props.model} streaming={props.state.streaming} />
+      <Messages
+        blocks={props.state.blocks}
+        modelLabel={props.model}
+        streaming={props.state.streaming}
+        onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
+      />
       {props.state.toast ? (
         <box flexShrink={0} paddingX={1}>
           <text fg={theme.textMuted}>{props.state.toast.text}</text>

@@ -11,7 +11,7 @@ import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, isFoldable, NEW_SESSION_ID, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, type TuiState } from "./state.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
@@ -223,18 +223,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   const handleAction = (action: TuiAction): void => {
     switch (action.type) {
       case "send": {
-        if (state.focusIndex >= 0 && promptEmpty(state.prompt)) {
-          commit(reduceAction(state, { type: "toggle-fold" }));
-          return;
-        }
-        if (promptEmpty(state.prompt)) {
-          const lastFoldable = state.blocks
-            .map((b, i): number => (isFoldable(b) ? i : -1))
-            .filter((i) => i >= 0)
-            .at(-1);
-          if (lastFoldable !== undefined) commit(reduceAction({ ...state, focusIndex: lastFoldable }, { type: "toggle-fold" }));
-          return;
-        }
+        // 空输入 Enter：不再折叠最后一个可折叠块（展开/收起已改鼠标点击，Enter 保留发送）
+        if (promptEmpty(state.prompt)) return;
         const text = state.prompt.lines.join("\n");
         if (!text.trim()) return;
         if (text.startsWith("/")) handleCommand(text);
@@ -350,6 +340,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     targetFps: 60,
     autoFocus: false,
     openConsoleOnError: false,
+    // 鼠标：开启后滚动条拖拽/滚轮滚动由 opentui 原生承担，点击折叠等由视图 onMouseUp 接线
+    useMouse: true,
   });
   win32DisableProcessedInput();
 

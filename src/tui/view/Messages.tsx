@@ -25,26 +25,31 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；Enter 切换由 reducer 改 thinkingCollapsed */
-function ThinkingFold(props: { text: string; collapsed: boolean }): JSX.Element {
+/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；点击折叠头切换（onFold=鼠标展开/收起） */
+function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => void }): JSX.Element {
   const width = Array.from(props.text).length;
   return (
-    <text fg={theme.textMuted}>
-      {props.collapsed ? (
-        <span>思考（▸ {width}，Enter 展开）</span>
-      ) : (
-        <span style={{ fg: theme.text }}>
-          <span style={{ fg: theme.textMuted }}>▼ 思考（Enter 收起）</span>
-          {"\n"}
-          {props.text}
-        </span>
-      )}
-    </text>
+    <box flexDirection="column">
+      <box onMouseUp={props.onFold}>
+        <text fg={theme.textMuted}>
+          {props.collapsed ? (
+            <span>思考（▸ {width}，点击展开）</span>
+          ) : (
+            <span style={{ fg: theme.text }}>
+              <span style={{ fg: theme.textMuted }}>▼ 思考（点击收起）</span>
+            </span>
+          )}
+        </text>
+      </box>
+      <Show when={!props.collapsed}>
+        <text>{props.text}</text>
+      </Show>
+    </box>
   );
 }
 
-/** 单条消息块：用户/助手，含思考折叠与错误标记 */
-function MessageView(props: { b: MessageBlock; modelLabel: string }): JSX.Element {
+/** 单条消息块：用户/助手，含点击可切换的思考折叠与错误标记 */
+function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () => void }): JSX.Element {
   const label = props.b.role === "user" ? "你" : props.modelLabel;
   return (
     <box flexDirection="column">
@@ -59,21 +64,21 @@ function MessageView(props: { b: MessageBlock; modelLabel: string }): JSX.Elemen
         <text>{props.b.text}</text>
       </Show>
       <Show when={props.b.thinking}>
-        <ThinkingFold text={props.b.thinking!} collapsed={props.b.thinkingCollapsed} />
+        <ThinkingFold text={props.b.thinking!} collapsed={props.b.thinkingCollapsed} onFold={props.onFold} />
       </Show>
     </box>
   );
 }
 
-/** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误（可折叠） */
-function ToolView(props: { b: ToolBlock }): JSX.Element {
+/** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误（点击参数行折叠） */
+function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const status = toolStatus(props.b);
   const hasOutput = Boolean(props.b.output || props.b.error);
   const hint =
     props.b.collapsedOutput && hasOutput
       ? props.b.output
-        ? `▾ 输出 ${props.b.output.replace(/\n$/, "").split("\n").length} 行 · Enter 展开`
-        : "▾ 错误详情 · Enter 展开"
+        ? `▾ 输出 ${props.b.output.replace(/\n$/, "").split("\n").length} 行 · 点击展开`
+        : "▾ 错误详情 · 点击展开"
       : "";
   return (
     <box
@@ -85,13 +90,15 @@ function ToolView(props: { b: ToolBlock }): JSX.Element {
       titleColor={status.fg}
     >
       {props.b.args ? (
-        <text fg={theme.textMuted} paddingX={1}>
-          {props.b.collapsedArgs
-            ? props.b.args.length > 60
-              ? `${props.b.args.slice(0, 60)}…（${props.b.args.length} 字符，Enter 展开）`
-              : props.b.args
-            : props.b.args}
-        </text>
+        <box onMouseUp={props.onFold} flexDirection="column">
+          <text fg={theme.textMuted} paddingX={1}>
+            {props.b.collapsedArgs
+              ? props.b.args.length > 60
+                ? `${props.b.args.slice(0, 60)}…（${props.b.args.length} 字符，点击展开）`
+                : props.b.args
+              : props.b.args}
+          </text>
+        </box>
       ) : null}
       <Show when={props.b.output && !props.b.collapsedOutput}>
         <text paddingX={1}>{props.b.output}</text>
@@ -139,13 +146,18 @@ function StreamingView(props: { s: Streaming }): JSX.Element {
   );
 }
 
-function blockView(b: BlockView, modelLabel: string): JSX.Element {
-  if (b.kind === "message") return <MessageView b={b} modelLabel={modelLabel} />;
-  if (b.kind === "tool") return <ToolView b={b} />;
+function blockView(b: BlockView, modelLabel: string, onFold: () => void): JSX.Element {
+  if (b.kind === "message") return <MessageView b={b} modelLabel={modelLabel} onFold={onFold} />;
+  if (b.kind === "tool") return <ToolView b={b} onFold={onFold} />;
   return <AgentView b={b} />;
 }
 
-export function Messages(props: { blocks: BlockView[]; modelLabel: string; streaming?: Streaming }): JSX.Element {
+export function Messages(props: {
+  blocks: BlockView[];
+  modelLabel: string;
+  streaming?: Streaming;
+  onFoldAt?: (index: number) => void;
+}): JSX.Element {
   return (
     <scrollbox
       flexGrow={1}
@@ -157,9 +169,9 @@ export function Messages(props: { blocks: BlockView[]; modelLabel: string; strea
       }}
     >
       <For each={props.blocks}>
-        {(b) => (
+        {(b, i) => (
           <box flexShrink={0} marginTop={1}>
-            {blockView(b, props.modelLabel)}
+            {blockView(b, props.modelLabel, () => props.onFoldAt?.(i()))}
           </box>
         )}
       </For>

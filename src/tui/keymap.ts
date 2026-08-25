@@ -22,8 +22,7 @@ export type TuiAction =
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
   | { type: "toggle-focus" }
-  | { type: "toggle-fold" }
-  /** 鼠标点击指定块（下标）的折叠头：直接翻该块折叠态，不走聚焦链 */
+  /** 鼠标点击指定块（下标）的折叠头：直接翻该块折叠态（Web 交互：展开/收起改鼠标点击） */
   | { type: "fold-at"; index: number }
   | { type: "interrupt" }
   | { type: "exit" }
