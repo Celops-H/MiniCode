@@ -94,6 +94,8 @@ export interface AgentOptions {
   checkpoint?: (messages: Message[]) => Promise<void> | void;
   /** 启用会话记忆（DESIGN 9.7）：每轮结束后模型增量维护记忆，压缩时用记忆替代现场摘要省模型调用 */
   memory?: boolean;
+  /** 只读快工具正常执行超时（ms）：glob/read/grep 等本应秒回，异常挂起时兜底强制失败；默认 10s */
+  toolTimeoutMs?: number;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
   team?: Team;
 }
@@ -104,6 +106,8 @@ export class Agent {
   private readonly modelId: string;
   private readonly systemPrompt: string;
   private readonly maxTurns: number;
+  /** 只读快工具正常执行超时（ms） */
+  private readonly toolTimeoutMs: number;
   private readonly registry: ToolRegistry;
   private readonly compactConfig?: CompactConfig;
   private readonly permission?: PermissionPipeline;
@@ -149,6 +153,7 @@ export class Agent {
     this.modelId = options.modelId;
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 10;
+    this.toolTimeoutMs = options.toolTimeoutMs ?? TOOL_READONLY_TIMEOUT_MS;
     this.compactConfig = options.compactConfig;
     this.permission = options.permission;
     this.hooks = options.hooks;
@@ -776,7 +781,10 @@ export class Agent {
     }
     try {
       // 工具中断看门狗：interrupt 后工具若不响应 signal（非 bash 类挂起）3s 强制转失败，
-      // 与 withInterruptTimeout 配套保证打断后本轮必然收尾
+      // 与 withInterruptTimeout 配套保证打断后本轮必然收尾；
+      // 只读快工具（glob/read/grep 等）另加正常执行超时：本应秒回却挂起不转圈（不依赖打断触发）
+      const deadlines: Promise<never>[] = [interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS)];
+      if (tool.isReadOnly) deadlines.push(executeDeadline(this.toolTimeoutMs));
       const result = await Promise.race([
         withCwd(this.cwd, () =>
           withFileState(
@@ -784,7 +792,7 @@ export class Agent {
             () => tool.execute(call.input, { signal: this.interruptController.signal }),
           ),
         ),
-        interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS),
+        ...deadlines,
       ]);
       const { output, contextModifier, isError } =
         typeof result === "string"
@@ -915,6 +923,10 @@ const INTERRUPT_STREAM_TIMEOUT_MS = 3_000;
 /** 工具中断看门狗超时：signal 中止后工具仍未返回的容忍窗口（ms） */
 const TOOL_INTERRUPT_TIMEOUT_MS = 3_000;
 
+/** 只读快工具正常执行超时：glob/read/grep 等本应较快返回，超时兜底防挂起卡死回合（不依赖打断触发）；
+ *  取 1min——大仓库下递归扫描（如巨型 monorepo 的 grep/glob）合法耗时可能不短，太紧会误杀正常完成 */
+const TOOL_READONLY_TIMEOUT_MS = 60_000;
+
 /**
  * 中断截止信号：signal 中止后 timeoutMs 内未完成则 reject（AbortError），
  * 与 withInterruptTimeout 配套——interrupt 后工具若不响应 signal（非 bash 类挂起），
@@ -928,6 +940,22 @@ function interruptDeadline(signal: AbortSignal, timeoutMs: number): Promise<neve
     const rejectNow = (): void => reject(new DOMException("Aborted", "AbortError"));
     if (signal.aborted) rejectNow();
     else signal.addEventListener("abort", () => setTimeout(rejectNow, timeoutMs), { once: true });
+  });
+  // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
+  promise.catch(() => undefined);
+  return promise;
+}
+
+/**
+ * 正常执行超时截止：timeoutMs 内工具未返回则 reject（超时错误）——兜底只读快工具的挂起
+ * （glob/read/grep 等异常卡死不转圈、不因不响应中断而无限等）。与中断看门狗独立：
+ * 该超时在正常运行期也生效，不依赖打扰信号；打断场景仍由 interruptDeadline 收尾。
+ * @param timeoutMs 工具执行超时窗口
+ * @returns 永不 resolve 的 promise（超时后 reject）
+ */
+function executeDeadline(timeoutMs: number): Promise<never> {
+  const promise = new Promise<never>((_resolve, reject) => {
+    setTimeout(() => reject(new Error(`工具执行超时：${timeoutMs / 1000}s 未返回`)), timeoutMs);
   });
   // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
   promise.catch(() => undefined);

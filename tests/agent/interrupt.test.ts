@@ -353,4 +353,129 @@ describe("Agent 主循环：turn 内真打断", () => {
     expect(result).toMatchObject({ toolCallId: "call_1", isError: true });
     expect(result?.content).toContain("工具 bash 执行失败");
   });
+
+  it("只读快工具正常执行挂起：正常执行超时兜底，回合不被无打断卡死", async () => {
+    // 只读快工具（模拟 glob/read 异常挂起）：不响应中断、也用不到打断；
+    // 用注入的短超时（100ms），真实计时器驱动，不依赖 fake timers
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const hungReadonly: Tool = {
+      name: "glob",
+      description: "只读快工具",
+      inputSchema: z.object({}),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute() {
+        markStarted!();
+        return new Promise<string>(() => {}); // 永不 resolve（模拟异常挂起）
+      },
+    };
+    const client: ModelClient = {
+      async *stream(_modelId, ctx) {
+        // 第一轮发工具调用；回灌失败结果后模型改发总结，回合结束（避免 mock 无限重试）
+        if (ctx.messages.some((m) => m.role === "tool_result")) {
+          yield { type: "text_delta", text: "工具超时，我换个思路" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "toolcall_start", index: 0, id: "call_1", name: "glob" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_use" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [hungReadonly],
+      toolTimeoutMs: 100, // 短超时，真实计时器驱动
+    });
+    agent.start("只读超时");
+    const runPromise = run(agent);
+    await started; // 工具已开始执行（挂起），未打断
+    await runPromise;
+    // 挂起的只读工具被强制转失败结果（配对闭合），回合收尾不卡死
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({ toolCallId: "call_1", isError: true });
+    expect(result?.content).toContain("工具执行超时");
+    expect(agent.isInterrupted()).toBe(false);
+  });
+
+  it("只读快工具正常完成：超时兜底不误伤，正常结果回灌", async () => {
+    vi.useFakeTimers();
+    const client: ModelClient = {
+      async *stream() {
+        yield { type: "toolcall_start", index: 0, id: "call_1", name: "glob" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_use" };
+      },
+    };
+    const okReadonly: Tool = {
+      name: "glob",
+      description: "只读快工具",
+      inputSchema: z.object({}),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "找到文件 A",
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [okReadonly],
+    });
+    agent.start("只读正常");
+    const runPromise = run(agent);
+    // 工具同步返回，无需推进假时钟（正常路径不受超时兜底影响）
+    await runPromise;
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({ toolCallId: "call_1", isError: false });
+    expect(result?.content).toContain("找到文件 A");
+    expect(result?.content).not.toContain("执行超时");
+  });
+
+  it("只读工具接近超时边界正常完成：不被超时兜底误杀（真实计时器）", async () => {
+    // 注入 100ms 短超时 + 真实计时器，工具在超时前（50ms）完成——覆盖"合法耗时但未到超时"的边界
+    const client: ModelClient = {
+      async *stream(_modelId, ctx) {
+        if (ctx.messages.some((m) => m.role === "tool_result")) {
+          yield { type: "text_delta", text: "完成" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "toolcall_start", index: 0, id: "call_1", name: "glob" };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_use" };
+      },
+    };
+    const slowReadonly: Tool = {
+      name: "glob",
+      description: "只读但需要点时间",
+      inputSchema: z.object({}),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => new Promise((resolve) => setTimeout(() => resolve("慢但完成"), 50)),
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [slowReadonly],
+      toolTimeoutMs: 100, // 短超时，真实计时器驱动；工具 50ms 完成 < 100ms
+    });
+    agent.start("只读边界");
+    await run(agent);
+    const messages = agent.getMessages();
+    const result = messages.find((m) => m.role === "tool_result");
+    expect(result).toMatchObject({ toolCallId: "call_1", isError: false });
+    expect(result?.content).toContain("慢但完成");
+    expect(result?.content).not.toContain("执行超时");
+  });
 });
