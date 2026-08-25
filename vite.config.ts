@@ -19,4 +19,9 @@ export default defineConfig({
       },
     }),
   ],
+  // node:ffi 是 Node 26 新增实验内建，vite 8 解析器未把它当 node 内建 external，
+  // 需显式标注，否则 dev:tui（vite-node）加载 win32.ts 报 Cannot find package 'node:ffi'
+  ssr: {
+    external: ["node:ffi"],
+  },
 });

@@ -41,12 +41,14 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
       {props.candidate ? <CandidateList candidate={props.candidate} /> : null}
       <For each={props.prompt.lines}>
         {(line, i) => {
-          if (i() !== props.prompt.curLine) return <text>{line}</text>;
+          const prefix = i() === 0 ? "❯ " : "  ";
+          if (i() !== props.prompt.curLine) return <text>{prefix + line}</text>;
           const chars = Array.from(line);
           const before = chars.slice(0, props.prompt.curCol).join("");
           const after = chars.slice(props.prompt.curCol).join("");
           return (
             <text>
+              {prefix}
               {before}
               <span style={{ bg: theme.textMuted, fg: theme.text }}> </span>
               {after}

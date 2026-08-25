@@ -1,11 +1,11 @@
 /**
- * Windows 终端输入初始化（opencode 的 terminal-win32 对应，node:ffi 版）。
+ * Windows 终端输入初始化（opencode 的 terminal-win32 对应）。
  * opentui 原生层在 Windows 下读控制台输入时，控制台的 PROCESSED_INPUT 标志未清除会导致
  * Ctrl+C 等按键被终端处理、原始字节不完整进应用（opencode 官方也在启动时调用这些）。
- * 需 --experimental-ffi（package.json dev:tui/test 已注入）。
+ *
+ * 全程用 process.getBuiltinModule("node:ffi") 而非静态 import：node:ffi 是 Node 26 实验内建，
+ * vite-node/vite 8 的解析器不识别它（resolved id 变 ffi 而加载失败），运行时获取绕过打包器解析。
  */
-import { dlopen, types } from "node:ffi";
-
 const STD_INPUT_HANDLE = -10;
 const ENABLE_PROCESSED_INPUT = 0x0001;
 
@@ -18,15 +18,30 @@ interface Kernel {
   };
 }
 
+interface FfiModule {
+  dlopen: (path: string, symbols: Record<string, unknown>) => Kernel;
+  types: Record<string, string>;
+}
+
+function ffi(): FfiModule | null {
+  try {
+    return process.getBuiltinModule("node:ffi") as unknown as FfiModule;
+  } catch {
+    return null;
+  }
+}
+
 function load(): Kernel | null {
   if (process.platform !== "win32") return null;
+  const mod = ffi();
+  if (!mod) return null;
   try {
-    return dlopen("kernel32.dll", {
-      GetStdHandle: { arguments: [types.INT_32], return: types.POINTER },
-      GetConsoleMode: { arguments: [types.POINTER, types.POINTER], return: types.INT_32 },
-      SetConsoleMode: { arguments: [types.POINTER, types.UINT_32], return: types.INT_32 },
-      FlushConsoleInputBuffer: { arguments: [types.POINTER], return: types.INT_32 },
-    }) as unknown as Kernel;
+    return mod.dlopen("kernel32.dll", {
+      GetStdHandle: { arguments: [mod.types.INT_32], return: mod.types.POINTER },
+      GetConsoleMode: { arguments: [mod.types.POINTER, mod.types.POINTER], return: mod.types.INT_32 },
+      SetConsoleMode: { arguments: [mod.types.POINTER, mod.types.UINT_32], return: mod.types.INT_32 },
+      FlushConsoleInputBuffer: { arguments: [mod.types.POINTER], return: mod.types.INT_32 },
+    });
   } catch {
     return null;
   }

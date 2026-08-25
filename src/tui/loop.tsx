@@ -371,12 +371,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     runningLoop = false;
     if (toastTimer) clearTimeout(toastTimer);
     for (const off of unsubscribeHooks) off();
+    // 先还原终端（renderer.destroy）再发会话结束事件：防 SessionEnd handler 的 stdout
+    // 写进 raw/备用屏；destroy 包 try（渲染器初始化失败等边缘路径也不漏还原）
+    try {
+      renderer.destroy();
+    } catch {
+      // 渲染器已不可用，忽略
+    }
     try {
       await hooks?.emit({ type: "SessionEnd" });
     } catch {
       // 会话结束事件处理失败不阻断退出
     }
-    renderer.destroy();
   }
   return pendingSwitch ? { switchTo: pendingSwitch } : undefined;
 }
