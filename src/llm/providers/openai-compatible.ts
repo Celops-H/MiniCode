@@ -88,12 +88,15 @@ export class OpenAICompatibleProvider implements Provider {
   }
 }
 
+/** 模型请求超时（ms）：厂商慢/挂起时不再无限等待——超时抛错走路由切换或错误渲染 */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
 /**
- * 默认用官方 OpenAI SDK 创建 client。
+ * 默认用官方 OpenAI SDK 创建 client（带请求超时，防厂商请求挂起无限等待）。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址
  * @returns OpenAI 兼容 client
  */
-function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
-  return new OpenAI({ baseURL: baseUrl, apiKey }) as unknown as ChatCompletionsClient;
+export function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
+  return new OpenAI({ baseURL: baseUrl, apiKey, timeout: REQUEST_TIMEOUT_MS }) as unknown as ChatCompletionsClient;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createContext, userMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
-import { OpenAICompatibleProvider } from "../../src/llm/index.js";
+import { defaultCreateClient, OpenAICompatibleProvider, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
 import type { ChatCompletionsClient, ModelInfo } from "../../src/llm/index.js";
 
 async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
@@ -81,5 +81,12 @@ describe("stream", () => {
         // 消费流以触发认证检查
       }
     }).rejects.toThrow();
+  });
+});
+
+describe("请求超时", () => {
+  it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
+    const client = defaultCreateClient("sk", "https://api.deepseek.com") as unknown as { timeout: number };
+    expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
   });
 });
