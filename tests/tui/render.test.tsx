@@ -4,10 +4,11 @@
  * 注意：状态行用窄宽用例钉住「窄屏不折行」——flexShrink:0 使右侧溢出被截而非换行。
  */
 import { testRender } from "@opentui/solid";
+import { createStore } from "solid-js/store";
 import { describe, it, expect } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
-import type { TuiState } from "../../src/tui/state.js";
+import { initState, reduceHook, type TuiState } from "../../src/tui/state.js";
 
 describe("view/App 渲染链", () => {
   it("根组件渲染出界面骨架内容", async () => {
@@ -46,6 +47,17 @@ describe("view/App 渲染链", () => {
       () => <App state={st} model="m" sessionId="s" onAction={channel.onAction} />,
       { width: 64, height: 12 },
     );
+    await setup.waitForVisualIdle();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("main()");
+    expect(frame).toContain("task_1()");
+  });
+
+  it("live AgentSpawned 后底栏 agent 树刷新（曾因组件体常量 + App 布尔 memo 短路不刷新）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const setup = await testRender(() => <App state={state} model="m" sessionId="s" onAction={() => {}} />, { width: 64, height: 12 });
+    await setup.waitForVisualIdle();
+    setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" }));
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
     expect(frame).toContain("main()");
