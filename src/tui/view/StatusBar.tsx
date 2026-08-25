@@ -24,7 +24,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
         ) : (
           <span>
             <span style={{ fg: theme.success }}>● 空闲</span>
-            <span style={{ fg: theme.textMuted }}> · ↑↓ 历史 · S+Enter 换行</span>
+            <span style={{ fg: theme.textMuted }}> · ↑↓ 历史 · Ctrl+J 换行</span>
           </span>
         )}
       </text>
