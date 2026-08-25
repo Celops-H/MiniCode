@@ -14,6 +14,7 @@ import { opentuiKeyToKey } from "../opentuiKeys.js";
 import { Messages } from "./Messages.js";
 import { PromptView } from "./Prompt.js";
 import { StatusBar } from "./StatusBar.js";
+import { ModalView } from "./Modal.js";
 
 export interface AppProps {
   /** 界面状态（Solid store proxy，属性访问即响应式） */
@@ -40,6 +41,7 @@ export function App(props: AppProps): JSX.Element {
   return (
     <box flexDirection="column" flexGrow={1}>
       <Messages blocks={props.state.blocks} modelLabel={props.model} streaming={props.state.streaming} />
+      {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} />
     </box>
