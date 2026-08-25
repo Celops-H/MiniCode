@@ -298,8 +298,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
   };
 
-  // 渲染挂载（render 立即返回，渲染器持续；退出时 destroy 还原终端）
-  const renderer = await createCliRenderer({});
+  // 渲染挂载（render 立即返回，渲染器持续；退出时 destroy 还原终端）。
+  // exitOnCtrlC 必须 false：Ctrl+C 语义由 loop 的 interrupt/退出接管（M4.3 交互经验，非渲染器自毁）
+  const renderer = await createCliRenderer({ exitOnCtrlC: false });
   await render(
     () => <App state={state} model={modelLabel} sessionId={session.meta.id} onAction={handleAction} />,
     renderer,
