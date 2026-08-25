@@ -245,6 +245,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                 : NEW_SESSION_ID;
             exitLoop();
           }
+          return;
+        }
+        // slash 候选态 Enter = 执行选中的命令（M4.3 语义，UI-SPEC §6「Enter 用选中的命令」）
+        const candidate = state.candidate;
+        if (candidate) {
+          const item = candidate.items[candidate.selected];
+          if (item) handleCommand(item);
         }
         return;
       }

@@ -30,18 +30,24 @@ export function App(props: AppProps): JSX.Element {
   useKeyboard((e) => {
     const key = opentuiKeyToKey(e);
     const s = props.state;
-    props.onAction(
-      mapKey(key, {
-        inputEmpty: promptEmpty(s.prompt),
-        browsingHistory: s.prompt.historyIndex !== -1,
-        popup: s.modal ? "modal" : s.candidate ? "candidate" : undefined,
-      }),
-    );
+    let action = mapKey(key, {
+      inputEmpty: promptEmpty(s.prompt),
+      browsingHistory: s.prompt.historyIndex !== -1,
+      popup: s.modal ? "modal" : s.candidate ? "candidate" : undefined,
+    });
+    // 无 slash 候选时 Tab = 在可折叠块间移动聚焦（M4.3 语义，toggle-fold 用 Enter 展开）
+    if (action.type === "complete" && !s.candidate) action = { type: "toggle-focus" };
+    props.onAction(action);
   });
 
   return (
     <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
       <Messages blocks={props.state.blocks} modelLabel={props.model} streaming={props.state.streaming} />
+      {props.state.toast ? (
+        <box flexShrink={0} paddingX={1}>
+          <text fg={theme.textMuted}>{props.state.toast.text}</text>
+        </box>
+      ) : null}
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
       <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} />
