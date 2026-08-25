@@ -43,7 +43,9 @@ export interface KeymapContext {
 }
 
 export function mapKey(key: Key, ctx: KeymapContext = {}): TuiAction {
-  // Shift+Tab 全局切换权限模式（正常/候选/弹窗态都生效）
+  // Shift+Tab 全局切换权限模式（正常/候选/弹窗态都生效）。
+  // 注：需终端支持 kitty 键盘协议（我们开了 useKittyKeyboard）才能带 shift 标志到达；
+  // 不支持的终端上 Shift+Tab 退化为 Tab 或 backtab(ignore)。
   if (key.kind === "shift-tab") return { type: "mode-cycle" };
   switch (ctx.popup) {
     case "modal":

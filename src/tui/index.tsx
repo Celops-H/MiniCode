@@ -106,8 +106,12 @@ async function runTuiSession(
       const pipelineOptions: PermissionPipelineOptions = {
         rules: [],
         approver,
-        // plan 模式放行的只读工具集合（Tool.isReadOnly 收集）
-        readOnlyTools: new Set(tools.filter((t) => t.isReadOnly).map((t) => t.name)),
+        // plan 模式放行的只读工具集合（Tool.isReadOnly 收集；list_agents 为协作工具中的只读项，
+// 只能在 Agent 内部经 deps 构造、TUI 侧显式并入，需与 collab.ts 的 isReadOnly 保持同步）
+        readOnlyTools: new Set<string>([
+          ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
+          "list_agents",
+        ]),
         // mode 用 getter 活读 modeBox：Shift+Tab 切换即时作用于后续工具审批
         get mode() {
           return permissionModeBox.value;
