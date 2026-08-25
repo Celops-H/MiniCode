@@ -3,7 +3,6 @@ import { createContext, userMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import { defaultCreateClient, OpenAICompatibleProvider, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
 import type { ChatCompletionsClient, ModelInfo } from "../../src/llm/index.js";
-
 async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
   for (const v of vals) yield v;
 }
@@ -88,5 +87,105 @@ describe("请求超时", () => {
   it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
     const client = defaultCreateClient("sk", "https://api.deepseek.com") as unknown as { timeout: number };
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
+  });
+});
+
+describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
+  /** 挂起流：先产出一个 chunk 后不再产出，直到 signal 中止才释放（模拟厂商断流但连接不关） */
+  function hangingStream(signal?: AbortSignal): AsyncIterable<unknown> {
+    return {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
+        await new Promise<void>((resolve) => {
+          const onAbort = (): void => resolve();
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      },
+    };
+  }
+
+  it("N 秒无新 chunk 时中断底层请求并抛「模型响应超时」，已产出保留", async () => {
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create(_request, options) {
+            return hangingStream(options?.signal);
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: MODELS,
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50, // 测试用短超时
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    const t0 = Date.now();
+    await expect(async () => {
+      for await (const e of provider.stream("deepseek-chat", createContext("s", [userMessage("q")]))) {
+        events.push(e);
+      }
+    }).rejects.toThrow(/模型响应超时/);
+    // 已产出的第一个 chunk 正常到达；超时触发后底层被 abort 释放
+    expect(events).toEqual([{ type: "text_delta", text: "hi" }]);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it("用户 signal 中止时转发中断底层挂起（打断语义保留，流尽快释放）", async () => {
+    let interrupted = false;
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create(_request, options) {
+            return {
+              async *[Symbol.asyncIterator]() {
+                yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
+                await new Promise<void>((resolve) => {
+                  const onAbort = (): void => {
+                    interrupted = true;
+                    resolve();
+                  };
+                  if (options?.signal?.aborted) onAbort();
+                  else options?.signal?.addEventListener("abort", onAbort, { once: true });
+                });
+              },
+            };
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: MODELS,
+      env: { DEEPSEEK_API_KEY: "sk" },
+      createClient: () => client,
+    });
+    const controller = new AbortController();
+    const iterator = provider
+      .stream("deepseek-chat", createContext("s", [userMessage("q")]), {
+        signal: controller.signal,
+      })
+      [Symbol.asyncIterator]();
+    const first = await iterator.next();
+    expect(first.value).toEqual({ type: "text_delta", text: "hi" });
+    controller.abort();
+    const rest: StreamEvent[] = [];
+    let step = await iterator.next();
+    while (!step.done) {
+      rest.push(step.value);
+      step = await iterator.next();
+    }
+    // 挂起被释放、流正常结束（无 finish_reason）→ parseStream 补发 error「流意外结束」
+    expect(interrupted).toBe(true);
+    expect(rest.some((e) => e.type === "error")).toBe(true);
   });
 });

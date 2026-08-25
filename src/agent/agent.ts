@@ -949,11 +949,14 @@ async function* withInterruptTimeout<T>(
   timeoutMs: number,
 ): AsyncIterable<T> {
   const iterator = source[Symbol.asyncIterator]();
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   try {
     while (true) {
       const next = iterator.next();
-      let timer: NodeJS.Timeout | undefined;
-      let onAbort: (() => void) | undefined;
+      // 防 unhandled rejection：打断后挂起的 next 可能 reject（本处不 await 它）；
+      // race 里 next 先 reject 时仍照常抛出，catch 不吞错误
+      next.catch(() => undefined);
       const deadline = new Promise<never>((_resolve, reject) => {
         onAbort = () => {
           timer = setTimeout(() => reject(new DOMException("Aborted", "AbortError")), timeoutMs);
@@ -962,12 +965,22 @@ async function* withInterruptTimeout<T>(
         else signal.addEventListener("abort", onAbort, { once: true });
       });
       const result = await Promise.race([next, deadline]);
-      if (timer) clearTimeout(timer);
-      if (onAbort) signal.removeEventListener("abort", onAbort);
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+        onAbort = undefined;
+      }
       if (result.done) return;
       yield result.value;
     }
   } finally {
+    // 清理残留的定时器与监听：race 的 reject 路径（打断超时/底层错误）不经过上面的清理，
+    // 在此兜底——否则每次打断残留一个 3s 定时器、每次错误残留一个 abort 监听
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
     // 不等待 return：永挂流（await 永不 settle）的 return() 也永不完成，等待会把收尾卡死；
     // 触发清理但不等结果，底层流正常时自会释放
     iterator.return?.().catch(() => undefined);
