@@ -53,7 +53,12 @@ export class FileState {
     const next = new Promise<void>((resolve) => {
       release = resolve;
     });
-    fileLocks.set(key, prev.then(() => next));
+    const tail = prev.then(() => next);
+    fileLocks.set(key, tail);
+    // 链尾完成即清理：key 无继续排队就删，防长会话 Map 无限膨胀；期间有新尾巴则不删
+    void tail.then(() => {
+      if (fileLocks.get(key) === tail) fileLocks.delete(key);
+    });
     await prev;
     try {
       return await fn();

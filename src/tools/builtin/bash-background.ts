@@ -22,7 +22,8 @@ const MAX_OUTPUT_CHARS = 4 * 1024 * 1024;
 
 interface TaskEntry {
   task: BackgroundTask;
-  child: ChildProcess;
+  /** 子进程引用：任务结束（close）后置空释放，防注册表长期持有已结束进程句柄 */
+  child: ChildProcess | null;
 }
 
 /** 模块级后台任务注册表（DESIGN 7.5）：任务随进程存活，宿主进程退出时统一清理 */
@@ -62,6 +63,9 @@ export function startBackgroundTask(command: string): BackgroundTask {
       task.status = code === 0 ? "completed" : "failed";
       task.exitCode = code ?? undefined;
     }
+    // 任务结束释放子进程句柄：任务对象（含最终输出）保留供查询，防注册表无限持已结束进程
+    const entry = tasks.get(task.id);
+    if (entry) entry.child = null;
   });
   tasks.set(task.id, { task, child });
   return task;
@@ -82,7 +86,8 @@ export function killBackgroundTask(id: string): BackgroundTask | undefined {
   const entry = tasks.get(id);
   if (!entry) return undefined;
   entry.task.status = "killed";
-  killProcessTree(entry.child.pid!);
+  const pid = entry.child?.pid;
+  if (pid !== undefined) killProcessTree(pid);
   return entry.task;
 }
 
@@ -94,7 +99,8 @@ export function killAllBackgroundTasks(): number {
   for (const entry of tasks.values()) {
     if (entry.task.status === "running") {
       entry.task.status = "killed";
-      killProcessTree(entry.child.pid!);
+      const pid = entry.child?.pid;
+      if (pid !== undefined) killProcessTree(pid);
       count++;
     }
   }
