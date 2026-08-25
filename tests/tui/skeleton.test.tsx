@@ -8,7 +8,7 @@ import { it, expect } from "vitest";
 import { createChannel } from "../../src/tui/loop.js";
 import { opentuiKeyToKey } from "../../src/tui/opentuiKeys.js";
 import { mapKey } from "../../src/tui/keymap.js";
-import { initState, reduceAction, cyclePermissionMode, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, cyclePermissionMode, permissionModeLabel, type TuiState } from "../../src/tui/state.js";
 
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   const base = initState([]);
@@ -47,6 +47,10 @@ it("Shift+Tab 切换权限模式（一般→plan→auto 循环）", () => {
   expect(cyclePermissionMode("default")).toBe("plan");
   expect(cyclePermissionMode("plan")).toBe("bypassPermissions");
   expect(cyclePermissionMode("bypassPermissions")).toBe("default");
+  // 显示名（P3 定稿）：default / plan mode / auto mode
+  expect(permissionModeLabel("default")).toBe("default");
+  expect(permissionModeLabel("plan")).toBe("plan mode");
+  expect(permissionModeLabel("bypassPermissions")).toBe("auto mode");
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

@@ -35,6 +35,6 @@ describe("view/App 渲染链", () => {
     const frame = setup.captureCharFrame();
     // 模型名与权限模式 chip 保留在同一行（flexShrink:0 右侧溢出被截而非换行）
     expect(frame).toContain("test-model");
-    expect(frame).toContain("模式[一般]");
+    expect(frame).toContain("模式[default]");
   });
 });

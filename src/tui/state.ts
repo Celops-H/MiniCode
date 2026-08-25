@@ -129,9 +129,11 @@ export function cyclePermissionMode(mode: PermissionMode): PermissionMode {
   return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length]!;
 }
 
-/** 权限模式显示名：default=一般 / plan=plan / bypassPermissions=auto */
+/** 权限模式显示名：default / plan mode / auto mode（P3 用户定稿；后端枚举不变 default/plan/bypassPermissions） */
 export function permissionModeLabel(mode: PermissionMode): string {
-  return mode === "default" ? "一般" : mode === "plan" ? "plan" : "auto";
+  if (mode === "plan") return "plan mode";
+  if (mode === "bypassPermissions") return "auto mode";
+  return "default";
 }
 
 /** 当前轮流式累积区：done 时并入消息块 */

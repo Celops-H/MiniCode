@@ -1,5 +1,5 @@
 /**
- * 状态行（底部固定一行）：模型 · 会话id · 模式[一般/plan/auto] · 运行状态 · 操作提示。
+ * 状态行（底部固定一行）：模型 · 会话id · 模式[default/plan mode/auto mode] · 运行状态 · 操作提示。
  * 观感对齐 opencode footer 一行内分布；窄屏右侧溢出被截（模型名与模式 chip 优先保留，flexShrink:0）。
  */
 import type { JSX } from "@opentui/solid";

@@ -429,17 +429,17 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "mode-cycle": {
-        // Shift+Tab 切换权限模式：一般(正常审批) → plan(只读放行) → auto(自动放行)
+        // Shift+Tab 切换权限模式：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行)
         const next = cyclePermissionMode(state.permissionMode);
         modeBox.value = next;
         commit({ ...state, permissionMode: next });
         const note =
           next === "plan"
-            ? "（plan：只放行只读工具）"
+            ? "只放行只读工具"
             : next === "bypassPermissions"
-              ? "（auto：自动放行，保留危险命令检查）"
-              : "（一般：正常审批）";
-        showToast(`权限模式：${permissionModeLabel(next)}${note}`);
+              ? "自动放行（保留危险命令检查）"
+              : "正常审批";
+        showToast(`权限模式：${permissionModeLabel(next)}（${note}）`);
         return;
       }
       default:
