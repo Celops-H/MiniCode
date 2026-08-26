@@ -18,7 +18,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
   return (
     <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} paddingTop={1} flexShrink={0}>
       <box flexDirection="row" gap={1} flexShrink={0}>
-        <text fg={theme.text}>{props.model}</text>
+        <text fg={theme.modelColor}>{props.model}</text>
         <text fg={theme.textMuted}>· 会话 {props.sessionId.slice(-6)}</text>
         {props.permissionMode ? (
           <text fg={theme.foregroundAccent}>· 模式[{permissionModeLabel(props.permissionMode)}]</text>

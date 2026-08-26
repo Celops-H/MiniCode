@@ -214,6 +214,20 @@ function dotColors(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unk
   return colors;
 }
 
+/** 取首个文本等于 text 的 span 的 fg 颜色（hex）；无匹配或无颜色返回 undefined */
+function textFg(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
+  for (const line of frame.lines) {
+    for (const span of line.spans) {
+      if (span.text === text) {
+        const buf = (span.fg as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+        if (!buf) return undefined;
+        return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 it("圆点配色：你=紫、模型=蓝、工具/思考=灰、通知=橙", async () => {
   const setup = await testRender(
     () => (
@@ -235,4 +249,15 @@ it("圆点配色：你=紫、模型=蓝、工具/思考=灰、通知=橙", async
   expect(colors[1]).toBe("#61afef"); // 模型=蓝
   expect(colors[2]).toBe("#8f9096"); // 工具=灰
   expect(colors[3]).toBe("#f0a94a"); // 通知=警示橙（路由切换等提醒保持醒目）
+});
+
+it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧「你」保持强调紫", async () => {
+  const setup = await app([
+    { kind: "message", id: "u1", role: "user", text: "hi", thinkingCollapsed: true },
+    { kind: "message", id: "a1", role: "assistant", text: "hello", thinkingCollapsed: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const spans = setup.captureSpans();
+  expect(textFg(spans, "test-model")).toBe("#61afef"); // 模型名=蓝
+  expect(textFg(spans, "你")).toBe("#9d7cd8"); // 你=强调紫
 });

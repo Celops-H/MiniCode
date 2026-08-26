@@ -97,7 +97,7 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
     <box flexDirection="column">
       <text fg={theme.textMuted}>
         {props.b.isError ? <span style={{ fg: theme.error }}>⚠ </span> : null}
-        <span style={{ fg: props.b.role === "user" ? theme.foregroundAccent : theme.textMuted }}>
+        <span style={{ fg: props.b.role === "user" ? theme.foregroundAccent : theme.modelColor }}>
           {label}
         </span>{" "}
         {props.b.time ?? ""}
