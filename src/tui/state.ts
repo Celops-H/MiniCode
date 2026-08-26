@@ -39,13 +39,15 @@ export interface ToolBlock {
   collapsedOutput: boolean;
 }
 
-/** 子 agent 活动行（派生/完成/中断，带结论与合并结果） */
+/** 子 agent 活动行（派生/完成/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
+ *  平时收敛成单行，点击展开（用户复核：子 agent 结果应像工具一样支持展开/关闭） */
 export interface AgentActivityBlock {
   kind: "agent";
   event: "spawned" | "completed" | "interrupted";
   path: string;
   conclusion?: string;
   mergeResult?: string;
+  collapsed: boolean;
 }
 
 /** 系统通知行（模型路由切换等观察事件）：常驻消息区让用户看到发生了什么（非一闪而过的 toast） */
@@ -355,17 +357,20 @@ export function resetToNewState(state: TuiState): TuiState {
   };
 }
 
-/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠）；导出供 loop 空输入展开交互复用 */
+/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠 / 子 agent 结论与合并）；导出供 loop 空输入展开交互复用 */
 export function isFoldable(block: BlockView): boolean {
   if (block.kind === "message") return Boolean(block.thinking);
   if (block.kind === "tool") return Boolean(block.args) || Boolean(block.output || block.error);
+  // 子 agent 有结论/合并结果才可折叠（派生/中断无内容不需折叠）
+  if (block.kind === "agent") return block.event === "completed" && Boolean(block.conclusion || block.mergeResult);
   return false;
 }
 
-/** 翻转一个可折叠块的折叠态（消息翻思考，工具翻参数与输出） */
+/** 翻转一个可折叠块的折叠态（消息翻思考，工具翻参数与输出，子 agent 翻结论/合并） */
 function flipFold(block: BlockView): BlockView {
   if (block.kind === "message") return { ...block, thinkingCollapsed: !block.thinkingCollapsed };
   if (block.kind === "tool") return { ...block, collapsedArgs: !block.collapsedArgs, collapsedOutput: !block.collapsedOutput };
+  if (block.kind === "agent") return { ...block, collapsed: !block.collapsed };
   return block;
 }
 
@@ -627,7 +632,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         agents: state.agents.some((a) => a.path === event.path)
           ? state.agents
           : [...state.agents, { path: event.path, status: "running", spawnedAt: event.spawnedAt ?? null, completedAt: null }],
-        blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path }],
+        blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path, collapsed: true }],
       };
     case "AgentCompleted":
       return {
@@ -643,6 +648,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
             path: event.path,
             conclusion: event.conclusion,
             mergeResult: event.mergeResult,
+            collapsed: true,
           },
         ],
       };
@@ -652,7 +658,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         agents: state.agents.map((a) =>
           a.path === event.path ? { ...a, status: "interrupted", completedAt: event.completedAt ?? null } : a,
         ),
-        blocks: [...state.blocks, { kind: "agent", event: "interrupted", path: event.path }],
+        blocks: [...state.blocks, { kind: "agent", event: "interrupted", path: event.path, collapsed: true }],
       };
     case "Stop":
       return { ...state, status: "idle" };

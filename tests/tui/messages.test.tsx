@@ -59,13 +59,38 @@ it("工具卡按状态显示图标与名称", async () => {
   expect(fail.captureCharFrame()).toContain("Invalid pattern");
 });
 
-it("子 agent 活动行带路径与状态", async () => {
+it("子 agent 活动行带路径与状态；结论默认折叠、点击展开", async () => {
+  const calls: number[] = [];
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[{ kind: "agent", event: "completed", path: "/root/task_1", conclusion: "已合并分区逻辑", collapsed: true }]}
+        modelLabel="m"
+        onFoldAt={(i) => calls.push(i)}
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("子 agent [/root/task_1]");
+  expect(frame).toContain("点击展开");
+  expect(frame).not.toContain("已合并分区逻辑"); // 折叠时结论不展示
+  // 点子 agent 行 → fold-at(0)（结论可折叠，与工具卡同交互；第一块上方 marginTop 空行，头部在 y=1）
+  await setup.mockMouse.click(30, 1);
+  await setup.waitForVisualIdle();
+  expect(calls).toEqual([0]);
+});
+
+it("子 agent 结论展开后显示结论与合并（默认折叠，点击展开）", async () => {
   const setup = await app([
-    { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "已合并分区逻辑" },
+    { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "已合并分区逻辑", mergeResult: "2 处改动", collapsed: false },
   ]);
   await setup.waitForVisualIdle();
-  expect(setup.captureCharFrame()).toContain("子 agent [/root/task_1]");
-  expect(setup.captureCharFrame()).toContain("已合并分区逻辑");
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("子 agent [/root/task_1]");
+  expect(frame).toContain("结论：已合并分区逻辑");
+  expect(frame).toContain("合并：2 处改动");
 });
 
 it("流式尾显示思考与增量文本", async () => {

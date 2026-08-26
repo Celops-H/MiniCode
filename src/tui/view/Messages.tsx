@@ -167,18 +167,30 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   );
 }
 
-/** 子 agent 活动行：派生/完成（结论+合并）/中断 */
-function AgentView(props: { b: Extract<BlockView, { kind: "agent" }> }): JSX.Element {
+/** 子 agent 活动行：派生/完成（结论+合并可折叠）/中断——结论/合并长内容平时收敛单行，
+ *  点击展开（用户复核：子 agent 结果应像工具一样支持展开/关闭） */
+function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: () => void }): JSX.Element {
   const b = props.b;
+  const foldable = b.event === "completed" && Boolean(b.conclusion || b.mergeResult);
+  const fold = useFoldClick(props.onFold);
   return (
-    <text fg={theme.textMuted}>
-      <span style={{ fg: theme.foregroundAccent }}>⑂</span> 子 agent [{b.path}]
-      {b.event === "spawned"
-        ? " 已派生"
-        : b.event === "completed"
-          ? ` 完成${b.conclusion ? `：${b.conclusion}` : ""}${b.mergeResult ? `（${b.mergeResult}）` : ""}`
-          : " 中断"}
-    </text>
+    <box flexDirection="column" {...(foldable ? fold : {})}>
+      <text fg={theme.textMuted}>
+        <span style={{ fg: theme.foregroundAccent }}>⑂</span> 子 agent [{b.path}]
+        {b.event === "spawned"
+          ? " 已派生"
+          : b.event === "completed"
+            ? ` 完成${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
+            : " 中断"}
+      </text>
+      <Show when={foldable && !b.collapsed}>
+        <text fg={theme.textMuted}>
+          {b.conclusion ? `结论：${b.conclusion}` : null}
+          {b.conclusion && b.mergeResult ? "\n" : null}
+          {b.mergeResult ? `合并：${b.mergeResult}` : null}
+        </text>
+      </Show>
+    </box>
   );
 }
 
@@ -205,7 +217,7 @@ function blockView(b: BlockView, modelLabel: string, onFold: () => void): JSX.El
   if (b.kind === "message") return <MessageView b={b} modelLabel={modelLabel} onFold={onFold} />;
   if (b.kind === "tool") return <ToolView b={b} onFold={onFold} />;
   if (b.kind === "notice") return <NoticeView b={b} />;
-  return <AgentView b={b} />;
+  return <AgentView b={b} onFold={onFold} />;
 }
 
 export function Messages(props: {
