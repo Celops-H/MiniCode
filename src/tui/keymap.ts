@@ -15,6 +15,8 @@ export type TuiAction =
   | { type: "clear-input" }
   | { type: "newline" }
   | { type: "cursor"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
+  /** Shift+方向键：扩展输入框选区（B-2；无选区时从当前位置起选，编辑操作清选区） */
+  | { type: "select"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
   | { type: "delete-line" }
   | { type: "delete-to-end" }
   | { type: "delete-word" }
@@ -88,6 +90,12 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
     case "left":
     case "right":
       return { type: "cursor", dir: key.kind };
+    case "shift-left":
+    case "shift-right":
+    case "shift-up":
+    case "shift-down":
+      // Shift+方向键：扩展输入框选区（B-2）
+      return { type: "select", dir: key.kind.replace("shift-", "") as "left" | "right" | "up" | "down" };
     case "up":
     case "down":
       // 输入为空、或已在历史浏览中：回溯/前进历史；否则框内移光标

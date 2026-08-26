@@ -75,7 +75,13 @@ export type AgentEventMeta = HookEvent & { spawnedAt?: number; completedAt?: num
 /** 输入行上限（UI-SPEC §1：多行输入最多 20 行，超出不再增高，靠光标移动查看） */
 export const MAX_PROMPT_LINES = 20;
 
-/** 输入框状态：多行编辑（行上限 20）+ 历史回溯 */
+/** 输入框选区锚点：Shift+方向键起点（光标 curLine/curCol 是焦点端，随移动扩展/收缩） */
+export interface SelectionAnchor {
+  line: number;
+  col: number;
+}
+
+/** 输入框状态：多行编辑（行上限 20）+ 历史回溯 + 选区（Shift 选择，B-2） */
 export interface PromptState {
   lines: string[];
   /** 光标所在行 */
@@ -85,6 +91,8 @@ export interface PromptState {
   history: string[];
   /** -1 = 不在历史浏览中；否则浏览的 history 下标 */
   historyIndex: number;
+  /** 选区锚点（null=无选区）；光标是焦点端，选区 = 锚点↔光标的文本 */
+  sel: SelectionAnchor | null;
 }
 
 /** slash 命令候选：输入首字符为 / 时弹出 */
@@ -231,7 +239,7 @@ export interface TuiState {
  * 当成「引用未变」而跳过 —— 表现即「发送后输入框不清空」（历史 bug，见 2026-08-26 定位）。
  */
 function emptyPrompt(history: string[]): PromptState {
-  return { lines: [""], curLine: 0, curCol: 0, history, historyIndex: -1 };
+  return { lines: [""], curLine: 0, curCol: 0, history, historyIndex: -1, sel: null };
 }
 
 /** 展示时间：HH:MM:SS */
@@ -271,6 +279,23 @@ export function promptFirstLine(prompt: PromptState): string {
 /** 输入是否为空（发送判定、方向键是否回溯历史） */
 export function promptEmpty(prompt: PromptState): boolean {
   return prompt.lines.every((l) => l.length === 0) && prompt.lines.length === 1;
+}
+
+/** 输入框选区文本（Shift 选择锚点↔光标，B-2）：按码点取区间，跨行用换行连接；无选区返回空串 */
+export function selectedPromptText(p: PromptState): string {
+  if (!p.sel) return "";
+  const a = p.sel;
+  const aBefore = a.line < p.curLine || (a.line === p.curLine && a.col <= p.curCol);
+  const anchor = aBefore ? a : { line: p.curLine, col: p.curCol };
+  const focus = aBefore ? { line: p.curLine, col: p.curCol } : a;
+  const codepoints = (i: number): string[] => Array.from(p.lines[i] ?? "");
+  if (anchor.line === focus.line) {
+    return codepoints(anchor.line).slice(anchor.col, focus.col).join("");
+  }
+  const head = codepoints(anchor.line).slice(anchor.col).join("");
+  const mid = p.lines.slice(anchor.line + 1, focus.line);
+  const tail = codepoints(focus.line).slice(0, focus.col).join("");
+  return [head, ...mid, tail].join("\n");
 }
 
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步） */
@@ -740,7 +765,16 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
     case "cursor": {
-      return { ...state, prompt: moveCursor(state.prompt, action.dir) };
+      // 普通移动光标：清除选区（选择是临时态，编辑/移动即取消）
+      return { ...state, prompt: { ...moveCursor(state.prompt, action.dir), sel: null } };
+    }
+    case "select": {
+      // Shift+方向键扩展选区（B-2）：锚点首按固定在当前位，光标（焦点端）移动扩展/收缩
+      const p = state.prompt;
+      const anchor = p.sel ?? { line: p.curLine, col: p.curCol };
+      const moved = moveCursor(p, action.dir);
+      const prompt = { ...moved, sel: anchor };
+      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
     case "history": {
       // 历史回溯：不在浏览时 ↑ 进最后一条；浏览中 ↑/↓ 移动；-1 退出浏览回编辑内容
@@ -751,7 +785,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       if (nextIndex >= history.length) return state; // 已在最旧一条再 ↓
       const prompt: PromptState =
         nextIndex === -1
-          ? { ...state.prompt, historyIndex: -1 }
+          ? { ...state.prompt, historyIndex: -1, sel: null }
           : (() => {
               const lines = history[nextIndex]!.split("\n");
               const last = lines.at(-1) ?? "";
@@ -761,6 +795,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
                 curCol: Array.from(last).length,
                 history,
                 historyIndex: nextIndex,
+                sel: null,
               };
             })();
       return { ...state, prompt };
@@ -775,11 +810,13 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
         lines: [item, ...state.prompt.lines.slice(1)],
         curLine: 0,
         curCol: item.length,
+        sel: null,
       };
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
     case "modal-nav": {
-      if (!state.candidate) return { ...state, prompt: moveCursor(state.prompt, action.dir === -1 ? "up" : "down") };
+      if (!state.candidate)
+        return { ...state, prompt: { ...moveCursor(state.prompt, action.dir === -1 ? "up" : "down"), sel: null } };
       const selected = Math.max(0, Math.min(state.candidate.items.length - 1, state.candidate.selected + action.dir));
       return { ...state, candidate: { ...state.candidate, selected } };
     }
@@ -840,7 +877,7 @@ function insertText(prompt: PromptState, text: string): PromptState {
   const after = Array.from(line).slice(prompt.curCol).join("");
   const lines = [...prompt.lines];
   lines[prompt.curLine] = before + text + after;
-  return { ...prompt, lines, curCol: prompt.curCol + Array.from(text).length };
+  return { ...prompt, lines, curCol: prompt.curCol + Array.from(text).length, sel: null };
 }
 
 /** 粘贴整段文本：光标处插入，\r\n/\n 拆多行（bracketed paste 整段插入），总行数超上限截断 */
@@ -852,7 +889,7 @@ function pasteText(prompt: PromptState, text: string): PromptState {
   if (parts.length === 1) {
     const lines = [...prompt.lines];
     lines[prompt.curLine] = before + parts[0]! + after;
-    return { ...prompt, lines, curCol: prompt.curCol + Array.from(parts[0]!).length };
+    return { ...prompt, lines, curCol: prompt.curCol + Array.from(parts[0]!).length, sel: null };
   }
   const head = before + parts[0]!;
   const tail = parts.at(-1)! + after;
@@ -870,7 +907,7 @@ function pasteText(prompt: PromptState, text: string): PromptState {
     curLine = Math.min(curLine, MAX_PROMPT_LINES - 1);
     curCol = Math.min(curCol, Array.from(lines[curLine] ?? "").length);
   }
-  return { ...prompt, lines, curLine, curCol };
+  return { ...prompt, lines, curLine, curCol, sel: null };
 }
 
 /** 光标处换行（超 20 行忽略） */
@@ -879,10 +916,10 @@ function splitLine(prompt: PromptState): PromptState {
   const before = Array.from(line).slice(0, prompt.curCol).join("");
   const after = Array.from(line).slice(prompt.curCol).join("");
   const lines = [...prompt.lines.slice(0, prompt.curLine), before, after, ...prompt.lines.slice(prompt.curLine + 1)];
-  return { ...prompt, lines, curLine: prompt.curLine + 1, curCol: 0 };
+  return { ...prompt, lines, curLine: prompt.curLine + 1, curCol: 0, sel: null };
 }
 
-/** 退格：删光标前字符；行首时与上一行合并 */
+/** 退格：删光标前字符；行首时与上一行合并（编辑一律清选区） */
 function deleteBackward(prompt: PromptState): PromptState {
   const line = prompt.lines[prompt.curLine] ?? "";
   if (prompt.curCol > 0) {
@@ -891,15 +928,15 @@ function deleteBackward(prompt: PromptState): PromptState {
     const after = chars.slice(prompt.curCol).join("");
     const lines = [...prompt.lines];
     lines[prompt.curLine] = before + after;
-    return { ...prompt, lines, curCol: prompt.curCol - 1 };
+    return { ...prompt, lines, curCol: prompt.curCol - 1, sel: null };
   }
-  if (prompt.curLine === 0) return prompt;
+  if (prompt.curLine === 0) return { ...prompt, sel: null };
   const prev = prompt.lines[prompt.curLine - 1] ?? "";
   const lines = [...prompt.lines.slice(0, prompt.curLine - 1), prev + line, ...prompt.lines.slice(prompt.curLine + 1)];
-  return { ...prompt, lines, curLine: prompt.curLine - 1, curCol: Array.from(prev).length };
+  return { ...prompt, lines, curLine: prompt.curLine - 1, curCol: Array.from(prev).length, sel: null };
 }
 
-/** 删除：删光标处字符；行尾时与下一行合并 */
+/** 删除：删光标处字符；行尾时与下一行合并（编辑一律清选区） */
 function deleteForward(prompt: PromptState): PromptState {
   const line = prompt.lines[prompt.curLine] ?? "";
   const chars = Array.from(line);
@@ -908,12 +945,12 @@ function deleteForward(prompt: PromptState): PromptState {
     const after = chars.slice(prompt.curCol + 1).join("");
     const lines = [...prompt.lines];
     lines[prompt.curLine] = before + after;
-    return { ...prompt, lines };
+    return { ...prompt, lines, sel: null };
   }
-  if (prompt.curLine >= prompt.lines.length - 1) return prompt;
+  if (prompt.curLine >= prompt.lines.length - 1) return { ...prompt, sel: null };
   const next = prompt.lines[prompt.curLine + 1] ?? "";
   const lines = [...prompt.lines.slice(0, prompt.curLine), line + next, ...prompt.lines.slice(prompt.curLine + 2)];
-  return { ...prompt, lines };
+  return { ...prompt, lines, sel: null };
 }
 
 /** 光标移动（跨行时保持目标列到行末截断）；start/end = 行首/行尾（Ctrl+A/E） */
@@ -955,14 +992,14 @@ function deleteToEnd(prompt: PromptState): PromptState {
   const before = chars.slice(0, prompt.curCol).join("");
   const lines = [...prompt.lines];
   lines[prompt.curLine] = before;
-  return { ...prompt, lines };
+  return { ...prompt, lines, sel: null };
 }
 
 /** 删整行：清空当前行、光标回行首（Ctrl+U） */
 function deleteLine(prompt: PromptState): PromptState {
   const lines = [...prompt.lines];
   lines[prompt.curLine] = "";
-  return { ...prompt, lines, curCol: 0 };
+  return { ...prompt, lines, curCol: 0, sel: null };
 }
 
 /** 删前词：先退过连续空格，再退过连续非空格（Ctrl+W；行首无词则不动） */
@@ -976,5 +1013,5 @@ function deleteWord(prompt: PromptState): PromptState {
   const after = chars.slice(prompt.curCol).join("");
   const lines = [...prompt.lines];
   lines[prompt.curLine] = before + after;
-  return { ...prompt, lines, curCol: col };
+  return { ...prompt, lines, curCol: col, sel: null };
 }

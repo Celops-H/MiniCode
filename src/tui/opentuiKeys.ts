@@ -65,6 +65,8 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
     case "down":
     case "left":
     case "right":
+      // Shift+方向键保留修饰：输入框扩展选区（B-2）；kitty 协议下 shift 标志可靠到达
+      if (shift) return { kind: `shift-${name}` as "shift-left" | "shift-right" | "shift-up" | "shift-down" };
       return { kind: name };
     case "pageup":
       return { kind: "pageup" };

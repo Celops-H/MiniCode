@@ -9,8 +9,31 @@
  */
 import { createMemo, onCleanup, onMount, createSignal } from "solid-js";
 import type { JSX } from "@opentui/solid";
-import type { PromptState, SlashCandidate } from "../state.js";
+import type { PromptState, SelectionAnchor, SlashCandidate } from "../state.js";
 import { theme } from "./theme.js";
+
+/** 单行选中区间：锚点↔光标跨行的行内范围（[start,end) 码点下标）；无选区或空选区返回 null。
+ *  行号在锚点行与焦点行之间整行选中；锚点/焦点所在行取到边界。 */
+function lineSelRange(
+  lineLen: number,
+  i: number,
+  sel: SelectionAnchor,
+  curLine: number,
+  curCol: number,
+): [number, number] | null {
+  // 归一化：锚点在前、焦点在后（支持反向选择）
+  const aBefore = sel.line < curLine || (sel.line === curLine && sel.col <= curCol);
+  const anchor = aBefore ? sel : { line: curLine, col: curCol };
+  const focus = aBefore ? { line: curLine, col: curCol } : sel;
+  if (i < anchor.line || i > focus.line) return null;
+  if (anchor.line === focus.line) {
+    if (i !== anchor.line || anchor.col === focus.col) return null; // 同行空选区不显示
+    return [anchor.col, focus.col];
+  }
+  if (i === anchor.line) return [anchor.col, lineLen];
+  if (i === focus.line) return [0, focus.col];
+  return [0, lineLen];
+}
 
 /** slash 候选列表：memo 重算选中态（▸ 高亮随 ↑↓ 移动） */
 function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
@@ -42,23 +65,69 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
     onCleanup(() => clearInterval(timer));
   });
 
-  // 行列表：读整个 prompt（lines/curLine/curCol），任何变化整体重算——光标位置必跟上
+  // 行列表：读整个 prompt（lines/curLine/curCol/sel），任何变化整体重算——光标/选区必跟上
   const rows = createMemo(() => {
     const p = props.prompt;
+    const cursorFg = cursorOn() ? theme.foregroundAccent : theme.background;
     return p.lines.map((line, i) => {
       const prefix = i === 0 ? "❯ " : "  ";
-      // 模态（/connect key 弹窗）时隐藏输入框光标：key 在弹窗内输入，光标指示在弹窗
-      //（ConnectFlowModal），底部输入区不显示光标（此路径不读 cursorOn，闪烁不触发重算）
-      if (i !== p.curLine || props.showCursor === false) return <text>{prefix + line}</text>;
       const chars = Array.from(line);
-      const before = chars.slice(0, p.curCol).join("");
-      const after = chars.slice(p.curCol).join("");
+      const showCursor = i === p.curLine && props.showCursor !== false;
+      const range = p.sel ? lineSelRange(chars.length, i, p.sel, p.curLine, p.curCol) : null;
+      // 无选区：原样渲染（光标行插竖线）
+      if (!range) {
+        if (!showCursor) return <text>{prefix + line}</text>;
+        const before = chars.slice(0, p.curCol).join("");
+        const after = chars.slice(p.curCol).join("");
+        return (
+          <text>
+            {prefix}
+            {before}
+            {/* 竖线光标（P4-5）：细竖线字符随编辑位置移动，500ms 明灭闪烁 */}
+            <span style={{ fg: cursorFg }}>│</span>
+            {after}
+          </text>
+        );
+      }
+      // 有选区（B-2 Shift 选择）：选中段背景抬高高亮；光标落选区焦点边界
+      const [s, e] = range;
+      const selSpan = (t: string) => <span style={{ bg: theme.backgroundRaised, fg: theme.text }}>{t}</span>;
+      const caret = <span style={{ fg: cursorFg }}>│</span>;
+      const c = p.curCol;
+      const before = chars.slice(0, s).join("");
+      const after = chars.slice(e).join("");
+      if (!showCursor || c <= s) {
+        // 光标在选区起点（反向选择到最左）：竖线在选中段前
+        return (
+          <text>
+            {prefix}
+            {before}
+            {showCursor && c <= s ? caret : null}
+            {selSpan(chars.slice(s, e).join(""))}
+            {after}
+          </text>
+        );
+      }
+      if (c >= e) {
+        // 光标在选区终点：竖线在选中段后
+        return (
+          <text>
+            {prefix}
+            {before}
+            {selSpan(chars.slice(s, e).join(""))}
+            {caret}
+            {after}
+          </text>
+        );
+      }
+      // 光标在选中区中段：高亮段按光标断开
       return (
         <text>
           {prefix}
           {before}
-          {/* 竖线光标（P4-5）：细竖线字符随编辑位置移动，500ms 明灭闪烁 */}
-          <span style={{ fg: cursorOn() ? theme.foregroundAccent : theme.background }}>│</span>
+          {selSpan(chars.slice(s, c).join(""))}
+          {caret}
+          {selSpan(chars.slice(c, e).join(""))}
           {after}
         </text>
       );

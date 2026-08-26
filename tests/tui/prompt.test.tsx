@@ -26,6 +26,7 @@ const prompt = (over: Partial<PromptState> = {}): PromptState => ({
   curCol: 0,
   history: [],
   historyIndex: -1,
+  sel: null,
   ...over,
 });
 

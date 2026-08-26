@@ -15,6 +15,11 @@ export type Key =
   | { kind: "down" }
   | { kind: "left" }
   | { kind: "right" }
+  /** Shift+方向键：扩展输入框选区（B-2，需终端带 shift 修饰标志上报，kitty 协议下可靠） */
+  | { kind: "shift-up" }
+  | { kind: "shift-down" }
+  | { kind: "shift-left" }
+  | { kind: "shift-right" }
   | { kind: "pageup" }
   | { kind: "pagedown" }
   | { kind: "home" }

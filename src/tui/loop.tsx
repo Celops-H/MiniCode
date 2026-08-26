@@ -13,7 +13,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, modelErrorText, resetToNewState, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -388,8 +388,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "copy": {
-        // Ctrl+C 复制：应用内选区（opentui 拖选/Shift 选择）→ 系统剪贴板；无选区不动作
-        // （打断语义已由 Esc 承担，Ctrl+C 专用于复制）；复制后清除选区 + toast 反馈
+        // Ctrl+C 复制：优先输入框选区（Shift+方向键选择，B-2），其次消息区 opentui 拖选选区；
+        // 复制后清除选区 + toast 反馈（打断语义已由 Esc 承担，Ctrl+C 专用于复制）
+        const promptText = selectedPromptText(state.prompt);
+        if (promptText) {
+          copyToClipboard(promptText);
+          showToast(`已复制 ${promptText.length} 个字符到剪贴板`);
+          commit({ ...state, prompt: { ...state.prompt, sel: null } });
+          return;
+        }
         const r = renderer as
           | { getSelection?: () => { getSelectedText?: () => string } | null; clearSelection?: () => void }
           | undefined;
