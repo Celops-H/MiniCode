@@ -24,12 +24,47 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<Config> 
   const projectRaw = await readJsonFile(paths.projectConfigFile);
   const envRaw = pickEnvConfig(env);
 
-  return configSchema.parse({
-    ...defaults,
-    ...globalRaw,
-    ...projectRaw,
-    ...envRaw,
-  });
+  return configSchema.parse(mergeConfigLayers([defaults, globalRaw, projectRaw, envRaw]));
+}
+
+/**
+ * 逐级合并配置来源：顶层键后级覆盖前级；providers 例外——按 id 归并（同 id 后级覆盖、
+ * 不同 id 都保留），避免项目 .minicode.json 把全局配置里 /connect 新加的供应商整体顶掉。
+ * 任一层 providers 不是数组或项缺 id，视为非法整体透传，交给 schema strict 校验报错（不静默吞）。
+ */
+function mergeConfigLayers(layers: Array<Record<string, unknown> | null>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  const providerById = new Map<string, unknown>();
+  let providersInvalid: unknown;
+  for (const layer of layers) {
+    if (!layer) continue;
+    const providers = layer.providers;
+    if (Array.isArray(providers)) {
+      // 已有非法 providers 层时不再归并后续层，直接把非法值透传出去等 schema 报错
+      if (providersInvalid === undefined) {
+        for (const p of providers) {
+          const id = (p as { id?: unknown } | null | undefined)?.id;
+          if (typeof id !== "string") {
+            providersInvalid = providers;
+            break;
+          }
+          providerById.set(id, p);
+        }
+      }
+    } else if (providers !== undefined) {
+      providersInvalid = providers;
+    }
+    for (const [key, value] of Object.entries(layer)) {
+      if (key === "providers") continue;
+      result[key] = value;
+    }
+  }
+  if (providersInvalid !== undefined) {
+    result.providers = providersInvalid;
+  } else if (providerById.size > 0) {
+    result.providers = [...providerById.values()];
+  }
+  return result;
 }
 
 /**

@@ -177,14 +177,25 @@ describe("loadConfig", () => {
     expect(config.modelChain).toEqual(["deepseek-chat", "deepseek-reasoner"]);
   });
 
-  it("项目配置覆盖全局配置的 providers", async () => {
+  it("providers 按 id 合并：全局与项目不同供应商都保留", async () => {
     const config = await loadConfig({
       paths: setup({
         global: { providers: [{ id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "a-1" }] }] },
         project: { providers: [{ id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [{ id: "b-1" }] }] },
       }),
     });
-    expect(config.providers).toEqual([{ id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [{ id: "b-1" }] }]);
+    expect(config.providers?.map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("providers 同 id：项目覆盖全局同供应商的配置（合并后不重复）", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: { providers: [{ id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "a-1" }] }] },
+        project: { providers: [{ id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "a-2" }] }] },
+      }),
+    });
+    expect(config.providers).toHaveLength(1);
+    expect(config.providers?.[0]?.models).toEqual([{ id: "a-2" }]);
   });
 
   it("非法 providers 配置（baseUrl 非 URL）直接报错", async () => {
