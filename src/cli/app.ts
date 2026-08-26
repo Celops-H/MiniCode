@@ -176,9 +176,10 @@ export function buildCompactConfig(
   const model = models?.resolve(modelId)?.model;
   return {
     contextWindow: compact.contextWindow ?? model?.contextWindow ?? 128_000,
-    maxOutputTokens: compact.maxOutputTokens,
-    safetyMargin: compact.safetyMargin,
-    keepRecentToolResults: compact.keepRecentToolResults,
+    // 其余三项 schema 已 default（8192/4096/5），这里再兜底：非 zod 解析路径（测试/手拼 config）缺省时不 undefined
+    maxOutputTokens: compact.maxOutputTokens ?? 8192,
+    safetyMargin: compact.safetyMargin ?? 4096,
+    keepRecentToolResults: compact.keepRecentToolResults ?? 5,
   };
 }
 

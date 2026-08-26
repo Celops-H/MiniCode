@@ -606,6 +606,17 @@ describe("buildCompactConfig 装配", () => {
     // 未配置 compact：不启用
     expect(buildCompactConfig(configSchema.parse({}), "m")).toBeUndefined();
   });
+
+  it("手拼 compact 缺字段时兜底默认值（非 zod 解析路径）", () => {
+    // 未经 schema default 的原始对象（测试/直调）：只给 contextWindow，其余三项兜底
+    const raw = { compact: { contextWindow: 50000 } };
+    expect(buildCompactConfig(raw as never, "m")).toEqual({
+      contextWindow: 50000,
+      maxOutputTokens: 8192,
+      safetyMargin: 4096,
+      keepRecentToolResults: 5,
+    });
+  });
 });
 
 describe("CLI 交互循环", () => {
