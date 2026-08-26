@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it, expect } from "vitest";
-import { connectProvider, writeGlobalConfig, writeEnvKey, PROVIDER_PRESETS, type ProviderPreset } from "../../src/tui/connect.js";
+import { connectProvider, writeGlobalConfig, writeEnvKey, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset } from "../../src/tui/connect.js";
 
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
@@ -57,12 +57,21 @@ it("writeEnvKey：新增追加、更新替换（幂等）", async () => {
   }
 });
 
+/** /models 拉取 mock：返回给定列表；rejected 用于模拟 key 无效/网络失败 */
+function fakeFetch(models: string[] | Error): typeof import("../../src/tui/connect.js").fetchProviderModels {
+  return async () => {
+    if (models instanceof Error) throw models;
+    return models;
+  };
+}
+
 it("connectProvider：写全局 config + .env 成功；空 key 拒绝", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const globalFile = path.join(dir, "config.json");
   const envFile = path.join(dir, ".env");
   try {
-    const ok = await connectProvider(deepseek, "sk-123", { globalConfigFile: globalFile, envFile });
+    // 注入空结果 mock：不真实请求网络（连接链路本身不再依赖 /models 成功）
+    const ok = await connectProvider(deepseek, "sk-123", { globalConfigFile: globalFile, envFile, fetchImpl: async () => [] });
     expect(ok).toEqual({ ok: true });
     const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { id: string }[] };
     expect(config.providers[0]?.id).toBe("deepseek");
@@ -73,4 +82,69 @@ it("connectProvider：写全局 config + .env 成功；空 key 拒绝", async ()
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+it("connectProvider 拉全量模型：/models 返回的列表替换预设占位写入配置（N1）", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const globalFile = path.join(dir, "config.json");
+  try {
+    const result = await connectProvider(deepseek, "sk-123", {
+      globalConfigFile: globalFile,
+      envFile: path.join(dir, ".env"),
+      fetchImpl: fakeFetch(["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.fetchedModels).toBe(3);
+    const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { models: { id: string }[] }[] };
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("connectProvider 拉取失败（key 无效/网络）：用预设模型兜底、连接照常成功", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const globalFile = path.join(dir, "config.json");
+  try {
+    const result = await connectProvider(deepseek, "bad-key", {
+      globalConfigFile: globalFile,
+      envFile: path.join(dir, ".env"),
+      fetchImpl: fakeFetch(new Error("HTTP 401")),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.fetchedModels).toBeUndefined();
+    const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { models: { id: string }[] }[] };
+    // 回落预设占位模型
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(deepseek.models);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("fetchProviderModels：解析 OpenAI 兼容 {data:[{id}]}、过滤空 id、baseUrl 尾斜杠归一", async () => {
+  const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => {
+    const url = typeof input === "string" ? input : String(input);
+    calls.push({ url, headers: init?.headers });
+    void init?.signal; // 超时信号由 AbortSignal.timeout 注入，此处不做时钟断言
+    return new Response(JSON.stringify({ data: [{ id: "m-a" }, {}, { id: "m-b" }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const list = await fetchProviderModels("https://example.com/api/v1/", "sk-x");
+    expect(list).toEqual(["m-a", "m-b"]);
+    expect(calls[0]?.url).toBe("https://example.com/api/v1/models");
+    expect(calls[0]?.headers?.Authorization).toBe("Bearer sk-x");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+it("opencode 预设拆 Go/Zen 两端点（域名实测 zen/v1 与 zen/go/v1）", () => {
+  const zen = PROVIDER_PRESETS.find((p) => p.id === "opencode-zen");
+  const go = PROVIDER_PRESETS.find((p) => p.id === "opencode-go");
+  expect(zen?.baseUrl).toBe("https://opencode.ai/zen/v1");
+  expect(go?.baseUrl).toBe("https://opencode.ai/zen/go/v1");
+  expect(zen?.apiKeyEnv).toBe("OPENCODE_API_KEY");
+  expect(go?.apiKeyEnv).toBe("OPENCODE_API_KEY");
 });

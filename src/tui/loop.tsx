@@ -299,7 +299,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       if (result.ok) {
-        showToast(`${conn.providerName} 已连接，正在重建会话…`);
+        // 拉全量模型成功带数量提示（N1）；未拉到静默（回落预设占位，/model 仍可用预设模型）
+        const fetched = result.fetchedModels != null ? `，已拉取 ${result.fetchedModels} 个模型` : "";
+        showToast(`${conn.providerName} 已连接${fetched}，正在重建会话…`);
         pendingReconfigure = true;
         exitLoop();
         return;

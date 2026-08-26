@@ -84,6 +84,24 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"],
     defaultModel: "anthropic/claude-sonnet-4-5",
   },
+  {
+    // opencode 订阅 API：Zen（主端点）与 Go（另一网关）两条路径，key 同为订阅凭据
+    id: "opencode-zen",
+    name: "OpenCode Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    apiKeyEnv: "OPENCODE_API_KEY",
+    // 占位模型：连接时经 /models 端点拉全量替换（fetchProviderModels），此处只保底
+    models: ["claude-sonnet-4-5"],
+    defaultModel: "claude-sonnet-4-5",
+  },
+  {
+    id: "opencode-go",
+    name: "OpenCode Go",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    apiKeyEnv: "OPENCODE_API_KEY",
+    models: ["claude-sonnet-4-5"],
+    defaultModel: "claude-sonnet-4-5",
+  },
 ];
 
 /** 读取全局 config 原始对象；文件不存在返回 {} */
@@ -136,21 +154,56 @@ export async function writeEnvKey(envFile: string, key: string, value: string): 
   await fs.writeFile(envFile, lines.join("\n").replace(/\n$/, "") + "\n", "utf8");
 }
 
-/** 连接供应商：写全局 config + 项目 .env；成功返回 { ok:true }，失败 { ok:false, error }。paths 可注入（测试）。 */
+/** /models 拉取超时（ms）：厂商慢响应时不让连接卡住 */
+export const FETCH_MODELS_TIMEOUT_MS = 10_000;
+
+/**
+ * 用 API Key 调厂商 /models 端点拉全量模型列表（OpenAI 兼容格式 { data: [{id}] }）。
+ * 连接供应商时调用：写入 config 的 models 用真实列表而非手维护的预设占位，
+ * 厂商上新模型即时可用（N1）。失败（key 无效/网络不通/非 JSON）抛错由调用方兜底。
+ * @param baseUrl 厂商 OpenAI 兼容端点
+ * @param apiKey 用户输入的 API Key
+ * @param timeoutMs 超时 ms（缺省 FETCH_MODELS_TIMEOUT_MS）
+ * @returns 模型 id 列表
+ */
+export async function fetchProviderModels(baseUrl: string, apiKey: string, timeoutMs = FETCH_MODELS_TIMEOUT_MS): Promise<string[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = (await res.json()) as { data?: Array<{ id?: string }> };
+  return (json.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+}
+
+/** 连接供应商：写全局 config + 项目 .env；成功返回 { ok:true, fetchedModels? }，失败 { ok:false, error }。paths 可注入（测试）。 */
 export async function connectProvider(
   preset: ProviderPreset,
   apiKey: string,
-  opts: { globalConfigFile?: string; envFile?: string } = {},
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { globalConfigFile?: string; envFile?: string; fetchImpl?: typeof fetchProviderModels } = {},
+): Promise<{ ok: boolean; error?: string; fetchedModels?: number }> {
   const trimmed = apiKey.trim();
   if (!trimmed) return { ok: false, error: "API Key 不能为空" };
   try {
     const paths = resolveConfigPaths();
     const globalFile = opts.globalConfigFile ?? paths.globalConfigFile;
     const envFile = opts.envFile ?? path.join(process.cwd(), ".env");
-    await writeGlobalConfig(globalFile, preset);
+    // 先拉全量模型（10s 超时）：拉到即用真实列表写配置；key 无效/网络失败仅回落预设占位，
+    // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）
+    let models = preset.models;
+    let fetchedModels: number | undefined;
+    try {
+      const fetched = await (opts.fetchImpl ?? fetchProviderModels)(preset.baseUrl, trimmed);
+      if (fetched.length > 0) {
+        models = fetched;
+        fetchedModels = fetched.length;
+      }
+    } catch {
+      // 拉取失败用预设占位，静默（不 toast 干扰：连接本身成功）
+    }
+    await writeGlobalConfig(globalFile, { ...preset, models });
     await writeEnvKey(envFile, preset.apiKeyEnv, trimmed);
-    return { ok: true };
+    return { ok: true, fetchedModels };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `写配置失败：${msg}` };
