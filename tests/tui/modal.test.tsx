@@ -139,6 +139,47 @@ it("会话面板长模型名按卡宽截断：不折行、保持每行 1 条", a
   expect(frame).not.toContain("20250219"); // 尾部被截断不出现
 });
 
+it("中文长标题按列宽截断（CJK 占 2 列）：不折行、id 与模型仍同行", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [
+      { id: "ab3f90", title: "重构 partition 并发分区的逻辑并补充完整单元测试覆盖所有边界场景", model: "deepseek-chat", updatedAt: "now" },
+      { id: "88bf1e", title: "短标题", model: "deepseek-chat", updatedAt: "now" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 长标题被截断（省略号出现）
+  expect(frame).toContain("…");
+  // 未折行：id 与模型在同一行（折行会把模型挤到下一行）
+  const rowWithId = frame.split("\n").find((l) => l.includes("ab3f90")) ?? "";
+  expect(rowWithId).toContain("deepseek-chat");
+  // 第二条会话标题完整可见
+  expect(frame).toContain("短标题");
+});
+
+it("窄卡（cardWidth=22）会话行仍 1 行/条：模型标题随卡宽截断不折行", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [
+      { id: "ab3f90", title: "窄卡标题也要放得下", model: "deepseek-chat", updatedAt: "now" },
+      { id: "88bf1e", title: "第二条", model: "deepseek-chat", updatedAt: "now" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 26, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 窄卡截断后仍 1 行/条：id 与截断内容（· 分隔 + …）同行 → 未折行
+  const rowWithId = frame.split("\n").find((l) => l.includes("ab3f90")) ?? "";
+  expect(rowWithId).toContain("·");
+  expect(rowWithId).toContain("…");
+  // 第二条会话也在（未被第一条折行挤走）
+  expect(frame).toContain("88bf1e");
+});
+
 it("/connect 供应商选择：列出厂商与键位提示，选中高亮", async () => {
   const modal: ModalState = {
     kind: "connect",

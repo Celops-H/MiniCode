@@ -64,11 +64,29 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   // 列表行：窗口渲染（memo 读 selected/dims 重算）。卡内固定开销（外边距 2 + 边框标题 1 + 新建 1 + 提示 3 + 底框 1）=8 行；
   // 终端高减 9 行给卡下固定内容（输入框 5 + 状态行 2 + agent/通知 2）占位，剩余高度按 1 行/条分配会话可见条数，
   // 选中项居中滚动、越界贴边——卡与底部状态行都不被顶出视口。
-  // 行内容 = id6 · 标题 · 模型：标题/模型按卡宽截断加省略号，防折行破 1 行/条假设。
+  // 行内容 = id6 · 标题 · 模型：按终端列宽截断加省略号（CJK 全宽字符占 2 列，按码点算会溢出折行
+  //   ——折行破 1 行/条假设、顶出下边框，见 P1-3 修过的同型缺陷）。
   //   /rename 改会话标题经 rewriteMessages 落盘，listSessions 每次重读 meta，面板标题即时同步。
-  const fit = (t: string, max: number): string => {
+  /** 终端展示列宽：东亚全宽/全角字符计 2 列，其余 1 列 */
+  const colWidth = (s: string): number => {
+    let w = 0;
+    for (const ch of Array.from(s)) w += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1;
+    return w;
+  };
+  /** 按列宽截断：末尾省略号占 1 列；预算 ≤1 列时只剩省略号 */
+  const fitWidth = (t: string, maxCols: number): string => {
+    if (colWidth(t) <= maxCols) return t;
+    if (maxCols <= 1) return "…";
     const chars = Array.from(t);
-    return chars.length <= max ? t : `${chars.slice(0, Math.max(1, max - 1)).join("")}…`;
+    let out = "";
+    let w = 0;
+    for (const ch of chars) {
+      const cw = colWidth(ch);
+      if (w + cw + 1 > maxCols) break; // 留 1 列给省略号
+      out += ch;
+      w += cw;
+    }
+    return `${out}…`;
   };
   const usable = cardWidth - 4; // 边框 2 + 行 paddingX 2
   const rows = createMemo(() => {
@@ -79,8 +97,10 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     const visible = b.sessions.slice(start, start + sessRows);
     const items = visible.map((s, i) => {
       const sel = start + i === b.selected;
-      const model = fit(s.model, 18);
-      const title = fit(s.title || "未命名", Math.max(1, usable - 2 - 6 - 6 - Array.from(model).length));
+      // 固定列：▸(2) + id6(6) + 分隔 · (3) × 2 = 14；模型预算随卡宽自适应（窄卡多截模型、保整行 1 行）
+      const modelMaxCols = Math.min(18, Math.max(3, usable - 17)); // 14 固定 + 标题下限 3
+      const model = fitWidth(s.model, modelMaxCols);
+      const title = fitWidth(s.title || "新会话", Math.max(2, usable - 14 - colWidth(model)));
       const line = `${s.id.slice(-6)} · ${title} · ${model}`;
       return sel ? (
         <text paddingX={1} fg={theme.foregroundAccent}>
