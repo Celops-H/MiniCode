@@ -7,6 +7,8 @@ import type { Key } from "./keys.js";
 /** 高层用户动作：按键整理出的意图，state reducer 据此变更界面状态 */
 export type TuiAction =
   | { type: "input"; text: string }
+  /** 粘贴：bracketed paste 整段文本插入输入框（opentui usePaste 触发，非键盘键位） */
+  | { type: "paste"; text: string }
   | { type: "backspace" }
   | { type: "delete" }
   | { type: "send" }

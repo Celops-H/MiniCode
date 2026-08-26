@@ -114,3 +114,52 @@ describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
     expect(fresh.title).toBe("旧标题");
   });
 });
+
+describe("paste（bracketed paste 整段插入）", () => {
+  it("单行粘贴：光标处插入、光标移到文本后", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "abc" });
+    s = reduceAction(s, { type: "cursor", dir: "start" });
+    s = reduceAction(s, { type: "paste", text: "X" });
+    expect(s.prompt.lines[0]).toBe("Xabc");
+    expect(s.prompt.curCol).toBe(1);
+  });
+
+  it("多行粘贴：\\n 拆行、光标落到末段尾", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "paste", text: "a\nb\nc" });
+    expect(s.prompt.lines).toEqual(["a", "b", "c"]);
+    expect(s.prompt.curLine).toBe(2);
+    expect(s.prompt.curCol).toBe(1);
+  });
+
+  it("粘贴在已有文本中间：首段接光标前、末段接光标后", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "xy" });
+    s = reduceAction(s, { type: "cursor", dir: "start" });
+    s = reduceAction(s, { type: "paste", text: "1\n2" });
+    expect(s.prompt.lines).toEqual(["1", "2xy"]);
+    expect(s.prompt.curLine).toBe(1);
+    expect(s.prompt.curCol).toBe(1);
+  });
+
+  it("CRLF 归一化为换行", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "paste", text: "a\r\nb\r\nc" });
+    expect(s.prompt.lines).toEqual(["a", "b", "c"]);
+  });
+
+  it("粘贴超 20 行截断：保留前 20 行、光标贴底", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "paste", text: Array.from({ length: 25 }, (_, i) => `行${i}`).join("\n") });
+    expect(s.prompt.lines).toHaveLength(20);
+    expect(s.prompt.lines[19]).toBe("行19");
+    expect(s.prompt.curLine).toBe(19);
+  });
+
+  it("connect-key 输入态粘贴：并入 key 缓冲", () => {
+    let s = withKeyModal(initState([]));
+    s = reduceAction(s, { type: "paste", text: "sk-12345" });
+    expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-12345" });
+  });
+});

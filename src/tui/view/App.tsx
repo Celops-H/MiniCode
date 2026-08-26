@@ -4,7 +4,7 @@
  * 即响应式订阅；键盘事件经 opentuiKeyToKey → mapKey → onAction 送回 reducer 落地。
  * （传函数 getter 给组件在 opentui reconciler 下不触发重渲染，改用 store proxy 属性访问。）
  */
-import { useKeyboard } from "@opentui/solid";
+import { useKeyboard, usePaste } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { TuiState } from "../state.js";
 import { promptEmpty } from "../state.js";
@@ -40,6 +40,15 @@ export function App(props: AppProps): JSX.Element {
     // 无 slash 候选时 Tab = 在可折叠块间移动聚焦（键盘用户定位；展开/收起已改鼠标点击 fold-at）
     if (action.type === "complete" && !s.candidate) action = { type: "toggle-focus" };
     props.onAction(action);
+  });
+
+  // 粘贴：bracketed paste 整段文本 → 输入框插入（Ctrl+V/Shift+Insert 由终端触发，opentui 识别
+  // paste 块发 PasteEvent；多行拆行、超行数截断、/connect key 输入态并入 key 缓冲由 reducer 处理）
+  usePaste((e) => {
+    const bytes = (e as { bytes?: Uint8Array }).bytes;
+    if (!bytes || bytes.length === 0) return;
+    const text = new TextDecoder().decode(bytes);
+    if (text) props.onAction({ type: "paste", text });
   });
 
   return (

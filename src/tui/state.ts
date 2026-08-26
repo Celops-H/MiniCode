@@ -697,6 +697,14 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
         candidate: recomputeCandidate(prompt, state.candidate),
       };
     }
+    case "paste": {
+      // 粘贴：bracketed paste 整段插入（多行拆行，超行数截断）；/connect key 输入态并入 key 缓冲
+      if (state.modal?.kind === "connect-key") {
+        return { ...state, modal: { ...state.modal, key: state.modal.key + action.text } };
+      }
+      const prompt = pasteText(state.prompt, action.text);
+      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
+    }
     case "newline": {
       if (state.prompt.lines.length >= MAX_PROMPT_LINES) return state;
       const prompt = splitLine(state.prompt);
@@ -830,6 +838,36 @@ function insertText(prompt: PromptState, text: string): PromptState {
   const lines = [...prompt.lines];
   lines[prompt.curLine] = before + text + after;
   return { ...prompt, lines, curCol: prompt.curCol + Array.from(text).length };
+}
+
+/** 粘贴整段文本：光标处插入，\r\n/\n 拆多行（bracketed paste 整段插入），总行数超上限截断 */
+function pasteText(prompt: PromptState, text: string): PromptState {
+  const line = prompt.lines[prompt.curLine] ?? "";
+  const before = Array.from(line).slice(0, prompt.curCol).join("");
+  const after = Array.from(line).slice(prompt.curCol).join("");
+  const parts = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  if (parts.length === 1) {
+    const lines = [...prompt.lines];
+    lines[prompt.curLine] = before + parts[0]! + after;
+    return { ...prompt, lines, curCol: prompt.curCol + Array.from(parts[0]!).length };
+  }
+  const head = before + parts[0]!;
+  const tail = parts.at(-1)! + after;
+  let lines = [
+    ...prompt.lines.slice(0, prompt.curLine),
+    head,
+    ...parts.slice(1, -1),
+    tail,
+    ...prompt.lines.slice(prompt.curLine + 1),
+  ];
+  let curLine = prompt.curLine + parts.length - 1;
+  let curCol = Array.from(tail).length - Array.from(after).length;
+  if (lines.length > MAX_PROMPT_LINES) {
+    lines = lines.slice(0, MAX_PROMPT_LINES);
+    curLine = Math.min(curLine, MAX_PROMPT_LINES - 1);
+    curCol = Math.min(curCol, Array.from(lines[curLine] ?? "").length);
+  }
+  return { ...prompt, lines, curLine, curCol };
 }
 
 /** 光标处换行（超 20 行忽略） */

@@ -360,6 +360,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         }
         return;
       }
+      case "paste": {
+        // 粘贴：bracketed paste 整段插入（reducer 处理多行/超行数/connect-key key 缓冲）
+        commit(reduceAction(state, action));
+        return;
+      }
       case "modal-confirm": {
         if (state.modal) {
           if (state.modal.kind === "permission") {
