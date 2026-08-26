@@ -146,6 +146,24 @@ describe("会话持久化与续跑", () => {
     expect(loaded.meta.title).toBe("重构 partition 并发分区");
   });
 
+  it("/clear 链路：rewriteMessages([]) 清空消息 + 标题复位后，会话回新建态且条目保留", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "m", title: "旧标题" });
+    await store.appendMessage(session, userMessage("旧对话一"));
+    await store.appendMessage(session, userMessage("旧对话二"));
+    await store.flush();
+    // /clear 命令的两步：改标题 + rewriteMessages([]) 清空整份消息
+    session.meta.title = "新会话";
+    await store.rewriteMessages(session, []);
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toEqual([]);
+    expect(loaded.meta.title).toBe("新会话");
+    // 会话条目保留（列表仍在）
+    const list = await store.listSessions();
+    expect(list.some((m) => m.id === session.meta.id)).toBe(true);
+  });
+
   it("rewriteMessages：重写整份 JSONL，重载后与替换内容一致（/compact 用）", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });

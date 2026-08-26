@@ -6,7 +6,7 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { initState, reduceAction, reduceEvent, modelErrorText, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -93,5 +93,22 @@ describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回�
       kind: "notice",
       text: "模型 gpt-4o 不可用，已切换 deepseek-v4-flash",
     });
+  });
+});
+describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
+  it("消息区/流式/弹层/候选/聚焦/agent 树/输入清空，历史保留", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "旧输入" });
+    s = reduceAction(s, { type: "send" }); // 发送才写入输入历史（↑↓ 回看）
+    s = { ...s, blocks: [{ kind: "message", id: "u1", role: "user", text: "旧对话", thinkingCollapsed: true }], agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }, { path: "/root/task_1", status: "running", spawnedAt: null, completedAt: null }] };
+    const fresh = resetToNewState(s);
+    expect(fresh.blocks).toEqual([]);
+    expect(fresh.agents).toEqual([{ path: "/root", status: "running", spawnedAt: null, completedAt: null }]);
+    expect(fresh.prompt.lines[0]).toBe("");
+    expect(fresh.modal).toBeUndefined();
+    expect(fresh.candidate).toBeUndefined();
+    expect(fresh.focusIndex).toBe(-1);
+    // 输入历史保留（↑↓ 可回看）
+    expect(fresh.prompt.history).toContain("旧输入");
   });
 });

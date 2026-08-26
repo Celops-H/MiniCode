@@ -12,7 +12,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, modelErrorText, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, modelErrorText, resetToNewState, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -252,9 +252,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
         return;
       }
-      // 清空消息区（新的一屏），历史仍在会话文件里可 /session 找回
-      commit({ ...state, blocks: [], streaming: undefined, toast: undefined, modal: undefined, candidate: undefined, focusIndex: -1 });
-      showToast("界面已清空");
+      // 回会话新建态：消息区/agent 树/输入清空（resetToNewState）+ 会话消息清盘 + 标题复位；会话条目保留
+      session.meta.title = "新会话";
+      commit(resetToNewState(state));
+      void store
+        .rewriteMessages(session, [])
+        .then(() => showToast("已清空，回到新会话"))
+        .catch(() => showToast("清空失败：写入会话文件出错"));
       return;
     }
     showToast(`未知命令 ${command}（/help 查看可用命令）`);

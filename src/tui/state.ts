@@ -335,6 +335,22 @@ export function initState(messages: Message[]): TuiState {
   };
 }
 
+/** /clear 回会话新建态：消息区/流式/弹层/候选/聚焦/agent 树/输入清空。
+ *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空 + 标题复位。 */
+export function resetToNewState(state: TuiState): TuiState {
+  return {
+    ...state,
+    blocks: [],
+    streaming: undefined,
+    toast: undefined,
+    modal: undefined,
+    candidate: undefined,
+    focusIndex: -1,
+    agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
+    prompt: emptyPrompt(state.prompt.history),
+  };
+}
+
 /** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠）；导出供 loop 空输入展开交互复用 */
 export function isFoldable(block: BlockView): boolean {
   if (block.kind === "message") return Boolean(block.thinking);
