@@ -211,6 +211,29 @@ export function formatTime(date: Date = new Date()): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/** 模型调用失败的可读提示：识别认证/配置类错误追加「换模型/配 key」引导，其它错误保持原样。
+ *  覆盖切到无 API Key 模型、key 无效（401/403）、模型 id 无效（404/未找到/未知模型）场景——
+ *  错误入口统一（interact catch 与 reduceEvent error）都套它，避免 SDK 原文裸抛看不懂。 */
+export function modelErrorText(error: string): string {
+  const markers = [
+    "未配置认证",
+    "请设置环境变量",
+    "未知模型",
+    "401",
+    "403",
+    "404",
+    "does not exist",
+    "not found",
+    "Incorrect API key",
+    "api key",
+    "authentication",
+  ] as const;
+  if (markers.some((m) => error.toLowerCase().includes(m.toLowerCase()))) {
+    return `${error}\n可用 /model 换模型，或 /connect 连接厂商配置 API Key`;
+  }
+  return error;
+}
+
 /** 输入框首行文本（判断 / 命令与候选依据） */
 export function promptFirstLine(prompt: PromptState): string {
   return prompt.lines[0] ?? "";
@@ -414,7 +437,8 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
     }
     case "error": {
       if (!state.streaming || (!state.streaming.text && !state.streaming.thinking)) {
-        // 无前缀内容的独立错误：展示错误消息块并回到空闲（error 即轮边界）
+        // 无前缀内容的独立错误：展示错误消息块并回到空闲（error 即轮边界）；
+        // 与 interact catch 同一套 modelErrorText，模型类错误带换模型/配 key 引导
         return {
           ...state,
           streaming: undefined,
@@ -425,7 +449,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
               kind: "message",
               id: `err_${state.blocks.length}`,
               role: "assistant",
-              text: event.message,
+              text: modelErrorText(event.message),
               isError: true,
               time: formatTime(),
               thinkingCollapsed: true,

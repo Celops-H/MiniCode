@@ -6,8 +6,7 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { initState, reduceAction, reduceEvent, type TuiState } from "../../src/tui/state.js";
-import { modelErrorText } from "../../src/tui/loop.js";
+import { initState, reduceAction, reduceEvent, modelErrorText, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -65,6 +64,9 @@ describe("modelErrorText：模型调用失败的可读引导（C2 /model 边界�
     expect(modelErrorText("Provider openai 未配置认证：请设置环境变量")).toContain("/model 换模型");
     expect(modelErrorText("Incorrect API key provided. 401")).toContain("/connect");
     expect(modelErrorText("未知模型：gpt-9")).toContain("/model 换模型");
+    // 厂商侧模型下架/改名（404 / 英文未找到）：同样给换模型引导
+    expect(modelErrorText("404 The model 'gpt-9' does not exist")).toContain("/model 换模型");
+    expect(modelErrorText("model not found")).toContain("/model 换模型");
   });
   it("其它错误保持原样，不误导", () => {
     expect(modelErrorText("会话存储写入失败")).toBe("会话存储写入失败");
@@ -72,9 +74,17 @@ describe("modelErrorText：模型调用失败的可读引导（C2 /model 边界�
 });
 
 describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回到空闲（不退出、可换回）", () => {
-  it("无前缀内容时错误作为独立错误块 + 状态回空闲", () => {
+  it("无前缀内容时错误作为独立错误块，带引导且状态回空闲", () => {
     const s = reduceEvent(initState([]), { type: "error", message: "Incorrect API key" });
     expect(s.status).toBe("idle");
-    expect(s.blocks.at(-1)).toMatchObject({ kind: "message", role: "assistant", isError: true, text: "Incorrect API key" });
+    const block = s.blocks.at(-1);
+    expect(block).toMatchObject({ kind: "message", role: "assistant", isError: true });
+    // 与 interact catch 同一套 modelErrorText：模型类错误附换模型/配 key 引导
+    expect((block as { text: string }).text).toContain("/model 换模型");
+  });
+  it("非模型类 error 事件：错误块原样文本、不带模型引导", () => {
+    const s = reduceEvent(initState([]), { type: "error", message: "存储写入失败" });
+    const block = s.blocks.at(-1) as { text: string } | undefined;
+    expect(block?.text).toBe("存储写入失败");
   });
 });
