@@ -97,11 +97,12 @@ it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {
   expect(state.prompt.curCol).toBe(1);
 });
 
-it("键盘特殊解析：空格、大写还原、linefeed 回车（opentui 实测行为）", () => {
+it("键盘特殊解析：空格、大写还原、linefeed 软换行（opentui 实测行为）", () => {
   expect(opentuiKeyToKey({ name: "space" })).toEqual({ kind: "char", char: " " });
   // opentui 对 A-Z 统一小写 + shift 标志还原大小写
   expect(opentuiKeyToKey({ name: "h", shift: true })).toEqual({ kind: "char", char: "H" });
-  expect(opentuiKeyToKey({ name: "linefeed" })).toEqual({ kind: "enter" });
+  // LF 键名 linefeed = Ctrl+J（无 kitty 协议时 opentui 把 0x0A 解析为此）→ 软换行，不发送
+  expect(opentuiKeyToKey({ name: "linefeed" })).toEqual({ kind: "shift-enter" });
   // Ctrl+Shift+C 是终端复制快捷键，不映射打断
   expect(opentuiKeyToKey({ name: "c", ctrl: true, shift: true })).toEqual({ kind: "ignore" });
 });
@@ -114,12 +115,14 @@ it("Ctrl+J 换行（主流编辑习惯），映射到软换行 newline", () => {
   expect(opentuiKeyToKey({ name: "j" })).toEqual({ kind: "char", char: "j" });
   // Ctrl+Enter 也走软换行
   expect(opentuiKeyToKey({ name: "return", ctrl: true })).toEqual({ kind: "shift-enter" });
-  // 终端忽略 disambiguate、Ctrl+J 按控制字符码点上报（name:"\n"+ctrl）：仍走换行，不落 prompt
+  // 终端忽略 disambiguate、Ctrl+J 按控制字符码点上报：带 ctrl 或裸 LF 都走软换行
   expect(opentuiKeyToKey({ name: "\n", ctrl: true })).toEqual({ kind: "shift-enter" });
   expect(opentuiKeyToKey({ name: "\r", ctrl: true })).toEqual({ kind: "shift-enter" });
-  // 裸 "\n"/"\r"（码点无修饰）不再当普通字符插进输入行，按回车语义发送
-  expect(opentuiKeyToKey({ name: "\n" })).toEqual({ kind: "enter" });
+  // 裸 LF（\n，Ctrl+J 的码点）→ 软换行；裸 CR（\r，Enter 键的码点）→ 回车发送
+  expect(opentuiKeyToKey({ name: "\n" })).toEqual({ kind: "shift-enter" });
   expect(opentuiKeyToKey({ name: "\r" })).toEqual({ kind: "enter" });
+  // 无 kitty 协议时 opentui 把 LF 解析为 name:"linefeed"（无 ctrl）→ 也软换行（此前误按发送，真机复现过）
+  expect(opentuiKeyToKey({ name: "linefeed" })).toEqual({ kind: "shift-enter" });
 });
 
 it("输入编辑键 Ctrl+A/E/U/K/W 从 opentui 键映射到结构键（普通字母不受影响）", () => {

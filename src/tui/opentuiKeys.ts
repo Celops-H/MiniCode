@@ -1,9 +1,9 @@
 /**
  * opentui 键盘事件 → MiniCode 结构键（Key）适配层。
  * opentui useKeyboard 的 KeyEvent 结构已实测：{ name, ctrl, shift, ... }。
- * 注意三点（opentui 解析行为，review 实测）：
- * - 空格解析为 name:"space"（不是 " "）；换行/回车可能是 "return" 或 "linefeed"（终端差异），
- *   终端忽略 kitty disambiguate 时还可能是 LF/CR 码点 "\n"/"\r"（见 switch 的对应分支）
+ * 注意三点（opentui 解析行为，review 实测 + 源码核对 chunk-node-mfda59vq.js parseKeypress）：
+ * - 空格解析为 name:"space"（不是 " "）；Enter 键（CR \r）解析为 "return"、Ctrl+J（LF \n）解析为
+ *   "linefeed"（无 ctrl 标志）；终端忽略 kitty disambiguate 时还可能是裸码点 "\n"/"\r"（见 switch 分支）
  * - A-Z 字母统一转小写、用 shift 标志还原大小写（name:"h"+shift → "H"）
  * - Ctrl+C 是打断语义；Ctrl+Shift+C 是终端复制快捷键，不进应用
  */
@@ -21,14 +21,16 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
   if (ctrl && name === "d") return { kind: "ctrl-d" };
   switch (name) {
     case "return":
+    case "\r":
+      // Enter 发送（标准终端 Enter 键发 CR \r → opentui 解析为 return/\r）；Shift/Ctrl 组合走软换行。
+      return { kind: ctrl || shift ? "shift-enter" : "enter" };
     case "linefeed":
     case "\n":
-    case "\r":
-      // Enter 发送；Shift+Enter 或 Ctrl+Enter/Ctrl+J 走软换行（主流编辑器习惯）。
-      // \n / \r 码点分支：部分终端忽略 kitty disambiguate、把 Ctrl+J 按控制字符码点上报
-      // （name:"\n"+ctrl）——此前被 default 的 ctrl 分支当组合键 ignore（换行静默失效）；
-      // 裸 "\n" 则会被当普通字符 insertText 进单行，破坏多行 prompt。统一按回车/换行语义走。
-      return { kind: ctrl || shift ? "shift-enter" : "enter" };
+      // LF = Ctrl+J：无 kitty 协议时 opentui 把 0x0A 解析为 name:"linefeed"（无 ctrl 标志，
+      //   parseKeypress 源码 CR→return、LF→linefeed，见 chunk-node-mfda59vq.js）——此前把 linefeed
+      //   归入发送组导致真机 Ctrl+J 仍发送（层1测试用 {name:"j",ctrl} 全绿但真机不生效）；
+      //   统一按软换行。裸 \n 码点（忽略 kitty 的终端上报）同样软换行，Enter 走 return/\r 不受影响。
+      return { kind: "shift-enter" };
     case "j":
       // Ctrl+J 换行（kitty 键盘协议下 ctrl+j 带 ctrl 标志独立到达）
       if (ctrl) return { kind: "shift-enter" };
