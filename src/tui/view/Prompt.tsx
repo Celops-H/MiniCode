@@ -1,16 +1,21 @@
 /**
- * 输入框视图（R3a + 新任务 3）：多行编辑 + 光标（反色块，闪烁）+ slash 候选列表。
+ * 输入框视图（R3a + 新任务 3）：多行编辑 + 光标（终端光标定位，不占格，D-1）+ slash 候选列表。
  * 编辑逻辑全在 reducer（input/backspace/cursor/history/newline/send 动作），本组件只读 prompt 呈现。
  * 边界：输入区顶部边框线 + 面板底色，与消息区/状态行分隔。
  * 渲染：**不用 <For>+条件**（opentui reconciler 下 For 子项不随非 each 依赖的标量刷新——历史 bug：
  * 光标/选中态不随 curCol/curLine/selected 移动），改 createMemo 读整个 prompt 重算行列表；
- * 光标反色块随编辑位置移动并 500ms 闪烁。
- * 候选列表同此：memo 读 selected 重算，选中行 ▸ 高亮。
+ * 选区高亮段随 curLine/curCol/sel 移动。
+ * 光标（D-1=36）：不再用插入字符「│」模拟（字符必占一列、移动时挤开文字）——本组件每次渲染
+ * 把光标应处的终端行列写入 tuiCursor，loop 的 postProcessFn 每帧 setCursorPosition 定位原生终端
+ * 光标（绝对定位不占格，闪烁由 loop 定时器控制）。
  */
-import { createMemo, onCleanup, onMount, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
+import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { PromptState, SelectionAnchor, SlashCandidate } from "../state.js";
 import { theme } from "./theme.js";
+import { colWidth } from "./fit.js";
+import { tuiCursor } from "../cursor.js";
 
 /** 单行选中区间：锚点↔光标跨行的行内范围（[start,end) 码点下标）；无选区或空选区返回 null。
  *  行号在锚点行与焦点行之间整行选中；锚点/焦点所在行取到边界。 */
@@ -35,6 +40,25 @@ export function lineSelRange(
   return [0, lineLen];
 }
 
+/**
+ * 输入框光标应处的终端行列（1-based，D-1）：行 = 终端高 - 行数 + 当前行 - 下方占用行数 + 1；
+ * 列 = 左缘(1) + paddingX(1) + 前缀「❯ 」(2) + 光标前文本列宽。
+ * @param bottomRows 输入框下方全部占用行数（底边框 1 + 状态行 1 + agent 条 N，由 App 传入）
+ */
+export function promptCursorPosition(
+  prompt: PromptState,
+  height: number,
+  bottomRows: number,
+): { row: number; col: number } {
+  const N = prompt.lines.length;
+  const row = height - N + prompt.curLine - bottomRows + 1;
+  const before = Array.from(prompt.lines[prompt.curLine] ?? "")
+    .slice(0, prompt.curCol)
+    .join("");
+  const col = 4 + colWidth(before);
+  return { row: Math.max(1, row), col: Math.max(1, col) };
+}
+
 /** slash 候选列表：memo 重算选中态（▸ 高亮随 ↑↓ 移动） */
 function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
   const rows = createMemo(() =>
@@ -56,79 +80,46 @@ function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
   );
 }
 
-export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate; blink?: boolean; showCursor?: boolean }): JSX.Element {
-  // 光标闪烁：500ms 切换一次「亮/灭」色（反色块由强调色 ⇄ 低对比）；测试可传 blink=false 关掉
-  const [cursorOn, setCursorOn] = createSignal(true);
-  onMount(() => {
-    if (props.blink === false) return;
-    const timer = setInterval(() => setCursorOn((c) => !c), 500);
-    onCleanup(() => clearInterval(timer));
-  });
+export function PromptView(props: {
+  prompt: PromptState;
+  candidate?: SlashCandidate;
+  blink?: boolean;
+  /** 是否显示光标（/connect key 弹窗输入时隐藏主输入框光标，光标移到弹窗内 key 输入区） */
+  showCursor?: boolean;
+  /** 输入框下方占用行数（底边框+状态行+agent 条），光标定位用（D-1） */
+  bottomRows?: number;
+}): JSX.Element {
+  const dims = useTerminalDimensions();
+  // 每次渲染更新终端光标状态：showCursor 时定位并启用（loop postProcessFn 每帧 setCursorPosition），
+  // 隐藏态（connect key 弹窗输入）停用并隐藏——弹窗内 key 光标用插入字符保持
+  if (props.showCursor !== false) {
+    const pos = promptCursorPosition(props.prompt, dims().height ?? 20, props.bottomRows ?? 2);
+    tuiCursor.row = pos.row;
+    tuiCursor.col = pos.col;
+    tuiCursor.enabled = true;
+  } else {
+    tuiCursor.enabled = false;
+    tuiCursor.visible = false;
+  }
 
-  // 行列表：读整个 prompt（lines/curLine/curCol/sel），任何变化整体重算——光标/选区必跟上
+  // 行列表：读整个 prompt（lines/curLine/curCol/sel），任何变化整体重算——选区高亮必跟上
   const rows = createMemo(() => {
     const p = props.prompt;
-    const cursorFg = cursorOn() ? theme.foregroundAccent : theme.background;
     return p.lines.map((line, i) => {
       const prefix = i === 0 ? "❯ " : "  ";
       const chars = Array.from(line);
-      const showCursor = i === p.curLine && props.showCursor !== false;
       const range = p.sel ? lineSelRange(chars.length, i, p.sel, p.curLine, p.curCol) : null;
-      // 无选区：原样渲染（光标行插竖线）
-      if (!range) {
-        if (!showCursor) return <text>{prefix + line}</text>;
-        const before = chars.slice(0, p.curCol).join("");
-        const after = chars.slice(p.curCol).join("");
-        return (
-          <text>
-            {prefix}
-            {before}
-            {/* 竖线光标（P4-5）：细竖线字符随编辑位置移动，500ms 明灭闪烁 */}
-            <span style={{ fg: cursorFg }}>│</span>
-            {after}
-          </text>
-        );
-      }
-      // 有选区（B-2 Shift 选择）：选中段背景抬高高亮；光标落选区焦点边界
+      // 无选区：纯文本行（光标已由终端定位，不插字符）
+      if (!range) return <text>{prefix + line}</text>;
+      // 有选区（B-2 Shift 选择）：选中段背景抬高高亮；光标（焦点端）已由终端定位，段内不插字符
       const [s, e] = range;
       const selSpan = (t: string) => <span style={{ bg: theme.backgroundRaised, fg: theme.text }}>{t}</span>;
-      const caret = <span style={{ fg: cursorFg }}>│</span>;
-      const c = p.curCol;
-      const before = chars.slice(0, s).join("");
-      const after = chars.slice(e).join("");
-      if (!showCursor || c <= s) {
-        // 光标在选区起点（反向选择到最左）：竖线在选中段前
-        return (
-          <text>
-            {prefix}
-            {before}
-            {showCursor && c <= s ? caret : null}
-            {selSpan(chars.slice(s, e).join(""))}
-            {after}
-          </text>
-        );
-      }
-      if (c >= e) {
-        // 光标在选区终点：竖线在选中段后
-        return (
-          <text>
-            {prefix}
-            {before}
-            {selSpan(chars.slice(s, e).join(""))}
-            {caret}
-            {after}
-          </text>
-        );
-      }
-      // 光标在选中区中段：高亮段按光标断开
       return (
         <text>
           {prefix}
-          {before}
-          {selSpan(chars.slice(s, c).join(""))}
-          {caret}
-          {selSpan(chars.slice(c, e).join(""))}
-          {after}
+          {chars.slice(0, s).join("")}
+          {selSpan(chars.slice(s, e).join(""))}
+          {chars.slice(e).join("")}
         </text>
       );
     });

@@ -1,24 +1,11 @@
 /**
- * 层 1：输入框视图——多行/光标/候选列表渲染断言。
+ * 层 1：输入框视图——多行/候选列表渲染断言 + 光标位置计算（D-1 终端光标不占格）。
  */
 import { testRender } from "@opentui/solid";
-import { it, expect } from "vitest";
-import { PromptView } from "../../src/tui/view/Prompt.js";
+import { it, expect, describe } from "vitest";
+import { PromptView, promptCursorPosition } from "../../src/tui/view/Prompt.js";
 import { createChannel } from "../../src/tui/loop.js";
 import type { PromptState, SlashCandidate } from "../../src/tui/state.js";
-
-/** 光标竖线所在列（P4-5 竖线光标）：扫描高亮色「│」span（测试 blink=false，光标恒亮） */
-function cursorColumn(setup: { captureSpans: () => { lines: Array<{ spans: Array<{ text: string; width: number }> }> } }): number {
-  const frame = setup.captureSpans();
-  for (const line of frame.lines) {
-    let x = 0;
-    for (const span of line.spans) {
-      if (span.text === "│") return x;
-      x += span.width ?? 1;
-    }
-  }
-  return -1;
-}
 
 const prompt = (over: Partial<PromptState> = {}): PromptState => ({
   lines: [""],
@@ -30,7 +17,7 @@ const prompt = (over: Partial<PromptState> = {}): PromptState => ({
   ...over,
 });
 
-it("多行输入按行渲染，光标行带反色块", async () => {
+it("多行输入按行渲染", async () => {
   const setup = await testRender(
     () => <PromptView prompt={prompt({ lines: ["第一行", "第二行"] })} />,
     { width: 40, height: 6 },
@@ -39,20 +26,6 @@ it("多行输入按行渲染，光标行带反色块", async () => {
   const frame = setup.captureCharFrame();
   expect(frame).toContain("第一行");
   expect(frame).toContain("第二行");
-});
-
-it("光标块插在光标位置", async () => {
-  const setup = await testRender(
-    () => <PromptView prompt={prompt({ lines: ["ab"], curCol: 1 })} />,
-    { width: 40, height: 4 },
-  );
-  await setup.waitForVisualIdle();
-  // 光标反色块（空格带背景）落在 a 与 b 之间：帧里应出现 a ▸ 空格 b 的顺序
-  const frame = setup.captureCharFrame();
-  const aIdx = frame.indexOf("a");
-  const bIdx = frame.indexOf("b");
-  expect(aIdx).toBeGreaterThanOrEqual(0);
-  expect(bIdx).toBeGreaterThan(aIdx);
 });
 
 it("slash 候选列表显示匹配命令与选中态", async () => {
@@ -68,7 +41,34 @@ it("slash 候选列表显示匹配命令与选中态", async () => {
   expect(frame).toContain("▸");
 });
 
-it("光标随左右键定位：curCol 移动后反色块列跟随（For+条件渲染器回归）", async () => {
+describe("promptCursorPosition（D-1 光标终端定位不占格）", () => {
+  it("单行：光标行 = 高 - 1 - 下方占用，列 = 前缀 + 光标前文本", () => {
+    // H=20、1 行、光标在 "ab" 后（col2），下方占用 2（底边框+状态行）
+    const pos = promptCursorPosition(prompt({ lines: ["ab"], curCol: 2 }), 20, 2);
+    // 行 = 20-1+0-2+1 = 18（内容行）；列 = 4 + "ab"列宽2 = 6
+    expect(pos).toEqual({ row: 18, col: 6 });
+  });
+
+  it("多行：光标在第 curLine 行（从下往上第 N-curLine 行）", () => {
+    // 3 行、光标在中间行（curLine=1, curCol=0），下方占用 3（底边框+状态行+agent 1 行）
+    const pos = promptCursorPosition(prompt({ lines: ["a", "b", "c"], curLine: 1, curCol: 0 }), 20, 3);
+    // 行 = 20-3+1-3+1 = 16；列 = 4 + 0 = 4
+    expect(pos).toEqual({ row: 16, col: 4 });
+  });
+
+  it("中文按列宽计：光标前 1 个中文字 = 2 列", () => {
+    const pos = promptCursorPosition(prompt({ lines: ["中ab"], curCol: 1 }), 20, 2);
+    // 光标在 "中" 后：列 = 4 + 2(中文) = 6
+    expect(pos.col).toBe(6);
+  });
+
+  it("坐标不小于 1（极窄/高输入防越界）", () => {
+    const pos = promptCursorPosition(prompt({ lines: Array.from({ length: 25 }, () => ""), curLine: 24 }), 10, 2);
+    expect(pos.row).toBeGreaterThanOrEqual(1);
+  });
+});
+
+it("光标位置随 curCol 移动（D-1：不再渲染插入字符「│」，位置由计算函数给出）", async () => {
   const channel = createChannel([]);
   const setup = await testRender(
     () => <PromptView prompt={channel.state.prompt} blink={false} />,
@@ -77,10 +77,12 @@ it("光标随左右键定位：curCol 移动后反色块列跟随（For+条件�
   await setup.waitForVisualIdle();
   channel.onAction({ type: "input", text: "ab" });
   await setup.waitForVisualIdle();
-  const afterInput = cursorColumn(setup);
-  expect(afterInput).toBeGreaterThan(0);
+  // 渲染帧不含「│」字符（光标已改终端定位，不占列）
+  expect(setup.captureCharFrame()).not.toContain("│");
+  const colAtEnd = promptCursorPosition(channel.state.prompt, 4, 2).col;
   channel.onAction({ type: "cursor", dir: "left" });
   await setup.waitForVisualIdle();
-  const afterLeft = cursorColumn(setup);
-  expect(afterLeft).toBe(afterInput - 1);
+  const colAfterLeft = promptCursorPosition(channel.state.prompt, 4, 2).col;
+  // 左移一格：光标列前进 1（a 是 1 列宽）
+  expect(colAfterLeft).toBe(colAtEnd - 1);
 });

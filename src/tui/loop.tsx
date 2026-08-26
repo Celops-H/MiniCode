@@ -18,6 +18,7 @@ import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
+import { tuiCursor } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
@@ -645,6 +646,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     renderer,
   );
 
+  // D-1=36 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
+  // 闪烁由定时器翻 tuiCursor.visible 并触发重渲（postProcessFn 随帧执行 setCursorPosition）
+  renderer.addPostProcessFn(() => {
+    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
+  });
+  const blinkTimer = setInterval(() => {
+    if (tuiCursor.enabled) {
+      tuiCursor.visible = !tuiCursor.visible;
+      renderer.requestRender();
+    }
+  }, 500);
+
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
   ({ agent, team } = options.assemble({ approver, feedRoot, hooks }));
 
@@ -699,6 +712,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   } finally {
     runningLoop = false;
     if (toastTimer) clearTimeout(toastTimer);
+    clearInterval(blinkTimer);
     for (const off of unsubscribeHooks) off();
     // 先还原终端（renderer.destroy）再发会话结束事件：防 SessionEnd handler 的 stdout
     // 写进 raw/备用屏；destroy 包 try（渲染器初始化失败等边缘路径也不漏还原）
