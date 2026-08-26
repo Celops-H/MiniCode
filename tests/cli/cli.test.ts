@@ -7,7 +7,7 @@ import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/cli/interact.js";
 import { buildModelClient } from "../../src/cli/models.js";
-import { buildCompactConfig, buildHookBus, createSessionAgent } from "../../src/cli/app.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent, environmentPrompt } from "../../src/cli/app.js";
 import { configSchema, loadConfig } from "../../src/config/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
@@ -766,5 +766,16 @@ describe("CLI 交互循环", () => {
     });
 
     expect(outputs.join("")).toContain("[错误] 流中断");
+  });
+});
+
+describe("N3 环境信息进系统提示词", () => {
+  it("environmentPrompt 含 OS/架构/Shell/工作目录四项", () => {
+    const p = environmentPrompt();
+    expect(p).toContain("操作系统");
+    expect(p).toContain("架构");
+    expect(p).toContain("Shell");
+    expect(p).toContain("工作目录");
+    expect(p).toContain(process.cwd());
   });
 });

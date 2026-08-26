@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -22,6 +23,14 @@ const SYSTEM_PROMPT = "你是 MiniCode，一个 AI 编程助手，通过工具�
 
 /** 多 agent 协作开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
 const COORDINATOR_PROMPT = "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。";
+
+/** 环境信息（N3）：OS/架构/Shell/工作目录四项，供模型感知运行环境（CLI/TUI 共用，
+ *  经 createSessionAgent 自动注入系统提示词）。Shell 从环境变量取，Windows 缺省记 PowerShell。 */
+export function environmentPrompt(): string {
+  const osName = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform;
+  const shell = process.env.SHELL ?? (process.platform === "win32" ? "PowerShell" : "未知");
+  return `当前环境：操作系统 ${osName}（${os.release()}），架构 ${process.arch}，Shell ${shell}，工作目录 ${process.cwd()}`;
+}
 
 export const program = new Command();
 program.name("minicode").description("AI 编程 Agent 命令行工具").version("0.0.1");
@@ -194,13 +203,14 @@ export function createSessionAgent(options: {
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
   onRootEvent?: (event: StreamEvent) => void;
 }): { agent: Agent; team?: Team } {
+  const envPrompt = environmentPrompt();
   if (options.agents === false) {
-    return { agent: new Agent(options) };
+    return { agent: new Agent({ ...options, systemPrompt: `${options.systemPrompt}\n${envPrompt}` }) };
   }
   const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks });
   const agent = new Agent({
     ...options,
-    systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}`,
+    systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}\n${envPrompt}`,
     team,
   });
   team.registerRoot(agent);
