@@ -502,7 +502,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           next === "plan"
             ? "只放行只读工具"
             : next === "bypassPermissions"
-              ? "自动放行（保留危险命令检查）"
+              ? "自动放行，保留危险命令检查"
               : "正常审批";
         showToast(`权限模式：${permissionModeLabel(next)}（${note}）`);
         return;

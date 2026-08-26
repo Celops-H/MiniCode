@@ -33,7 +33,7 @@ export type TuiAction =
   | { type: "exit" }
   /** Esc：运行中打断；空闲连按两次退出（loop 层处理计时与状态） */
   | { type: "esc" }
-  /** Shift+Tab 切换权限模式（一般/plan/auto） */
+  /** Shift+Tab 切换权限模式（default/plan/bypassPermissions，显示名见 permissionModeLabel） */
   | { type: "mode-cycle" }
   | { type: "noop" };
 

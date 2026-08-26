@@ -45,7 +45,7 @@ it("connect key 弹窗输入态：字符进 key 缓冲、不弹 slash 候选（�
   expect(s.candidate).toBeUndefined();
 });
 
-it("Shift+Tab 切换权限模式（一般→plan→auto 循环）", () => {
+it("Shift+Tab 切换权限模式（default→plan→bypassPermissions 循环 + 显示名映射）", () => {
   // opentui tab+shift → shift-tab → mode-cycle（任何 popup 态）
   expect(opentuiKeyToKey({ name: "tab", shift: true })).toEqual({ kind: "shift-tab" });
   expect(mapKey({ kind: "shift-tab" })).toEqual({ type: "mode-cycle" });

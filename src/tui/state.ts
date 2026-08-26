@@ -172,7 +172,7 @@ export const PERMISSION_OPTIONS = [
 /** 内置 slash 命令（输入 / 时候选加载） */
 export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/model", "/rename", "/session"] as const;
 
-/** 权限模式循环序（Shift+Tab 切换）：一般(正常审批) → plan(只读放行) → auto(自动放行) → 一般 */
+/** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
 
 /** 下一个权限模式（纯函数，shortcut 用） */
@@ -200,7 +200,7 @@ export interface TuiState {
   prompt: PromptState;
   streaming: Streaming | undefined;
   status: "idle" | "running";
-  /** 当前权限模式（一般/plan/auto）：Shift+Tab 切换，回灌后端 PermissionPipeline */
+  /** 当前权限模式（default/plan/bypassPermissions）：Shift+Tab 切换，回灌后端 PermissionPipeline；显示名见 permissionModeLabel */
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
