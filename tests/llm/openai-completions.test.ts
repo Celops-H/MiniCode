@@ -99,6 +99,20 @@ describe("buildRequest：消息与工具转换", () => {
     });
   });
 
+  it("reasoningContent 模式：只有 thinking 的 assistant 退化进 content（不缺 content/tool_calls 触发 400）", () => {
+    const reasoningProtocol = new OpenAICompletionsProtocol({ reasoningContent: true });
+    // 思考中打断收尾会落下只有 thinking 的 assistant（无文本、无工具调用）
+    const req = reasoningProtocol.buildRequest(createContext("s", [
+      assistantMessage([{ type: "thinking", thinking: "思考中的半截" }]),
+    ])) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "<thinking>思考中的半截</thinking>" }],
+    });
+    // 退化时不设 reasoning_content，避免只有该字段的 assistant 被厂商拒收
+    expect((req.messages[1] as Record<string, unknown>).reasoning_content).toBeUndefined();
+  });
+
   it("工具 schema 转换为 function 格式", () => {
     const context = createContext("s", [], [
       { name: "read", description: "读文件", inputSchema: { type: "object", properties: { path: { type: "string" } } } },

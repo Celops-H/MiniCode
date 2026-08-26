@@ -4,6 +4,7 @@ import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import { OpenAICompletionsProtocol } from "../../src/llm/index.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -226,6 +227,52 @@ describe("Agent 主循环：turn 内真打断", () => {
       content: [{ type: "text", text: "完成回复" }],
     });
     expect(agent.isInterrupted()).toBe(false);
+  });
+
+  it("思考中打断（只产 thinking）：续跑请求体不产生空 content assistant（A400 回归）", async () => {
+    const protocol = new OpenAICompletionsProtocol({ reasoningContent: true });
+    let calls = 0;
+    let secondBody: unknown;
+    const client: ModelClient = {
+      async *stream(_modelId, ctx, options) {
+        calls++;
+        if (calls === 1) {
+          // 第一轮：只产思考增量后挂起等 abort（思考中打断，无文本产出）
+          yield { type: "thinking_delta", thinking: "正在分析问题" };
+          try {
+            await abortWait(options?.signal!);
+          } catch (err) {
+            throw err;
+          }
+        }
+        // 第二轮（续跑）：用真实协议把当前上下文转成请求体，供断言合法性
+        secondBody = protocol.buildRequest(ctx);
+        yield { type: "text_delta", text: "续跑回复完成" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手" });
+    agent.start("首次思考");
+    await run(agent, (e) => {
+      if (e.type === "thinking_delta") agent.interrupt();
+    });
+    // 打断收尾保留 thinking-only assistant（已产出思考留在历史）
+    const interrupted = agent.getMessages();
+    expect(interrupted).toHaveLength(2);
+    expect(interrupted[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "正在分析问题" }],
+    });
+
+    // 续跑：请求体里每条 assistant 都有 content 或 tool_calls（复现「content or tool_calls must be set」的场景不再出现）
+    agent.start("继续");
+    await run(agent);
+    const body = secondBody as { messages: Array<Record<string, unknown>> };
+    for (const msg of body.messages) {
+      if (msg.role === "assistant") {
+        expect(msg.content ?? msg.tool_calls).toBeTruthy();
+      }
+    }
   });
 
   it("并发批工具中断：批内全部调用收敛为失败结果、配对闭合", async () => {
