@@ -25,6 +25,16 @@ it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删�
   expect(mapKey({ kind: "ctrl-shift-u" })).toEqual({ type: "clear-input" });
 });
 
+it("Shift+方向键：输入态扩展选区；历史浏览态仍导航历史（审查 L-5/L-6）", () => {
+  expect(mapKey({ kind: "shift-left" })).toEqual({ type: "select", dir: "left" });
+  expect(mapKey({ kind: "shift-right" })).toEqual({ type: "select", dir: "right" });
+  expect(mapKey({ kind: "shift-up" })).toEqual({ type: "select", dir: "up" });
+  expect(mapKey({ kind: "shift-down" })).toEqual({ type: "select", dir: "down" });
+  // 历史浏览/输入为空：Shift+↑↓ 与普通 ↑↓ 一致导航历史
+  expect(mapKey({ kind: "shift-up" }, { browsingHistory: true })).toEqual({ type: "history", dir: -1 });
+  expect(mapKey({ kind: "shift-down" }, { inputEmpty: true })).toEqual({ type: "history", dir: 1 });
+});
+
 it("编辑键在模态/候选态不落入输入：Ctrl+A/E/U/K/W → noop", () => {
   const m = { popup: "modal" as const };
   const c = { popup: "candidate" as const };

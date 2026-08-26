@@ -14,7 +14,7 @@ import { theme } from "./theme.js";
 
 /** 单行选中区间：锚点↔光标跨行的行内范围（[start,end) 码点下标）；无选区或空选区返回 null。
  *  行号在锚点行与焦点行之间整行选中；锚点/焦点所在行取到边界。 */
-function lineSelRange(
+export function lineSelRange(
   lineLen: number,
   i: number,
   sel: SelectionAnchor,

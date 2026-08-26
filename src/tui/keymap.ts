@@ -16,7 +16,7 @@ export type TuiAction =
   | { type: "newline" }
   | { type: "cursor"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
   /** Shift+方向键：扩展输入框选区（B-2；无选区时从当前位置起选，编辑操作清选区） */
-  | { type: "select"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
+  | { type: "select"; dir: "left" | "right" | "up" | "down" }
   | { type: "delete-line" }
   | { type: "delete-to-end" }
   | { type: "delete-word" }
@@ -92,10 +92,13 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       return { type: "cursor", dir: key.kind };
     case "shift-left":
     case "shift-right":
+      return { type: "select", dir: key.kind === "shift-left" ? "left" : "right" };
     case "shift-up":
     case "shift-down":
-      // Shift+方向键：扩展输入框选区（B-2）
-      return { type: "select", dir: key.kind.replace("shift-", "") as "left" | "right" | "up" | "down" };
+      // 历史浏览态 Shift+↑↓ 仍导航历史（与普通 ↑↓ 一致，审查 L-5）；输入态才扩展选区
+      return ctx.inputEmpty || ctx.browsingHistory
+        ? { type: "history", dir: key.kind === "shift-up" ? -1 : 1 }
+        : { type: "select", dir: key.kind === "shift-up" ? "up" : "down" };
     case "up":
     case "down":
       // 输入为空、或已在历史浏览中：回溯/前进历史；否则框内移光标

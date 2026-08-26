@@ -193,20 +193,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     if (command === "/compact") {
       if (state.status === "running") {
         showToast("运行中不可压缩，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
-      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       void compactAsync().catch(() => undefined);
       return;
     }
     if (command === "/help") {
       showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /model 模型 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
-      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
     if (command === "/session") {
-      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       void openSessionModal().catch(() => undefined);
       return;
     }
@@ -214,7 +214,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       // 运行中拒绝（重建链会把当前回合作废）；否则打开供应商选择弹窗
       if (state.status === "running") {
         showToast("运行中不可切换供应商，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
       commit({
@@ -224,7 +224,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           providers: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, defaultModel: p.defaultModel })),
           selected: 0,
         },
-        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
+        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
         candidate: undefined,
       });
       return;
@@ -233,7 +233,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（运行中同样等本轮结束）
       if (state.status === "running") {
         showToast("运行中不可切换模型，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
       const models = options.modelList ?? [];
@@ -244,7 +244,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       commit({
         ...state,
         modal: { kind: "model", models, selected, thinkingLevel: thinkingBox.value },
-        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
+        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
         candidate: undefined,
       });
       return;
@@ -255,10 +255,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       const renameTitle = command.slice("/rename".length).trim();
       if (!renameTitle) {
         showToast("用法：/rename 会话名");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       } else {
         session.meta.title = renameTitle;
-        commit({ ...state, title: renameTitle, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, title: renameTitle, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         void store
           .rewriteMessages(session, session.getMessages())
           .then(() => showToast(`会话已重命名：${renameTitle}`))
@@ -270,7 +270,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       // 运行守卫：运行中清屏会抹掉当前回合用户消息块与进行中的工具卡，破坏视图连续性
       if (state.status === "running") {
         showToast("运行中不可清空，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
       // 回会话新建态：agent 上下文清空（防下一轮 start() 把旧历史回灌模型并重写回文件）
@@ -284,7 +284,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     showToast(`未知命令 ${command}（/help 查看可用命令）`);
-    commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+    commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
   };
 
   /** 连接写盘是否进行中（防重入：连按 Enter 并发写全局 config 会 read-modify-write 互相覆盖，丢其它配置） */
@@ -388,24 +388,28 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "copy": {
-        // Ctrl+C 复制：优先输入框选区（Shift+方向键选择，B-2），其次消息区 opentui 拖选选区；
-        // 复制后清除选区 + toast 反馈（打断语义已由 Esc 承担，Ctrl+C 专用于复制）
-        const promptText = selectedPromptText(state.prompt);
-        if (promptText) {
-          copyToClipboard(promptText);
-          showToast(`已复制 ${promptText.length} 个字符到剪贴板`);
-          commit({ ...state, prompt: { ...state.prompt, sel: null } });
-          return;
-        }
+        // Ctrl+C 复制：优先输入框选区（Shift 选择，B-2），其次消息区 opentui 拖选选区；
+        // 有输入框选区（含空选区）先清 sel，空选区不复制回落消息区；复制后清对应选区 + toast
         const r = renderer as
           | { getSelection?: () => { getSelectedText?: () => string } | null; clearSelection?: () => void }
           | undefined;
+        if (state.prompt.sel) {
+          const promptText = selectedPromptText(state.prompt);
+          if (promptText) {
+            copyToClipboard(promptText);
+            showToast(`已复制 ${Array.from(promptText).length} 个字符到剪贴板`);
+          }
+          commit({ ...state, prompt: { ...state.prompt, sel: null } });
+          // 输入框复制同样清消息区残留选区（审查 L-4）
+          r?.clearSelection?.();
+          return;
+        }
         const sel = r?.getSelection?.();
         const text = sel?.getSelectedText?.();
         if (text) {
           copyToClipboard(text);
           r?.clearSelection?.();
-          showToast(`已复制 ${text.length} 个字符到剪贴板`);
+          showToast(`已复制 ${Array.from(text).length} 个字符到剪贴板`);
         }
         return;
       }

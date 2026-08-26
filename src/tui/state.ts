@@ -773,8 +773,8 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       const p = state.prompt;
       const anchor = p.sel ?? { line: p.curLine, col: p.curCol };
       const moved = moveCursor(p, action.dir);
-      const prompt = { ...moved, sel: anchor };
-      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
+      // 不重算 slash 候选（文本未变，与 cursor 分支一致）：/ 开头时候选已收起不会被 Shift+方向键重新弹起（审查 L-1）
+      return { ...state, prompt: { ...moved, sel: anchor } };
     }
     case "history": {
       // 历史回溯：不在浏览时 ↑ 进最后一条；浏览中 ↑/↓ 移动；-1 退出浏览回编辑内容
