@@ -323,12 +323,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
   };
 
-  /** /compact：强制压缩 + 历史重写落盘 */
+  /** /compact：强制压缩 + 历史重写落盘（F-1=56 toast 带压缩后条数，压缩有痕迹） */
   const compactAsync = async (): Promise<void> => {
     if (await agent.compactNow()) {
       await store.rewriteMessages(session, agent.getMessages());
       agent.consumeHistoryRewritten();
-      showToast("会话历史已压缩，关键上下文已保留");
+      const n = agent.getMessages().length;
+      showToast(`会话历史已压缩：当前 ${n} 条消息，关键上下文已保留`);
     } else {
       showToast("未配置压缩或摘要不可用");
     }

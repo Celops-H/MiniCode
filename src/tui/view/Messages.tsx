@@ -318,12 +318,21 @@ export function Messages(props: {
   streaming?: Streaming;
   onFoldAt?: (index: number) => void;
 }): JSX.Element {
+  // F-2=57 滚轮加速：opentui 原生每次滚 1 行太慢；onMouseEvent 先于原生 handleScroll 执行，
+  // 这里把 delta 放大到 3 行（拖拽滚动条不受影响）。onMouseEvent 不在 ScrollBoxProps 类型内，
+  // 运行时支持（opentui 组件 mouse 事件），用 spread 断言接入
+  const wheelBoost = {
+    onMouseEvent: (e: { type: string; scroll?: { delta: number } }) => {
+      if (e.type === "scroll" && e.scroll) e.scroll.delta *= 3;
+    },
+  } as unknown as Record<string, unknown>;
   return (
     <scrollbox
       flexGrow={1}
       paddingX={1}
       stickyScroll={true}
       stickyStart="bottom"
+      {...wheelBoost}
       verticalScrollbarOptions={{
         trackOptions: { backgroundColor: theme.backgroundPanel, foregroundColor: theme.border },
       }}
