@@ -153,10 +153,8 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
         </text>,
         <text paddingX={2} fg={theme.foregroundAccent}>
           {display}
-          {/* 反色块光标：亮/灭闪烁，指示 key 输入位置（未输入时光标在行首） */}
-          <span style={{ bg: cursorOn() ? theme.foregroundAccent : theme.backgroundRaised, fg: theme.background }}>
-            {" "}
-          </span>
+          {/* 竖线光标（P4-5）：key 输入位置细竖线指示，明灭闪烁 */}
+          <span style={{ fg: cursorOn() ? theme.foregroundAccent : theme.background }}>│</span>
         </text>,
         <text fg={theme.textMuted} paddingX={1} paddingY={1}>
           Enter 确认连接 · Backspace 删除 · Esc 取消

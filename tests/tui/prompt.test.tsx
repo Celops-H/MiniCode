@@ -7,13 +7,13 @@ import { PromptView } from "../../src/tui/view/Prompt.js";
 import { createChannel } from "../../src/tui/loop.js";
 import type { PromptState, SlashCandidate } from "../../src/tui/state.js";
 
-/** 光标反色块所在列：扫描最亮的紫色 bg 空格（测试 blink=false，光标恒亮） */
-function cursorColumn(setup: { captureSpans: () => { lines: Array<{ spans: Array<{ text: string; bg: { b: number }; width: number }> }> } }): number {
+/** 光标竖线所在列（P4-5 竖线光标）：扫描高亮色「│」span（测试 blink=false，光标恒亮） */
+function cursorColumn(setup: { captureSpans: () => { lines: Array<{ spans: Array<{ text: string; width: number }> }> } }): number {
   const frame = setup.captureSpans();
   for (const line of frame.lines) {
     let x = 0;
     for (const span of line.spans) {
-      if (span.bg && span.bg.b > 0.7 && span.text === " ") return x;
+      if (span.text === "│") return x;
       x += span.width ?? 1;
     }
   }

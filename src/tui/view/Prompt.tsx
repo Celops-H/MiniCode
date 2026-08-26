@@ -48,7 +48,7 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
     return p.lines.map((line, i) => {
       const prefix = i === 0 ? "❯ " : "  ";
       // 模态（/connect key 弹窗）时隐藏输入框光标：key 在弹窗内输入，光标指示在弹窗
-      //（ConnectFlowModal），底部输入区不显示反色块（此路径不读 cursorOn，闪烁不触发重算）
+      //（ConnectFlowModal），底部输入区不显示光标（此路径不读 cursorOn，闪烁不触发重算）
       if (i !== p.curLine || props.showCursor === false) return <text>{prefix + line}</text>;
       const chars = Array.from(line);
       const before = chars.slice(0, p.curCol).join("");
@@ -57,10 +57,8 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
         <text>
           {prefix}
           {before}
-          {/* 反色块光标：亮=强调色底，灭=低对比底（闪烁），位置=实际编辑列 */}
-          <span style={{ bg: cursorOn() ? theme.foregroundAccent : theme.backgroundRaised, fg: theme.background }}>
-            {" "}
-          </span>
+          {/* 竖线光标（P4-5）：细竖线字符随编辑位置移动，500ms 明灭闪烁 */}
+          <span style={{ fg: cursorOn() ? theme.foregroundAccent : theme.background }}>│</span>
           {after}
         </text>
       );
@@ -72,10 +70,8 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
       flexDirection="column"
       flexShrink={0}
       paddingX={1}
-      paddingTop={1}
-      paddingBottom={1}
       backgroundColor={theme.backgroundPanel}
-      // 上+下两条边界线：与背景块对齐，输入框随行数增高时线跟着块的上下沿走（上限 20 行）
+      // 上+下两条边界线贴内容（P4-5：去掉上下留白，线条与文本间距一屏可辨且随行数自然增高）
       border={["top", "bottom"]}
       borderColor={theme.border}
     >

@@ -12,11 +12,11 @@ import type { JSX } from "@opentui/solid";
 import type { BlockView, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { theme } from "./theme.js";
 
-/** 状态图标/颜色：进行中 spinner、成功绿、失败红、待执行暗 */
+/** 状态图标/颜色：进行中 spinner（浅蓝=进行中）、成功绿、失败红、待执行暗 */
 function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   switch (b.status) {
     case "running":
-      return { icon: "⠋", fg: theme.warning };
+      return { icon: "⠋", fg: theme.modelColor };
     case "success":
       return { icon: "✓", fg: theme.success };
     case "failure":
