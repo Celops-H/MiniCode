@@ -102,3 +102,16 @@ it("/connect 供应商选择：列出厂商与键位提示，选中高亮", asyn
   expect(frame).toContain("▸");
   expect(frame).toContain("输入 API Key");
 });
+
+it("/model 弹窗：模型列表 + 思考等级行 + 键位提示", async () => {
+  const modal: ModalState = { kind: "model", models: [{ id: "deepseek-chat" }, { id: "gpt-4o" }], selected: 0, thinkingLevel: "medium" };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("选择模型");
+  expect(frame).toContain("deepseek-chat");
+  expect(frame).toContain("gpt-4o");
+  expect(frame).toContain("思考等级");
+  expect(frame).toContain("medium");
+  expect(frame).toContain("←→");
+});

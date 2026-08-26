@@ -8,6 +8,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
 import type { PermissionMode } from "../permission/index.js";
+import type { ThinkingLevel } from "../core/index.js";
 
 /** 消息块：用户/助手文本，思考折叠保存于 thinkingCollapsed（默认收起一行） */
 export interface MessageBlock {
@@ -96,6 +97,14 @@ export interface ConnectPickModalState {
   selected: number;
 }
 
+/** /model 模型选择弹窗：列出全部配置模型（↑↓ 选模型、←→ 调思考等级），Enter 应用 */
+export interface ModelModalState {
+  kind: "model";
+  models: Array<{ id: string }>;
+  selected: number;
+  thinkingLevel: ThinkingLevel | undefined;
+}
+
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
 
@@ -107,8 +116,22 @@ export interface ConnectState {
   defaultModel: string;
 }
 
-/** 嵌入弹层：权限确认 / 会话切换 / 供应商选择 */
-export type ModalState = PermissionModalState | SessionModalState | ConnectPickModalState;
+/** 思考等级循环序（/model 左右调整）：low → medium → high → 缺省 → low */
+export const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
+
+/** 下一个思考等级（纯函数） */
+export function cycleThinkingLevel(level: ThinkingLevel | undefined): ThinkingLevel | undefined {
+  const idx = THINKING_LEVELS.indexOf(level);
+  return THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length];
+}
+
+/** 思考等级显示名（缺省显示「厂商默认」） */
+export function thinkingLevelLabel(level: ThinkingLevel | undefined): string {
+  return level ?? "默认";
+}
+
+/** 嵌入弹层：权限确认 / 会话切换 / 供应商选择 / 模型选择 */
+export type ModalState = PermissionModalState | SessionModalState | ConnectPickModalState | ModelModalState;
 
 /** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
@@ -118,7 +141,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/rename", "/session"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/model", "/rename", "/session"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：一般(正常审批) → plan(只读放行) → auto(自动放行) → 一般 */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
@@ -150,6 +173,8 @@ export interface TuiState {
   status: "idle" | "running";
   /** 当前权限模式（一般/plan/auto）：Shift+Tab 切换，回灌后端 PermissionPipeline */
   permissionMode: PermissionMode;
+  /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
+  thinkingLevel: ThinkingLevel | undefined;
   /** 可见 agent 路径列表（main() 恒在首位，AgentSpawned 追加）——底栏 agent 树数据源 */
   agents: string[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
@@ -253,6 +278,7 @@ export function initState(messages: Message[]): TuiState {
     streaming: undefined,
     status: "idle",
     permissionMode: "default",
+    thinkingLevel: undefined,
     agents: ["/root"],
     scrollOffset: 0,
     turnIndex: 0,
@@ -666,6 +692,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "modal-confirm":
     case "esc":
     case "mode-cycle":
+    case "thinking-adjust":
     case "noop":
       return state;
   }

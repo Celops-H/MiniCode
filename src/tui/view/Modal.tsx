@@ -10,7 +10,7 @@ import { createMemo } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { ModalState } from "../state.js";
-import { PERMISSION_OPTIONS } from "../state.js";
+import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
 
 /** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项高亮 chip，随 ←→ 移动） */
@@ -147,8 +147,53 @@ function ConnectModal(props: { modal: Extract<ModalState, { kind: "connect" }> }
   );
 }
 
+/** /model 模型选择：模型列表（↑↓ 选）+ 思考等级行（←→ 调）+ 键位提示；窗口渲染防超页 */
+function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): JSX.Element {
+  const b = props.modal;
+  const dims = useTerminalDimensions();
+  const rows = createMemo(() => {
+    const total = b.models.length;
+    const avail = dims().height ?? 20;
+    const visible = Math.max(1, Math.min(total, avail - 7));
+    const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
+    const items = b.models.slice(start, start + visible).map((m, i) =>
+      start + i === b.selected ? (
+        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+          ▸ {m.id}
+        </text>
+      ) : (
+        <text paddingX={1} paddingTop={1} fg={theme.text}>
+          {"  "}
+          {m.id}
+        </text>
+      ),
+    );
+    const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
+    items.push(
+      <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+        思考等级：{thinkingLevelLabel(b.thinkingLevel)}（←→ 调整）
+      </text>,
+    );
+    items.push(
+      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+        ↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Esc 取消{overflow}
+      </text>,
+    );
+    return items;
+  });
+  return (
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+      <box border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+        title="选择模型" titleColor={theme.foregroundAccent}>
+        {rows()}
+      </box>
+    </box>
+  );
+}
+
 export function ModalView(props: { modal: ModalState }): JSX.Element {
   if (props.modal.kind === "permission") return <PermissionModal modal={props.modal} />;
   if (props.modal.kind === "connect") return <ConnectModal modal={props.modal} />;
+  if (props.modal.kind === "model") return <ModelModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

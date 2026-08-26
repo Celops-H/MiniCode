@@ -34,6 +34,15 @@ it("candidate 态：回车→modal-confirm（执行选中命令）、Tab→compl
   expect(mapKey({ kind: "up" }, c)).toEqual({ type: "modal-nav", dir: -1 });
 });
 
+it("model 弹窗：↑↓ 选模型、←→ 调思考等级、Enter 应用", () => {
+  const m = { popup: "modal" as const, modalKind: "model" as const };
+  expect(mapKey({ kind: "up" }, m)).toEqual({ type: "modal-nav", dir: -1 });
+  expect(mapKey({ kind: "left" }, m)).toEqual({ type: "thinking-adjust", dir: -1 });
+  expect(mapKey({ kind: "right" }, m)).toEqual({ type: "thinking-adjust", dir: 1 });
+  expect(mapKey({ kind: "enter" }, m)).toEqual({ type: "modal-confirm" });
+  expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
+});
+
 it("decideEsc：聚焦先取消 → 运行中打断 → 空闲双击退出", () => {
   // 有折叠聚焦：取消聚焦优先
   expect(decideEsc({ hasFocus: true, running: true, lastEscAt: 0, now: 0 })).toBe("focus-clear");

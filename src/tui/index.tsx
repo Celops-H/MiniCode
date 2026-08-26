@@ -14,6 +14,7 @@ import { buildModelClient, resolveMainModel } from "../cli/models.js";
 import { NEW_SESSION_ID } from "./state.js";
 import { runTui } from "./loop.js";
 import type { Config } from "../config/index.js";
+import type { ThinkingLevel } from "../core/index.js";
 import type { Models } from "../llm/index.js";
 import type { Session } from "../storage/index.js";
 
@@ -52,8 +53,10 @@ export async function runTuiEntry(options: { sessionId?: string; agents?: boolea
   let session = options.sessionId
     ? await store.loadSession(options.sessionId)
     : await store.createSession({ model: modelId });
+  // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
+  const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
   for (;;) {
-    const result = await runTuiSession(store, models, config, session, options.agents ?? true);
+    const result = await runTuiSession(store, models, config, session, options.agents ?? true, thinkingLevelBox);
     if (!result) break;
     // /connect 成功后重建配置链：重读 config + .env，重建模型客户端与主模型（新会话落新模型）
     if (result.reconfigure) {
@@ -82,6 +85,7 @@ async function runTuiSession(
   config: Config,
   session: Session,
   agents: boolean,
+  thinkingLevelBox: { value: ThinkingLevel | undefined },
 ): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
@@ -101,6 +105,8 @@ async function runTuiSession(
     hooks,
     modelLabel: modelId,
     permissionMode: permissionModeBox,
+    thinkingLevel: thinkingLevelBox,
+    modelList: models.listModels().map((m) => ({ id: m.id })),
     assemble: ({ approver, feedRoot }) => {
       const tools = createBuiltinTools();
       const pipelineOptions: PermissionPipelineOptions = {
@@ -126,6 +132,8 @@ async function runTuiSession(
         agents,
         hooks,
         compactConfig,
+        // 思考等级活引用：/@/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
+        thinkingLevelRef: () => thinkingLevelBox.value,
         // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
         onRootEvent: feedRoot,
         // 工具权限走用户审批：approver 渲染弹块等键盘决策（允许本次/全部/拒绝）

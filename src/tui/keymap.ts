@@ -19,6 +19,8 @@ export type TuiAction =
   | { type: "complete" }
   | { type: "modal-nav"; dir: 1 | -1 }
   | { type: "modal-confirm" }
+  /** /model 弹窗左右调整思考等级 */
+  | { type: "thinking-adjust"; dir: 1 | -1 }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
   | { type: "toggle-focus" }
@@ -36,6 +38,8 @@ export type TuiAction =
 export interface KeymapContext {
   /** 输入弹层：slash 候选 / 权限或会话 modal（弹层时 Enter/↑↓/Tab 不落输入框） */
   popup?: "candidate" | "modal";
+  /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级，区别于其它弹窗的选项导航） */
+  modalKind?: "permission" | "session" | "connect" | "model";
   /** 输入框是否为空（空时 ↑↓ 回溯历史；非空在框内移光标） */
   inputEmpty?: boolean;
   /** 是否正在浏览历史（已按 ↑ 载入条目后继续 ↑↓ 在历史间移动） */
@@ -49,7 +53,7 @@ export function mapKey(key: Key, ctx: KeymapContext = {}): TuiAction {
   if (key.kind === "shift-tab") return { type: "mode-cycle" };
   switch (ctx.popup) {
     case "modal":
-      return mapModalKey(key);
+      return mapModalKey(key, ctx.modalKind);
     case "candidate":
       return mapCandidateKey(key);
     default:
@@ -105,9 +109,30 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
   }
 }
 
-/** modal 态（权限确认 / 会话面板）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
+/** modal 态（权限确认 / 会话面板 / /connect / /model）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
+ *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
  *  Ctrl+D 保留退出；Ctrl+C 弃用（与终端复制冲突，改 Esc 语义）。 */
-function mapModalKey(key: Key): TuiAction {
+function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiAction {
+  if (modalKind === "model") {
+    switch (key.kind) {
+      case "up":
+      case "down":
+        return { type: "modal-nav", dir: key.kind === "up" ? -1 : 1 };
+      case "left":
+      case "right":
+        return { type: "thinking-adjust", dir: key.kind === "left" ? -1 : 1 };
+      case "enter":
+        return { type: "modal-confirm" };
+      case "esc":
+        return { type: "cancel" };
+      case "ctrl-c":
+        return { type: "noop" };
+      case "ctrl-d":
+        return { type: "exit" };
+      default:
+        return { type: "noop" };
+    }
+  }
   switch (key.kind) {
     case "up":
     case "left":

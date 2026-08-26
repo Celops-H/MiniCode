@@ -35,6 +35,8 @@ export function App(props: AppProps): JSX.Element {
       inputEmpty: promptEmpty(s.prompt),
       browsingHistory: s.prompt.historyIndex !== -1,
       popup: s.modal ? "modal" : s.candidate ? "candidate" : undefined,
+      // /model 弹窗 ←→ 用于思考等级（区别于其它弹窗的选项导航）
+      modalKind: s.modal?.kind,
     });
     // 无 slash 候选时 Tab = 在可折叠块间移动聚焦（键盘用户定位；展开/收起已改鼠标点击 fold-at）
     if (action.type === "complete" && !s.candidate) action = { type: "toggle-focus" };

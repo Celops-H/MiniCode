@@ -12,7 +12,8 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
+import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
@@ -56,6 +57,10 @@ export interface TuiLoopOptions {
   modelLabel: string;
   /** 权限模式的可变盒子（装配层用它把模式回灌 PermissionPipeline；Shift+Tab 在这里同步） */
   permissionMode?: { value: PermissionMode };
+  /** 思考等级可变盒子（/model 左右调整；装配层经 Agent.thinkingLevelRef 每轮透传 reasoning_effort） */
+  thinkingLevel?: { value: ThinkingLevel | undefined };
+  /** 全部配置模型列表（/@/model 弹窗数据源） */
+  modelList?: Array<{ id: string }>;
 }
 
 /** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
@@ -82,6 +87,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   let lastEscAt = 0;
   /** 权限模式盒子（Shift+Tab 切换；装配层 PermissionPipeline 用它做活引用，见 assemble） */
   const modeBox: { value: PermissionMode } = options.permissionMode ?? { value: "default" };
+  /** 思考等级盒子（/@/model 左右调整；装配层 Agent.thinkingLevelRef 每轮读它透传） */
+  const thinkingBox: { value: ThinkingLevel | undefined } = options.thinkingLevel ?? { value: undefined };
 
   const commit = (next: TuiState): void => setState(reconcile(next));
 
@@ -174,7 +181,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/help") {
-      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /model 模型 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       return;
     }
@@ -197,6 +204,24 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           providers: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, defaultModel: p.defaultModel })),
           selected: 0,
         },
+        prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
+        candidate: undefined,
+      });
+      return;
+    }
+    if (command === "/model") {
+      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（运行中同样等本轮结束）
+      if (state.status === "running") {
+        showToast("运行中不可切换模型，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
+        return;
+      }
+      const models = options.modelList ?? [];
+      const current = session.meta.model;
+      const selected = Math.max(0, models.findIndex((m) => m.id === current));
+      commit({
+        ...state,
+        modal: { kind: "model", models, selected, thinkingLevel: state.thinkingLevel },
         prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
         candidate: undefined,
       });
@@ -337,7 +362,27 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                 candidate: undefined,
               });
             }
+          } else if (state.modal.kind === "model") {
+            // 应用 /model：切模型（同一会话用新模型续跑）+ 思考等级即时生效
+            const picked = state.modal.models[state.modal.selected];
+            thinkingBox.value = state.modal.thinkingLevel;
+            commit({ ...state, modal: undefined, thinkingLevel: state.modal.thinkingLevel });
+            if (picked && picked.id !== session.meta.model) {
+              session.meta.model = picked.id;
+              void store
+                .rewriteMessages(session, session.getMessages())
+                .then(() => {
+                  showToast(`模型已切换：${picked.id}`);
+                  pendingReconfigure = true;
+                  pendingSwitch = session.meta.id; // 同一会话用新模型续跑，历史保留
+                  exitLoop();
+                })
+                .catch(() => showToast("切换模型失败：写入会话文件出错"));
+            } else {
+              showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
+            }
           } else {
+            // /session 会话面板：选中切换目标后退出循环由装配层重建
             const targetIndex = state.modal.selected;
             pendingSwitch =
               targetIndex < state.modal.sessions.length
@@ -366,6 +411,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
             commit({ ...state, modal: { ...state.modal, selected } });
           } else if (state.modal.kind === "connect") {
             const max = state.modal.providers.length - 1;
+            commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
+          } else if (state.modal.kind === "model") {
+            const max = state.modal.models.length - 1;
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
           } else {
             const max = state.modal.sessions.length;
@@ -440,6 +488,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
               ? "自动放行（保留危险命令检查）"
               : "正常审批";
         showToast(`权限模式：${permissionModeLabel(next)}（${note}）`);
+        return;
+      }
+      case "thinking-adjust": {
+        // /model 弹窗 ←→：循环思考等级（默认→low→medium→high），同步盒子即时生效
+        if (state.modal?.kind !== "model") return;
+        const next = cycleThinkingLevel(state.modal.thinkingLevel);
+        thinkingBox.value = next;
+        commit({ ...state, modal: { ...state.modal, thinkingLevel: next } });
         return;
       }
       default:
