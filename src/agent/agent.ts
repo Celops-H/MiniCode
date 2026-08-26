@@ -243,6 +243,12 @@ export class Agent {
     return [...this.messages];
   }
 
+  /** 清空消息历史（TUI /clear 回会话新建态用）：会话消息清盘后 agent 上下文同步清空，
+   *  防下一轮 start() 把旧历史连同新输入一起回灌模型并重写会话文件 */
+  resetHistory(): void {
+    this.messages = [];
+  }
+
   /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2；Team 创建 worktree 时读取） */
   getCwd(): string {
     return this.cwd;

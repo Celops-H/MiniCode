@@ -91,6 +91,28 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages()).toHaveLength(4);
   });
 
+  it("resetHistory 清空消息历史：清空后再 start 只带新输入（/clear 回会话新建态用）", async () => {
+    const agent = new Agent({
+      modelClient: mockTextClient("旧回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("旧问题");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+    expect(agent.getMessages().length).toBeGreaterThan(0);
+
+    // /clear 链路：清空 agent 历史
+    agent.resetHistory();
+    expect(agent.getMessages()).toEqual([]);
+
+    // 清空后再 start：新输入成为唯一消息（旧历史不回灌模型）
+    agent.start("新问题");
+    expect(agent.getMessages()).toHaveLength(1);
+    expect(agent.getMessages()[0]).toMatchObject({ role: "user", content: "新问题" });
+  });
+
   it("runTurn 按 turn 粒度执行：工具调用一轮暂停，再调用继续，Stop 后无事件", async () => {
     const echoTool: Tool = {
       name: "echo",
