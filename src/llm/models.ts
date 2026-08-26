@@ -80,9 +80,10 @@ export class Models {
       yield* resolved.provider.stream(modelId, context, options);
       return;
     }
-    // 路由模式：select 跳过冷却中的模型；失败记冷却后重选，直到成功或整链尝试过
+    // 路由模式：select 跳过冷却中的模型；失败记冷却后重选，直到成功或整链尝试过。
+    // 传入的 modelId（-m 或 TUI /model 选定）打头，配置的 modelChain 作备选路由（对齐 buildModelClient）
     const router = this.router;
-    const chain = this.chain ?? [modelId];
+    const chain = modelId ? [modelId, ...(this.chain ?? []).filter((m) => m !== modelId)] : this.chain ?? [modelId];
     let selected = router.select(chain);
     const tried = new Set<string>();
     let lastError: unknown;

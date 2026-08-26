@@ -213,6 +213,8 @@ export class Agent {
       maxTurns: this.maxTurns,
       outputDir: this.outputDir,
       cwd: worktree?.dir ?? this.cwd,
+      // 思考等级随父继承（会话级偏好，子 agent 与 root 一致）
+      thinkingLevelRef: this.thinkingLevelRef,
     });
     child.agentPath = path;
     return child;

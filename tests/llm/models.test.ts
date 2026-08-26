@@ -113,6 +113,20 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.isHealthy("main-1")).toBe(false);
   });
 
+  it("传入 modelId 不在配置链时以其打头（/@/model 切到链外模型生效）", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1"));
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    models.register(makeFaultyProvider("pick", "picked-1"));
+    // stream 传入 picked-1（不在 chain 里）：路由链应以它为头，首选即 picked-1
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("picked-1", createContext("s"))) events.push(e);
+    expect(events[0]).toEqual({ type: "text_delta", text: "pick:picked-1" });
+    // main-1 未被触达（健康保持，证明没有退回链首）
+    expect(router.isHealthy("main-1")).toBe(true);
+  });
+
   it("整链全部失败时抛最后的错误", async () => {
     const models = new Models({ router: new ModelRouter(), chain: ["main-1", "backup-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
