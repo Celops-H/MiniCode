@@ -337,7 +337,7 @@ export function initState(messages: Message[]): TuiState {
 }
 
 /** /clear 回会话新建态：消息区/流式/弹层/候选/聚焦/agent 树/输入清空。
- *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空 + 标题复位。 */
+ *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空；标题保留不复位。 */
 export function resetToNewState(state: TuiState): TuiState {
   return {
     ...state,
