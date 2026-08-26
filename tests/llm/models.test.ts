@@ -130,6 +130,21 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     ]);
   });
 
+  it("401（认证/余额不足）走熔断：recordFailure 冷却主模型、切备选，冷却期不再请求主模型（F-3=60）", async () => {
+    const router = new ModelRouter({ cooldownMs: 5_000 });
+    const models = new Models({ router, chain: ["openrouter-1", "deepseek-1"] });
+    models.register(makeFaultyProvider("openrouter", "openrouter-1", { failWith: 401 }));
+    models.register(makeFaultyProvider("deepseek", "deepseek-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("openrouter-1", createContext("s"))) events.push(e);
+    // 401 可切换：发 model_fallback 接备选正常产出（对齐 openai 厂商同路径）
+    expect(events[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
+    // 主模型被 recordFailure 冷却：select 跳过冷却中的它（熔断冷却生效，不立即无脑重试坏 key）
+    expect(router.isHealthy("openrouter-1")).toBe(false);
+    expect(router.select(["openrouter-1", "deepseek-1"])).toBe("deepseek-1");
+  });
+
   it("传入 modelId 不在配置链时以其打头（/@/model 切到链外模型生效）", async () => {
     const router = new ModelRouter();
     const models = new Models({ router, chain: ["main-1", "backup-1"] });
