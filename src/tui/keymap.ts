@@ -145,7 +145,7 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
 /** modal 态（权限确认 / 会话面板 / /connect / /model）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
  *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
  *  /connect key 弹窗里字符键输 API Key、Backspace 删、Enter 确认；
- *  Ctrl+D 保留退出；Ctrl+C 弃用（与终端复制冲突，改 Esc 语义）。 */
+ *  Ctrl+D 保留退出；Ctrl+C 复制应用内选区（B-1，打断语义由 Esc 承担）。 */
 function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiAction {
   if (modalKind === "connect-key") {
     switch (key.kind) {

@@ -180,6 +180,20 @@ describe("paste（bracketed paste 整段插入）", () => {
     s = reduceAction(s, { type: "paste", text: "sk-12345" });
     expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-12345" });
   });
+
+  it("connect-key 粘贴含换行/空白：key 清掉（API key 无空白，误带换行污染提交值，G-7）", () => {
+    let s = withKeyModal(initState([]));
+    s = reduceAction(s, { type: "paste", text: "sk-123\n456\t " });
+    expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-123456" });
+  });
+
+  it("非 connect 弹窗打开时粘贴忽略（session/permission 输入框不可见，G-6 边界）", () => {
+    const base = initState([]);
+    const s1: TuiState = { ...base, modal: { kind: "session", sessions: [], selected: 0 } };
+    expect(reduceAction(s1, { type: "paste", text: "x" }).prompt.lines).toEqual([""]);
+    const s2: TuiState = { ...base, modal: { kind: "permission", toolName: "bash", content: "", argsText: "{}", selected: 0 } };
+    expect(reduceAction(s2, { type: "paste", text: "x" }).prompt.lines).toEqual([""]);
+  });
 });
 
 describe("输入编辑（D-2 Ctrl+U 连续删 / D-3 一键清空）", () => {

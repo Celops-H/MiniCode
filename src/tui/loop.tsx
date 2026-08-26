@@ -207,6 +207,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/session") {
+      // 运行中拒绝（G-5=43：与 /compact 等守卫一致——运行中切会话会把当前回合作废，删除交互风险面更大）
+      if (state.status === "running") {
+        showToast("运行中不可切换会话，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+        return;
+      }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       void openSessionModal().catch(() => undefined);
       return;

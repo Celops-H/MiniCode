@@ -1,7 +1,7 @@
 /**
  * 消息流：按 opencode 观感渲染 state.blocks 与流式尾（M4.4 收尾打磨批 + 新任务 5）。
- * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你=强调紫、模型=蓝、工具/思考/子agent=灰），
- * 后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
+ * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你/模型=浅蓝、工具/思考/子agent=灰、
+ * 通知=红警示），后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
  * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
  * 子 agent 活动行带结论/合并；错误块红色标记。
  * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
@@ -154,13 +154,17 @@ function toolDisplayMode(name: string | undefined): "compact" | "bash" | "generi
   return "generic";
 }
 
-/** 参数摘要：取 JSON 第一个字符串值（path/pattern 等），长则截断；非 JSON 用原文截断 */
+/** 参数摘要（G-4=42）：优先取 path/file/command/pattern 等已知键名（content 排在前面也不误导），
+ *  无已知键再取任意首字符串；长则截断；非 JSON 用原文截断 */
+const ARGS_PREFERRED_KEYS = ["path", "file", "command", "pattern", "query", "message", "target"];
 function argsDigest(args: string, max = 40): string {
   let s = args;
   try {
     const parsed = JSON.parse(args) as Record<string, unknown>;
-    const first = Object.values(parsed).find((v): v is string => typeof v === "string");
-    if (first != null) s = first;
+    const preferred =
+      ARGS_PREFERRED_KEYS.map((k) => parsed[k]).find((v): v is string => typeof v === "string") ??
+      Object.values(parsed).find((v): v is string => typeof v === "string");
+    if (preferred != null) s = preferred;
   } catch {
     // 非 JSON 参数用原文
   }

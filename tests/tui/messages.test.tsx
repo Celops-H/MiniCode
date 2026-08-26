@@ -1,6 +1,7 @@
 /**
  * 层 1：消息流渲染——用户/助手/思考折叠/工具卡/子agent/错误/流式 各块的字符帧断言。
  */
+import { createSignal } from "solid-js";
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
 import { Messages } from "../../src/tui/view/Messages.js";
@@ -375,4 +376,31 @@ it("折叠块悬停：摘要文字变白，移开恢复灰（E-1=35，不再整�
   await setup.mockMouse.moveTo(5, 10);
   await setup.waitForVisualIdle();
   expect(spanFgOf(setup.captureSpans(), "read")).toBe("#8f9096");
+});
+
+it("compact 工具点击展开：点卡后输出全文可见（G-6 真实 click 断言）", async () => {
+  const [blocks, setBlocks] = createSignal<BlockView[]>([
+    { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "line1\nline2" },
+  ]);
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={blocks()}
+        modelLabel="m"
+        onFoldAt={() =>
+          setBlocks(blocks().map((b) => (b.kind === "tool" ? { ...b, collapsedOutput: false } : b)))
+        }
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  // 折叠态：输出隐藏
+  expect(setup.captureCharFrame()).not.toContain("line1");
+  // 点卡 → 展开：输出全文可见
+  await setup.mockMouse.click(30, 1);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("line1");
+  expect(frame).toContain("line2");
 });

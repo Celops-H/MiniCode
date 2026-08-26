@@ -5,11 +5,13 @@
 import { it, expect } from "vitest";
 import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "../../src/tui/view/fit.js";
 
-it("colWidth：ASCII 1 列、CJK 全宽 2 列、混合", () => {
+it("colWidth：ASCII 1 列、CJK 全宽 2 列、emoji 2 列（G-7）、混合", () => {
   expect(colWidth("ab")).toBe(2);
   expect(colWidth("中文")).toBe(4);
   expect(colWidth("a中b")).toBe(4);
   expect(colWidth("")).toBe(0);
+  expect(colWidth("🎉")).toBe(2); // emoji 扩展区 2 列
+  expect(colWidth("a🎉")).toBe(3);
 });
 
 it("fitWidth：不超预算原样返回", () => {
@@ -33,19 +35,20 @@ it("padCols：右补空格到目标列宽（CJK 计 2 列），超宽原样返�
   expect(padCols("abcdef", 3)).toBe("abcdef");
 });
 
-it("relativeTime：s/min/hours/days ago 四档（用户指定格式）", () => {
+it("relativeTime：s/min/hour(s)/day(s) ago 四档（G-7 单复数：1 不加 s）", () => {
   const now = Date.parse("2026-08-27T12:00:00.000Z");
   expect(relativeTime("2026-08-27T11:59:40.000Z", now)).toBe("20s ago");
   expect(relativeTime("2026-08-27T11:30:00.000Z", now)).toBe("30min ago");
-  expect(relativeTime("2026-08-27T06:00:00.000Z", now)).toBe("6hours ago");
-  expect(relativeTime("2026-08-24T00:00:00.000Z", now)).toBe("3days ago");
+  expect(relativeTime("2026-08-27T06:00:00.000Z", now)).toBe("6 hours ago");
+  expect(relativeTime("2026-08-24T00:00:00.000Z", now)).toBe("3 days ago");
+  expect(relativeTime("2026-08-27T11:00:00.000Z", now)).toBe("1 hour ago"); // 单数不加 s
   // 非法时间不抛错
   expect(relativeTime("not-a-date", now)).toBe("—");
 });
 
-it("formatBytes：KB 一位小数、不足 1KB 显示 B", () => {
+it("formatBytes：B/KB/MB 分级（G-2，>1MB 显示 MB 不再大数字难读）", () => {
   expect(formatBytes(0)).toBe("0 B");
   expect(formatBytes(512)).toBe("512 B");
   expect(formatBytes(4096)).toBe("4.0 KB");
-  expect(formatBytes(2048 * 1024)).toBe("2048.0 KB");
+  expect(formatBytes(2048 * 1024)).toBe("2.00 MB");
 });

@@ -1,7 +1,8 @@
-/** 终端展示列宽：东亚全宽/全角字符计 2 列，其余 1 列（CJK 按码点截断会溢出折行，见 Modal/StatusBar 使用处） */
+/** 终端展示列宽：东亚全宽/全角字符与 emoji 计 2 列，其余 1 列（G-7 补 emoji 扩展区；
+ *  CJK 按码点截断会溢出折行，见 Modal/StatusBar 使用处） */
 export function colWidth(s: string): number {
   let w = 0;
-  for (const ch of Array.from(s)) w += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1;
+  for (const ch of Array.from(s)) w += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{1F300}-\u{1FAFF}]/u.test(ch) ? 2 : 1;
   return w;
 }
 
@@ -27,7 +28,7 @@ export function padCols(s: string, cols: number): string {
   return w >= cols ? s : s + " ".repeat(cols - w);
 }
 
-/** 相对时间（P4-3 副行）：xx s/min/hours/days ago（用户指定格式） */
+/** 相对时间（P4-3 副行）：xx s/min/hour(s)/day(s) ago（G-7 单复数：1 hour 不加 s） */
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
@@ -36,12 +37,15 @@ export function relativeTime(iso: string, now = Date.now()): string {
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}min ago`;
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}hours ago`;
-  return `${Math.floor(hr / 24)}days ago`;
+  if (hr < 24) return `${hr} ${hr === 1 ? "hour" : "hours"} ago`;
+  const d = Math.floor(hr / 24);
+  return `${d} ${d === 1 ? "day" : "days"} ago`;
 }
 
-/** 文件大小展示：KB 一位小数，不足 1KB 显示 B */
+/** 文件大小展示：B/KB/MB 分级（G-2=40，>1KB 显示 KB、>1MB 显示 MB，不再大数字难读） */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
 }
