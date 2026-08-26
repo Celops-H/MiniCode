@@ -252,7 +252,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
         return;
       }
-      // 回会话新建态：消息区/agent 树/输入清空（resetToNewState）+ 会话消息清盘 + 标题复位；会话条目保留
+      // 回会话新建态：agent 上下文清空（防下一轮 start() 把旧历史回灌模型并重写回文件）
+      //  + 会话消息清盘 + 标题复位 + UI 重置；会话条目保留
+      agent.resetHistory();
       session.meta.title = "新会话";
       commit(resetToNewState(state));
       void store
