@@ -54,29 +54,36 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
 }
 
 /** 会话切换面板：等宽卡片居中弹层（非全屏铺满）+ 边框内标题 + 最近会话列表 + 新建入口，键位提示。
- *  列表行高与窗口计算一致（每行 1 行、无额外竖向 padding），卡内总高 ≤ 可用高度，
+ *  列表行高与窗口计算一致（每行 1 行、模型名按卡宽截断防折行），卡内总高 ≤ 可用高度，
  *  选中项随 ↑↓ 窗口滚动入视野、越界贴边 clamp——列表再长也不滑出视口、下边框始终可见。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
+  // 等宽卡宽：64 内定宽、左右留白居中；极窄终端保底 20（负宽会破坏布局）
+  const cardWidth = Math.max(20, Math.min(64, (dims().width ?? 80) - 4));
   // 列表行：窗口渲染（memo 读 selected/dims 重算）。卡内固定开销（外边距 2 + 边框标题 1 + 新建 1 + 提示 3 + 底框 1）=8 行；
-  // 终端高减 3 行给输入框/状态行/agent 行占位，剩余高度按 1 行/条分配会话可见条数，选中项居中滚动、越界贴边。
+  // 终端高减 9 行给卡下固定内容（输入框 5 + 状态行 2 + agent/通知 2）占位，剩余高度按 1 行/条分配会话可见条数，
+  // 选中项居中滚动、越界贴边——卡与底部状态行都不被顶出视口。
+  // 模型名预算：卡宽 - 边框 2 - 行 paddingX 2 - 行前缀（▸ 6位id · ）11 ≈ 15；超出截断加省略号防折行破 1 行/条假设。
+  const modelMax = cardWidth - 15;
+  const fitModel = (m: string): string => (Array.from(m).length > modelMax ? `${Array.from(m).slice(0, modelMax).join("")}…` : m);
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    const avail = Math.max(10, (dims().height ?? 20) - 3);
+    const avail = Math.max(10, (dims().height ?? 20) - 9);
     const sessRows = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(b.selected - Math.floor((sessRows - 1) / 2), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
     const items = visible.map((s, i) => {
       const sel = start + i === b.selected;
+      const model = fitModel(s.model);
       return sel ? (
         <text paddingX={1} fg={theme.foregroundAccent}>
-          ▸ {s.id.slice(-6)} · {s.model}
+          ▸ {s.id.slice(-6)} · {model}
         </text>
       ) : (
         <text paddingX={1} fg={theme.text}>
           {"  "}
-          {s.id.slice(-6)} · {s.model}
+          {s.id.slice(-6)} · {model}
         </text>
       );
     });
@@ -100,7 +107,6 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     );
     return items;
   });
-  const cardWidth = Math.min(64, (dims().width ?? 80) - 4);
   return (
     <box flexDirection="row" justifyContent="center" paddingY={1} flexShrink={0}>
       <box width={cardWidth} border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}

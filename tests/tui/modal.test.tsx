@@ -63,7 +63,7 @@ it("会话面板：列表/新建入口/键位提示", async () => {
   expect(frame).toContain("新建会话");
 });
 
-it("会话面板等宽卡片居中：不铺满全宽、左右留白居中，下边界框线可见", async () => {
+it("会话面板等宽卡片居中：不铺满全宽、左右留白对称，下边界框线可见", async () => {
   const modal: ModalState = {
     kind: "session",
     sessions: [
@@ -75,8 +75,12 @@ it("会话面板等宽卡片居中：不铺满全宽、左右留白居中，下�
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  // 卡片居中：首行标题边框前有左右留白（非 0 列起始），且最左列不是边框角
-  expect(frame).toMatch(/\s{2,}╭/);
+  // 卡片居中：首行标题边框前有留白（非 0 列起始），且左右留白对称（╭ 前空格 = ╮ 后空格）
+  const titleRow = frame.split("\n").find((l) => l.includes("切换会话")) ?? "";
+  const leftGap = titleRow.indexOf("╭");
+  const rightGap = titleRow.length - titleRow.lastIndexOf("╮") - 1;
+  expect(leftGap).toBeGreaterThan(0);
+  expect(rightGap).toBe(leftGap);
   // 下边界框线可见（整卡在视口内，未溢出截断）
   expect(frame).toContain("╰");
   expect(frame).toContain("↑↓ 选择");
@@ -108,6 +112,29 @@ it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不�
   expect(frame).toContain("sxx-11");
   expect(frame).not.toContain("sxx-00");
   expect(frame).toContain("╰");
+  setModal({ kind: "session", sessions, selected: 12 }); // 新建入口选中
+  await setup.waitForVisualIdle();
+  frame = setup.captureCharFrame();
+  // 选中「新建会话」：窗口贴底、新建项带 ▸ 高亮且在视野内
+  expect(frame).toContain("▸ ── 新建会话 ──");
+  expect(frame).toContain("sxx-11");
+});
+
+it("会话面板长模型名按卡宽截断：不折行、保持每行 1 条", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [
+      { id: "ab3f90", model: "bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0", updatedAt: "now" },
+      { id: "88bf1e", model: "deepseek-chat", updatedAt: "now" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 长模型名被截断（…），不在卡内折成第二行（第二行仍是下一条会话）
+  expect(frame).toContain("…");
+  expect(frame).not.toContain("20250219"); // 尾部被截断不出现
 });
 
 it("/connect 供应商选择：列出厂商与键位提示，选中高亮", async () => {
