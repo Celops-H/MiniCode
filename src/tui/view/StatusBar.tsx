@@ -32,7 +32,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
       </box>
       <text fg={theme.textMuted} flexShrink={0}>
         {props.status === "running" ? (
-          <span style={{ fg: theme.warning }}>▶ 运行中（Esc 打断 · 连按两次 Esc 退出）</span>
+          <span style={{ fg: theme.running }}>▶ 运行中（Esc 打断 · 连按两次 Esc 退出）</span>
         ) : (
           <span>
             <span style={{ fg: theme.success }}>● 空闲</span>

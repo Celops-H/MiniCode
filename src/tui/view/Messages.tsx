@@ -66,32 +66,32 @@ function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX
   );
 }
 
-/** 可折叠区悬停临时态（⑦悬停视觉反馈）：onMouseOver/onMouseOut 切换整块背景抬高
- *  （backgroundRaised），无文字提示；仅可折叠块生效，正文/状态行不受影响 */
-function useHoverBg(): {
-  bg: () => string | undefined;
+/** 可折叠区悬停临时态（E-1=35）：onMouseOver/onMouseOut 切换块内灰色文字变白（theme.text），
+ *  移开恢复灰（不再整块背景抬高）；仅可折叠块生效，正文/状态行不受影响 */
+function useHoverFg(): {
+  fg: () => string;
   onMouseOver: () => void;
   onMouseOut: () => void;
 } {
   const [hover, setHover] = createSignal(false);
   return {
-    bg: () => (hover() ? theme.backgroundRaised : undefined),
+    fg: () => (hover() ? theme.text : theme.textMuted),
     onMouseOver: () => setHover(true),
     onMouseOut: () => setHover(false),
   };
 }
 
-/** 折叠块容器属性合并：点击折叠（fold）+ 悬停高亮（hover）同挂一个 box，属性不冲突 */
+/** 折叠块容器属性合并：点击折叠（fold）+ 悬停文字变白（hover）同挂一个 box，属性不冲突 */
 function useFoldHover(onFold: () => void): {
-  bg: () => string | undefined;
+  fg: () => string;
   onMouseDown: (e: { button: number; x: number; y: number }) => void;
   onMouseUp: (e: { button: number; x: number; y: number }) => void;
   onMouseOver: () => void;
   onMouseOut: () => void;
 } {
   const fold = useFoldClick(onFold);
-  const hover = useHoverBg();
-  return { bg: hover.bg, onMouseDown: fold.onMouseDown, onMouseUp: fold.onMouseUp, onMouseOver: hover.onMouseOver, onMouseOut: hover.onMouseOut };
+  const hover = useHoverFg();
+  return { fg: hover.fg, onMouseDown: fold.onMouseDown, onMouseUp: fold.onMouseUp, onMouseOver: hover.onMouseOver, onMouseOut: hover.onMouseOut };
 }
 
 /** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；整块左键同点点击切换（内容长时点任意部位收起） */
@@ -99,14 +99,14 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
   const width = Array.from(props.text).length;
   const h = useFoldHover(props.onFold);
   return (
-    <box flexDirection="column" backgroundColor={h.bg()} onMouseDown={h.onMouseDown} onMouseUp={h.onMouseUp} onMouseOver={h.onMouseOver} onMouseOut={h.onMouseOut}>
+    <box flexDirection="column" onMouseDown={h.onMouseDown} onMouseUp={h.onMouseUp} onMouseOver={h.onMouseOver} onMouseOut={h.onMouseOut}>
       <box>
-        <text fg={theme.textMuted}>
+        <text fg={h.fg()}>
           {props.collapsed ? (
             <span>思考（▸ {width}，点击展开）</span>
           ) : (
             <span style={{ fg: theme.text }}>
-              <span style={{ fg: theme.textMuted }}>▼ 思考（点击收起）</span>
+              <span style={{ fg: h.fg() }}>▼ 思考（点击收起）</span>
             </span>
           )}
         </text>
@@ -175,7 +175,6 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const mode = toolDisplayMode(b.name);
   const h = useFoldHover(props.onFold);
   const foldBox = {
-    backgroundColor: h.bg(),
     onMouseDown: h.onMouseDown,
     onMouseUp: h.onMouseUp,
     onMouseOver: h.onMouseOver,
@@ -187,7 +186,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
     const outputLines = b.output ? b.output.replace(/\n$/, "").split("\n").length : 0;
     return (
       <box flexDirection="column" {...foldBox}>
-        <text fg={theme.textMuted}>
+        <text fg={h.fg()}>
           <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
           {b.args ? ` ${argsDigest(b.args)}` : ""}
           {b.status === "running" ? (
@@ -211,7 +210,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
     return (
       <box flexDirection="column" {...foldBox}>
         <text>
-          <span style={{ fg: status.fg }}>{status.icon}</span> <span style={{ fg: theme.textMuted }}>Bash</span>{" "}
+          <span style={{ fg: status.fg }}>{status.icon}</span> <span style={{ fg: h.fg() }}>Bash</span>{" "}
           {b.args ? argsDigest(b.args, 60) : ""}
         </text>
         <Show when={hasOutput(b)}>
@@ -232,7 +231,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   // generic：默认单行 icon+名+参数，输出隐藏；展开显示输出（完成后同样可点开）
   return (
     <box flexDirection="column" {...foldBox}>
-      <text fg={theme.textMuted}>
+      <text fg={h.fg()}>
         <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
         {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」，与 compact/bash 摘要一致 */}
@@ -263,10 +262,10 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
       flexDirection="column"
       // 不可折叠（派生/中断）时不挂任何鼠标监听，整行纯展示
       {...(foldable
-        ? { backgroundColor: h.bg(), onMouseDown: h.onMouseDown, onMouseUp: h.onMouseUp, onMouseOver: h.onMouseOver, onMouseOut: h.onMouseOut }
+        ? { onMouseDown: h.onMouseDown, onMouseUp: h.onMouseUp, onMouseOver: h.onMouseOver, onMouseOut: h.onMouseOut }
         : {})}
     >
-      <text fg={theme.textMuted}>
+      <text fg={h.fg()}>
         <span style={{ fg: theme.foregroundAccent }}>⑂</span> 子 agent [{b.path}]
         {b.event === "spawned"
           ? " 已派生"

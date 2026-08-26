@@ -24,6 +24,20 @@ function textFg(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknow
   return undefined;
 }
 
+/** 取首个包含 text 的 span 的 fg（span 可能被拆分时用包含匹配） */
+function textFgContaining(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
+  for (const line of frame.lines) {
+    for (const span of line.spans) {
+      if (span.text.includes(text)) {
+        const buf = (span.fg as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+        if (!buf) return undefined;
+        return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 describe("view/App 渲染链", () => {
   it("根组件渲染出界面骨架内容", async () => {
     const channel = createChannel([]);
@@ -79,6 +93,18 @@ describe("view/App 渲染链", () => {
     );
     await setup.waitForVisualIdle();
     expect(textFg(setup.captureSpans(), "model-blue")).toBe("#61afef");
+  });
+
+  it("运行中状态显示黄色（E-2=66：进行中黄，红色只留严重错误/API error）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([]));
+    setState({ status: "running" });
+    const setup = await testRender(
+      () => <App state={state} model="m" onAction={() => {}} />,
+      { width: 64, height: 8 },
+    );
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("▶ 运行中");
+    expect(textFgContaining(setup.captureSpans(), "运行中（Esc 打断")).toBe("#e5c07b");
   });
 
   it("状态行显示会话标题，/rename 同步更新（用户复核：会话名应随 /rename 变）", async () => {

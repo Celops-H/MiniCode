@@ -12,6 +12,20 @@ const app = (blocks: BlockView[], streaming?: Streaming) =>
     height: 16,
   });
 
+/** 取首个含 text 的 span 的 fg（hex）；无匹配/无颜色返回 undefined */
+function spanFgOf(spans: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
+  for (const line of spans.lines) {
+    for (const span of line.spans) {
+      if (span.text.includes(text)) {
+        const buf = (span.fg as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+        if (!buf) return undefined;
+        return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 it("用户消息带头部与文本", async () => {
   const setup = await app([
     { kind: "message", id: "u1", role: "user", text: "重构 partition 逻辑", time: "14:00:01", thinkingCollapsed: true },
@@ -345,4 +359,20 @@ it("思考块渲染在消息文本之前（思考在前、结论在后，用户�
   const textIdx = lines.findIndex((l) => l.includes("先看结论"));
   expect(thinkingIdx).toBeGreaterThanOrEqual(0); // 思考块存在
   expect(textIdx).toBeGreaterThan(thinkingIdx); // 思考行在消息文本之前
+});
+it("折叠块悬停：摘要文字变白，移开恢复灰（E-1=35，不再整块背景抬高）", async () => {
+  const setup = await app([
+    { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "内容" },
+  ]);
+  await setup.waitForVisualIdle();
+  // 悬停前：摘要文字灰（textMuted）
+  expect(spanFgOf(setup.captureSpans(), "read")).toBe("#8f9096");
+  // 移入工具卡（第一行）：文字变白（theme.text）
+  await setup.mockMouse.moveTo(5, 1);
+  await setup.waitForVisualIdle();
+  expect(spanFgOf(setup.captureSpans(), "read")).toBe("#ececf0");
+  // 移开：恢复灰
+  await setup.mockMouse.moveTo(5, 10);
+  await setup.waitForVisualIdle();
+  expect(spanFgOf(setup.captureSpans(), "read")).toBe("#8f9096");
 });

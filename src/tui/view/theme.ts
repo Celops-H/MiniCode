@@ -16,6 +16,8 @@ export const theme = {
   foregroundAccent: "#61afef",
   /** 模型消息点标记（模型蓝）——与灰（工具/思考/子agent）、红（错误）区分 */
   modelColor: "#61afef",
+  /** 运行中/进行中状态（E-2=66：黄色语义；红色只留严重错误/API error——色板六色外为进行中新增的黄） */
+  running: "#e5c07b",
   /** 界面背景（窗口底色，更深的黑） */
   background: "#101013",
   /** 面板/局部区块背景（P4-5：与主区背景统一一个颜色） */
