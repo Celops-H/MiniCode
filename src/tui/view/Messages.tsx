@@ -114,57 +114,106 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
   );
 }
 
-/** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误；
- *  整卡左键同点点击折叠（参数长/输出多时点任意部位收起，拖选/右键不触发） */
+/** 工具调用卡片（③工具浓缩，opencode 风格，用户确认 4 点）：
+ *  - compact（glob/read/grep/ls 只读快工具）：完成收敛单行摘要「✱ Read 参数摘要 · 输出 N 行」，鼠标点击展开参数与输出全文
+ *  - bash：去框线紧凑块——首行状态 + 命令摘要，超长输出折叠为行数提示，鼠标点击切换
+ *  - generic（未特判工具）：默认单行「⚙ 名 参数」，输出隐藏，鼠标点击展开
+ *  全部展开/关闭一律鼠标点击（复用整卡左键同点判定）；折叠字段复用 collapsedOutput/collapsedArgs */
+const COMPACT_TOOLS = new Set(["glob", "read", "grep", "ls"]);
+
+function toolDisplayMode(name: string | undefined): "compact" | "bash" | "generic" {
+  const n = (name ?? "").toLowerCase();
+  if (n === "bash") return "bash";
+  if (COMPACT_TOOLS.has(n)) return "compact";
+  return "generic";
+}
+
+/** 参数摘要：取 JSON 第一个字符串值（path/pattern 等），长则截断；非 JSON 用原文截断 */
+function argsDigest(args: string, max = 40): string {
+  let s = args;
+  try {
+    const parsed = JSON.parse(args) as Record<string, unknown>;
+    const first = Object.values(parsed).find((v): v is string => typeof v === "string");
+    if (first != null) s = first;
+  } catch {
+    // 非 JSON 参数用原文
+  }
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
-  const status = toolStatus(props.b);
-  const hasOutput = Boolean(props.b.output || props.b.error);
-  const hint =
-    props.b.collapsedOutput && hasOutput
-      ? props.b.output
-        ? `▾ 输出 ${props.b.output.replace(/\n$/, "").split("\n").length} 行 · 点击展开`
-        : "▾ 错误详情 · 点击展开"
-      : "";
+  const b = props.b;
+  const status = toolStatus(b);
+  const mode = toolDisplayMode(b.name);
   const fold = useFoldClick(props.onFold);
+
+  if (mode === "compact") {
+    const expanded = !b.collapsedOutput;
+    const outputLines = b.output ? b.output.replace(/\n$/, "").split("\n").length : 0;
+    return (
+      <box flexDirection="column" {...fold}>
+        <text fg={theme.textMuted}>
+          <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
+          {b.args ? ` ${argsDigest(b.args)}` : ""}
+          {b.status === "running" ? (
+            ""
+          ) : hasOutput(b) && !expanded ? ` · 输出 ${outputLines} 行 · 点击展开` : ""}
+        </text>
+        <Show when={expanded && b.args}>
+          <text fg={theme.textMuted}>{b.args}</text>
+        </Show>
+        <Show when={expanded && b.output}>
+          <text fg={theme.textMuted}>{b.output}</text>
+        </Show>
+        <Show when={expanded && b.error}>
+          <text fg={theme.error}>{b.error}</text>
+        </Show>
+      </box>
+    );
+  }
+  if (mode === "bash") {
+    // bash：去框线紧凑——首行状态 + 命令摘要，输出按折叠切换（保留输出块无边框）
+    return (
+      <box flexDirection="column" {...fold}>
+        <text>
+          <span style={{ fg: status.fg }}>{status.icon}</span> <span style={{ fg: theme.textMuted }}>Bash</span>{" "}
+          {b.args ? argsDigest(b.args, 60) : ""}
+        </text>
+        <Show when={hasOutput(b)}>
+          {b.collapsedOutput ? (
+            <text fg={theme.textMuted}>
+              ▾ {b.error ? "错误详情" : `输出 ${(b.output ?? "").replace(/\n$/, "").split("\n").length} 行`} · 点击展开
+            </text>
+          ) : (
+            <Show when={b.output}>
+              <text fg={theme.textMuted}>{b.output}</text>
+            </Show>
+          )}
+          {!b.collapsedOutput && b.error ? <text fg={theme.error}>{b.error}</text> : null}
+        </Show>
+      </box>
+    );
+  }
+  // generic：默认单行 icon+名+参数，输出隐藏；展开显示输出（完成后同样可点开）
   return (
-    <box
-      border={true}
-      borderStyle="rounded"
-      borderColor={props.b.status === "success" ? theme.border : status.fg}
-      flexDirection="column"
-      title={`${status.icon} ${props.b.name ?? "tool"}`}
-      titleColor={status.fg}
-      {...fold}
-    >
-      {props.b.args ? (
-        <box flexDirection="column">
-          <text fg={theme.textMuted} paddingX={1}>
-            {props.b.collapsedArgs
-              ? props.b.args.length > 60
-                ? `${props.b.args.slice(0, 60)}…（${props.b.args.length} 字符，点击展开）`
-                : props.b.args
-              : props.b.args}
-          </text>
-        </box>
-      ) : null}
-      <Show when={props.b.output && !props.b.collapsedOutput}>
-        {/* 工具输出展开后保持灰色调（与折叠提示同灰，用户复核：展开后也应灰色显示）；错误保持红色区分 */}
-        <text fg={theme.textMuted} paddingX={1}>
-          {props.b.output}
-        </text>
+    <box flexDirection="column" {...fold}>
+      <text fg={theme.textMuted}>
+        <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
+        {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
+        {hasOutput(b) && b.collapsedOutput ? " · 点击展开" : ""}
+      </text>
+      <Show when={!b.collapsedOutput && b.output}>
+        <text fg={theme.textMuted}>{b.output}</text>
       </Show>
-      <Show when={props.b.error && !props.b.collapsedOutput}>
-        <text fg={theme.error} paddingX={1}>
-          {props.b.error}
-        </text>
+      <Show when={!b.collapsedOutput && b.error}>
+        <text fg={theme.error}>{b.error}</text>
       </Show>
-      {hint ? (
-        <text fg={theme.textMuted} paddingX={1} paddingTop={1}>
-          {hint}
-        </text>
-      ) : null}
     </box>
   );
+}
+
+function hasOutput(b: ToolBlock): boolean {
+  return Boolean(b.output || b.error);
 }
 
 /** 子 agent 活动行：派生/完成（结论+合并可折叠）/中断——结论/合并长内容平时收敛单行，

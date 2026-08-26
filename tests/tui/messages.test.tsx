@@ -40,7 +40,7 @@ it("助手消息带思考折叠（收起显示「思考」）", async () => {
   expect(frame).toContain("思考（▸");
 });
 
-it("工具卡按状态显示图标与名称", async () => {
+it("工具卡按状态显示图标与名称（compact 浓缩：只读快工具去框线）", async () => {
   const ok = await app([
     { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: false, output: "export function a() {}" },
   ]);
@@ -48,8 +48,9 @@ it("工具卡按状态显示图标与名称", async () => {
   const frame = ok.captureCharFrame();
   expect(frame).toContain("✓");
   expect(frame).toContain("read");
-  // 卡片 rounded 框线（视觉分隔体系：边框内标题）
-  expect(frame).toContain("╭");
+  // compact 浓缩后无框线（③工具浓缩：glob/read/grep 单行摘要风格）
+  expect(frame).toContain("a.ts");
+  expect(frame).not.toContain("╭");
 
   const fail = await app([
     { kind: "tool", index: 0, turn: 0, name: "grep", args: "{}", status: "failure", error: "Invalid pattern", collapsedArgs: true, collapsedOutput: false },
@@ -57,6 +58,40 @@ it("工具卡按状态显示图标与名称", async () => {
   await fail.waitForVisualIdle();
   expect(fail.captureCharFrame()).toContain("✕");
   expect(fail.captureCharFrame()).toContain("Invalid pattern");
+});
+
+it("compact 工具完成收敛单行摘要（点击展开全文）", async () => {
+  const setup = await app([
+    { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"src/a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "line1\nline2\nline3" },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 折叠态单行：图标+名+参数摘要+输出行数提示
+  expect(frame).toContain("✓ read src/a.ts");
+  expect(frame).toContain("输出 3 行 · 点击展开");
+  expect(frame).not.toContain("line1"); // 输出隐藏
+});
+
+it("bash 紧凑块：命令首行 + 折叠输出行数提示，无边框", async () => {
+  const setup = await app([
+    { kind: "tool", index: 0, turn: 0, name: "bash", args: '{"command":"pnpm test"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "ok\npass" },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("Bash pnpm test");
+  expect(frame).toContain("输出 2 行 · 点击展开");
+  expect(frame).not.toContain("╭"); // 无框线
+});
+
+it("generic 未特判工具默认单行：参数摘要展示、输出隐藏可展开", async () => {
+  const setup = await app([
+    { kind: "tool", index: 0, turn: 0, name: "write", args: '{"path":"x.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "written" },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("write x.ts");
+  expect(frame).toContain("· 点击展开");
+  expect(frame).not.toContain("written"); // 输出隐藏
 });
 
 it("子 agent 活动行带路径与状态；结论默认折叠、点击展开", async () => {
@@ -181,16 +216,16 @@ it("拖选文本/右键抬起不触发折叠——仅左键同点按下抬起命
     { width: 60, height: 16 },
   );
   await setup.waitForVisualIdle();
-  // 从参数文本自身拖到另一列释放（拖选）：按下抬起不同点，不折叠
-  await setup.mockMouse.drag(20, 2, 40, 2);
+  // 从参数文本自身拖到另一列释放（拖选）：按下抬起不同点，不折叠（compact 单行摘要 y=1）
+  await setup.mockMouse.drag(20, 1, 40, 1);
   await setup.waitForVisualIdle();
   expect(calls).toEqual([]);
   // 右键点击卡片（button=2）：不折叠
-  await setup.mockMouse.click(30, 2, 2);
+  await setup.mockMouse.click(30, 1, 2);
   await setup.waitForVisualIdle();
   expect(calls).toEqual([]);
   // 左键同点点击卡片（正常点击）：折叠
-  await setup.mockMouse.click(30, 2);
+  await setup.mockMouse.click(30, 1);
   await setup.waitForVisualIdle();
   expect(calls).toEqual([0]);
 });
