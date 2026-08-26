@@ -34,6 +34,24 @@ function markerFor(b: BlockView): string {
   return theme.textMuted;
 }
 
+/** 折叠点击判定：记录左键按下位置，仅同点抬起才算点击（拖选文本、外部拖入、右键/中键抬起不折叠）。
+ *  不用 opentui 的 isDragging——可选中文本上普通点击的 up 也带 isDragging，会误杀「点内容收起」。 */
+function useFoldClick(onFold: () => void): {
+  onMouseDown: (e: { button: number; x: number; y: number }) => void;
+  onMouseUp: (e: { button: number; x: number; y: number }) => void;
+} {
+  let down: { x: number; y: number } | null = null;
+  return {
+    onMouseDown: (e) => {
+      if (e.button === 0) down = { x: e.x, y: e.y };
+    },
+    onMouseUp: (e) => {
+      if (e.button === 0 && down && down.x === e.x && down.y === e.y) onFold();
+      down = null;
+    },
+  };
+}
+
 /** 块衬线：左侧 3 列「●  」+ 内容列（内容整体缩进到第 3 列，后续行只空不标） */
 function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX.Element {
   return (
@@ -48,11 +66,12 @@ function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX
   );
 }
 
-/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；整块点击切换（内容长时点任意部位收起） */
+/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；整块左键同点点击切换（内容长时点任意部位收起） */
 function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => void }): JSX.Element {
   const width = Array.from(props.text).length;
+  const fold = useFoldClick(props.onFold);
   return (
-    <box flexDirection="column" onMouseUp={props.onFold}>
+    <box flexDirection="column" {...fold}>
       <box>
         <text fg={theme.textMuted}>
           {props.collapsed ? (
@@ -94,7 +113,7 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
 }
 
 /** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误；
- *  整卡点击折叠（onMouseUp 在卡片本体，参数长/输出多时点任意部位收起） */
+ *  整卡左键同点点击折叠（参数长/输出多时点任意部位收起，拖选/右键不触发） */
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const status = toolStatus(props.b);
   const hasOutput = Boolean(props.b.output || props.b.error);
@@ -104,6 +123,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         ? `▾ 输出 ${props.b.output.replace(/\n$/, "").split("\n").length} 行 · 点击展开`
         : "▾ 错误详情 · 点击展开"
       : "";
+  const fold = useFoldClick(props.onFold);
   return (
     <box
       border={true}
@@ -112,7 +132,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
       flexDirection="column"
       title={`${status.icon} ${props.b.name ?? "tool"}`}
       titleColor={status.fg}
-      onMouseUp={props.onFold}
+      {...fold}
     >
       {props.b.args ? (
         <box flexDirection="column">

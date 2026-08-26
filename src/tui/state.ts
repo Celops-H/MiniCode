@@ -719,7 +719,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, focusIndex: next ?? current };
     }
     case "fold-at": {
-      // 鼠标点折叠头：直接翻转指定块的折叠态（无论聚焦与否）
+      // 鼠标左键点折叠块任意部位：直接翻转指定块的折叠态（无论聚焦与否）
       const target = state.blocks[action.index];
       if (!target || !isFoldable(target)) return state;
       const blocks = state.blocks.map((b, i) => (i === action.index ? flipFold(b) : b));

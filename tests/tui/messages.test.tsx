@@ -97,7 +97,7 @@ it("每块首行圆点标记 + 内容缩进到第 3 列（后续行只空不标�
   expect(frame).toMatch(/\n\s{3,}第二行也缩进/);
 });
 
-it("点工具卡非头部位置（标题行）也触发折叠——折叠命中扩到整卡", async () => {
+it("点工具卡非头部位置（标题行/输出区）触发折叠——折叠命中扩到整卡", async () => {
   const calls: number[] = [];
   const setup = await testRender(
     () => (
@@ -122,8 +122,51 @@ it("点工具卡非头部位置（标题行）也触发折叠——折叠命中�
     { width: 60, height: 16 },
   );
   await setup.waitForVisualIdle();
-  // 点卡片标题行（折叠头在参数行，标题行非头部）：应命中整卡 onMouseUp → fold-at(0)
+  // 卡片布局：y1=标题边框行、y2=参数行（旧折叠头）、y3=输出区。点 y1/y3 这些旧代码无折叠命中区的位置，
+  // 应命中整卡 onMouseUp → fold-at(0)（底边框行 opentui 不派发鼠标事件，不作为命中区断言）
+  await setup.mockMouse.click(30, 1);
+  await setup.waitForVisualIdle();
+  expect(calls).toEqual([0]);
+  await setup.mockMouse.click(30, 3);
+  await setup.waitForVisualIdle();
+  expect(calls).toEqual([0, 0]);
+});
+
+it("拖选文本/右键抬起不触发折叠——仅左键同点按下抬起命中", async () => {
+  const calls: number[] = [];
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          {
+            kind: "tool",
+            index: 0,
+            turn: 0,
+            name: "read",
+            args: '{"path":"a.ts"}',
+            status: "success",
+            collapsedArgs: true,
+            collapsedOutput: true,
+          },
+        ]}
+        modelLabel="test-model"
+        onFoldAt={(i) => calls.push(i)}
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  // 从参数文本自身拖到另一列释放（拖选）：按下抬起不同点，不折叠
+  await setup.mockMouse.drag(20, 2, 40, 2);
+  await setup.waitForVisualIdle();
+  expect(calls).toEqual([]);
+  // 右键点击卡片（button=2）：不折叠
+  await setup.mockMouse.click(30, 2, 2);
+  await setup.waitForVisualIdle();
+  expect(calls).toEqual([]);
+  // 左键同点点击卡片（正常点击）：折叠
   await setup.mockMouse.click(30, 2);
+  await setup.waitForVisualIdle();
   expect(calls).toEqual([0]);
 });
 
@@ -152,6 +195,7 @@ it("点思考展开内容中部收起——折叠命中扩到整个思考块", a
   await setup.waitForVisualIdle();
   // 点思考展开内容（折叠头在「▼ 思考」行，内容行非头部）：也应触发 fold-at(0)
   await setup.mockMouse.click(30, 4);
+  await setup.waitForVisualIdle();
   expect(calls).toEqual([0]);
 });
 
