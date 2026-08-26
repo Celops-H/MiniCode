@@ -25,9 +25,12 @@ describe("isSwitchableError（可切换错误分类）", () => {
     expect(isSwitchableError(new Error("fetch failed"))).toBe(true);
   });
 
-  it("参数（400）/认证（401）/权限（403）错误不可切换，直接报错", () => {
+  it("认证/余额不足（401）可切换——用户定论 A：切不可用模型自动路由（备选可能跨厂商、不同 key）", () => {
+    expect(isSwitchableError({ status: 401 })).toBe(true);
+  });
+
+  it("参数（400）/权限（403）错误不可切换，直接报错", () => {
     expect(isSwitchableError({ status: 400 })).toBe(false);
-    expect(isSwitchableError({ status: 401 })).toBe(false);
     expect(isSwitchableError({ status: 403 })).toBe(false);
   });
 
