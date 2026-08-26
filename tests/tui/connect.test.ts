@@ -1,5 +1,5 @@
 /**
- * /connect 写配置逻辑测试：全局 config 合并 provider + modelChain、.env 幂等追加/替换。
+ * /connect 写配置逻辑测试：全局 config 合并 provider（不写 modelChain——模型归 /model 管）+ .env 幂等追加/替换。
  */
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -10,15 +10,16 @@ import { connectProvider, writeGlobalConfig, writeEnvKey, PROVIDER_PRESETS, type
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
 
-it("writeGlobalConfig：写入 provider + modelChain 默认模型打头，strict schema 校验通过", async () => {
+it("writeGlobalConfig：写入 provider，不写 modelChain（模型切换归 /model 命令）", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const file = path.join(dir, "config.json");
   try {
     await writeGlobalConfig(file, deepseek);
-    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: unknown[]; modelChain: string[] };
+    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: unknown[]; modelChain?: string[] };
     expect(parsed.providers).toHaveLength(1);
     expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY" });
-    expect(parsed.modelChain[0]).toBe(deepseek.defaultModel);
+    // 连接只把供应商加进列表，不改优先级链——当前会话与模型保持（用 /model 切模型）
+    expect(parsed.modelChain).toBeUndefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -31,11 +32,11 @@ it("writeGlobalConfig：重复连接同厂商不产生重复 provider（按 id �
     await writeGlobalConfig(file, deepseek);
     await writeGlobalConfig(file, deepseek);
     await writeGlobalConfig(file, qwen);
-    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: { id: string }[]; modelChain: string[] };
+    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: { id: string }[]; modelChain?: string[] };
     expect(parsed.providers).toHaveLength(2);
     expect(parsed.providers.map((p) => p.id)).toEqual(["deepseek", "qwen"]);
-    // modelChain 以最新连接的默认模型打头，旧默认模型不重复
-    expect(parsed.modelChain[0]).toBe(qwen.defaultModel);
+    // 始终不写 modelChain
+    expect(parsed.modelChain).toBeUndefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -43,6 +43,16 @@ it("model 弹窗：↑↓ 选模型、←→ 调思考等级、Enter 应用", ()
   expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
 });
 
+it("connect-key 弹窗：字符→input、Backspace→backspace、Enter→modal-confirm、Esc→cancel、方向键→noop", () => {
+  const m = { popup: "modal" as const, modalKind: "connect-key" as const };
+  expect(mapKey({ kind: "char", char: "s" }, m)).toEqual({ type: "input", text: "s" });
+  expect(mapKey({ kind: "backspace" }, m)).toEqual({ type: "backspace" });
+  expect(mapKey({ kind: "enter" }, m)).toEqual({ type: "modal-confirm" });
+  expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
+  expect(mapKey({ kind: "up" }, m)).toEqual({ type: "noop" });
+  expect(mapKey({ kind: "ctrl-c" }, m)).toEqual({ type: "noop" });
+});
+
 it("decideEsc：聚焦先取消 → 运行中打断 → 空闲双击退出", () => {
   // 有折叠聚焦：取消聚焦优先
   expect(decideEsc({ hasFocus: true, running: true, lastEscAt: 0, now: 0 })).toBe("focus-clear");

@@ -27,13 +27,21 @@ it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   expect(unchanged.blocks[1]).toBe(withBlocks.blocks[1]);
 });
 
-it("connect 输入态不弹 slash 候选（防止候选态 Enter 执行命令而非提交 key）", () => {
+it("connect key 弹窗输入态：字符进 key 缓冲、不弹 slash 候选（弹窗内是输 API Key）", () => {
   const base: TuiState = {
     ...initState([]),
-    connect: { providerId: "deepseek", providerName: "DeepSeek", apiKeyEnv: "DEEPSEEK_API_KEY", defaultModel: "deepseek-chat" },
+    modal: {
+      kind: "connect-key",
+      providerId: "deepseek",
+      providerName: "DeepSeek",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      defaultModel: "deepseek-chat",
+      key: "",
+    },
   };
   const s = reduceAction(base, { type: "input", text: "/" });
-  // 输 / 在 connect 态不应算成命令候选（输入区是输 API Key）
+  // 弹窗内输 / 计入 key 缓冲，不应算成命令候选
+  expect(s.modal).toMatchObject({ kind: "connect-key", key: "/" });
   expect(s.candidate).toBeUndefined();
 });
 

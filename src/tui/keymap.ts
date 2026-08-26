@@ -38,8 +38,8 @@ export type TuiAction =
 export interface KeymapContext {
   /** 输入弹层：slash 候选 / 权限或会话 modal（弹层时 Enter/↑↓/Tab 不落输入框） */
   popup?: "candidate" | "modal";
-  /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级，区别于其它弹窗的选项导航） */
-  modalKind?: "permission" | "session" | "connect" | "model";
+  /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级；/connect key 弹窗里键入字符进 key 缓冲） */
+  modalKind?: "permission" | "session" | "connect" | "connect-key" | "model";
   /** 输入框是否为空（空时 ↑↓ 回溯历史；非空在框内移光标） */
   inputEmpty?: boolean;
   /** 是否正在浏览历史（已按 ↑ 载入条目后继续 ↑↓ 在历史间移动） */
@@ -111,8 +111,30 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
 
 /** modal 态（权限确认 / 会话面板 / /connect / /model）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
  *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
+ *  /connect key 弹窗里字符键输 API Key、Backspace 删、Enter 确认；
  *  Ctrl+D 保留退出；Ctrl+C 弃用（与终端复制冲突，改 Esc 语义）。 */
 function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiAction {
+  if (modalKind === "connect-key") {
+    switch (key.kind) {
+      case "char":
+        return { type: "input", text: key.char };
+      case "backspace":
+        return { type: "backspace" };
+      case "enter":
+        return { type: "modal-confirm" };
+      case "esc":
+        return { type: "cancel" };
+      case "ctrl-c":
+        return { type: "noop" };
+      case "ctrl-d":
+        return { type: "exit" };
+      case "ignore":
+        return { type: "noop" };
+      default:
+        // 方向键等 key 输入态无意义，消费不产生动作
+        return { type: "noop" };
+    }
+  }
   if (modalKind === "model") {
     switch (key.kind) {
       case "up":

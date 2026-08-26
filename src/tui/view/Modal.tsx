@@ -147,6 +147,27 @@ function ConnectModal(props: { modal: Extract<ModalState, { kind: "connect" }> }
   );
 }
 
+/** /connect key 输入弹窗：供应商名 + API Key 输入区（弹窗内输 key，明文显示便于核对）+ 键位提示 */
+function ConnectKeyModal(props: { modal: Extract<ModalState, { kind: "connect-key" }> }): JSX.Element {
+  const b = props.modal;
+  return (
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+        title={`输入 API Key · ${b.providerName}`} titleColor={theme.success}>
+        <text paddingX={1} paddingY={1}>
+          连接供应商 {b.providerName}，默认模型 {b.defaultModel}。输入 {b.apiKeyEnv}：
+        </text>
+        <text paddingX={2} fg={theme.foregroundAccent}>
+          {b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）"}
+        </text>
+        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+          Enter 确认连接 · Backspace 删除 · Esc 取消
+        </text>
+      </box>
+    </box>
+  );
+}
+
 /** /model 模型选择：模型列表（↑↓ 选）+ 思考等级行（←→ 调）+ 键位提示；窗口渲染防超页 */
 function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): JSX.Element {
   const b = props.modal;
@@ -194,6 +215,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
 export function ModalView(props: { modal: ModalState }): JSX.Element {
   if (props.modal.kind === "permission") return <PermissionModal modal={props.modal} />;
   if (props.modal.kind === "connect") return <ConnectModal modal={props.modal} />;
+  if (props.modal.kind === "connect-key") return <ConnectKeyModal modal={props.modal} />;
   if (props.modal.kind === "model") return <ModelModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

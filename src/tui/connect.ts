@@ -96,7 +96,7 @@ async function readGlobalConfigRaw(file: string): Promise<Record<string, unknown
   }
 }
 
-/** 写入全局 config：合并 provider（按 id 追加/替换）+ modelChain 默认模型打头 + strict 校验 */
+/** 写入全局 config：合并 provider（按 id 追加/替换，不写 modelChain——模型切换归 /model 命令）+ strict 校验 */
 export async function writeGlobalConfig(file: string, preset: ProviderPreset): Promise<void> {
   const raw = await readGlobalConfigRaw(file);
   const providers: Config["providers"] = (raw.providers as unknown as Config["providers"]) ?? [];
@@ -110,11 +110,11 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset): P
       models: preset.models.map((id) => ({ id })),
     },
   ];
-  const modelChain = [preset.defaultModel, ...((raw.modelChain as string[] | undefined) ?? []).filter((m) => m !== preset.defaultModel)];
+  // 只追加/替换 provider，不动 modelChain：连接供应商只是让它的模型进入列表，当前模型保持、
+  // 切换仍由 /model 命令负责（用户定论：连接后保持当前会话、不切换模型）
   const merged = {
     ...raw,
     providers: updated,
-    modelChain,
   };
   const validated = configSchema.parse(merged);
   await fs.mkdir(path.dirname(file), { recursive: true });

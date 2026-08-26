@@ -97,6 +97,16 @@ export interface ConnectPickModalState {
   selected: number;
 }
 
+/** /connect key 输入弹窗：选定供应商后弹窗内输 API Key（Enter 确认 / Esc 取消，reducer 增删 key） */
+export interface ConnectKeyModalState {
+  kind: "connect-key";
+  providerId: string;
+  providerName: string;
+  apiKeyEnv: string;
+  defaultModel: string;
+  key: string;
+}
+
 /** /model 模型选择弹窗：列出全部配置模型（↑↓ 选模型、←→ 调思考等级），Enter 应用 */
 export interface ModelModalState {
   kind: "model";
@@ -107,14 +117,6 @@ export interface ModelModalState {
 
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
-
-/** /connect 连接中输入态：选定供应商、等待用户在输入区输 API Key（Enter 确认 / Esc 取消） */
-export interface ConnectState {
-  providerId: string;
-  providerName: string;
-  apiKeyEnv: string;
-  defaultModel: string;
-}
 
 /** 思考等级循环序（/model 左右调整）：low → medium → high → 缺省 → low */
 export const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
@@ -130,8 +132,13 @@ export function thinkingLevelLabel(level: ThinkingLevel | undefined): string {
   return level ?? "默认";
 }
 
-/** 嵌入弹层：权限确认 / 会话切换 / 供应商选择 / 模型选择 */
-export type ModalState = PermissionModalState | SessionModalState | ConnectPickModalState | ModelModalState;
+/** 嵌入弹层：权限确认 / 会话切换 / /connect 选供应商与输 key / /model 选模型 */
+export type ModalState =
+  | PermissionModalState
+  | SessionModalState
+  | ConnectPickModalState
+  | ConnectKeyModalState
+  | ModelModalState;
 
 /** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
@@ -184,10 +191,8 @@ export interface TuiState {
   toast?: { text: string; key: number };
   /** slash 命令候选（输入以 / 开头时出现） */
   candidate?: SlashCandidate;
-  /** 嵌入弹层（权限确认 / 会话切换 / /connect 供应商）：出现时输入禁用、消息区让位 */
+  /** 嵌入弹层（权限确认 / 会话切换 / /connect / /model）：出现时输入禁用、消息区让位 */
   modal?: ModalState;
-  /** /connect 连接中输入态（选定供应商、待输 API Key）：占用输入区输 key，Enter 确认 */
-  connect?: ConnectState;
   /** 回合计数：done 递增，工具卡片按它隔离所属回合 */
   turnIndex: number;
 }
@@ -283,7 +288,6 @@ export function initState(messages: Message[]): TuiState {
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
-    connect: undefined,
   };
 }
 
@@ -584,13 +588,16 @@ function recomputeCandidate(prompt: PromptState, previous?: SlashCandidate): Sla
 export function reduceAction(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     case "input": {
+      // /connect key 弹窗输入态：字符进弹窗内 key 缓冲，不进输入框
+      if (state.modal?.kind === "connect-key") {
+        return { ...state, modal: { ...state.modal, key: state.modal.key + action.text } };
+      }
       // 单字符插入（IME 上送的成串字符也一次插入，不含换行）
       const prompt = insertText(state.prompt, action.text);
-      // connect 输入态是输 API Key：不弹 slash 候选（否则候选态 Enter 会执行命令而非提交 key）
       return {
         ...state,
         prompt,
-        candidate: state.connect ? undefined : recomputeCandidate(prompt, state.candidate),
+        candidate: recomputeCandidate(prompt, state.candidate),
       };
     }
     case "newline": {
@@ -599,6 +606,13 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
     case "backspace": {
+      // /connect key 弹窗输入态：删除 key 缓冲末字符
+      if (state.modal?.kind === "connect-key") {
+        return {
+          ...state,
+          modal: { ...state.modal, key: Array.from(state.modal.key).slice(0, -1).join("") },
+        };
+      }
       const prompt = deleteBackward(state.prompt);
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }

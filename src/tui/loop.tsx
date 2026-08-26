@@ -260,25 +260,26 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
   };
 
-  /** /connect 关键一步：读输入区内容作 API Key → 写全局 config + 项目 .env；成功则请求装配层重建会话 */
+  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config + 项目 .env。
+   *  成功只请求装配层重读配置并重建（reconfigure=true，不 switchTo——保持当前会话与模型）；
+   *  失败 toast 提示并清空 key 保留弹窗，可直接重输。 */
   const submitConnectKey = async (): Promise<void> => {
-    const conn = state.connect;
-    if (!conn) return;
+    const conn = state.modal;
+    if (!conn || conn.kind !== "connect-key") return;
     const preset = PROVIDER_PRESETS.find((p) => p.id === conn.providerId);
     if (!preset) return;
-    const key = state.prompt.lines.join("\n").trim();
+    const key = conn.key.trim();
     const result = await connectProvider(preset, key);
-    // await 期间用户可能已按 Esc 取消（connect 置空）：取消后不再重建、不再动输入
-    if (!state.connect) return;
+    // await 期间用户可能已按 Esc 取消（弹窗关闭）：取消后不再重建、不再动弹窗
+    if (state.modal?.kind !== "connect-key") return;
     if (result.ok) {
       showToast(`${conn.providerName} 已连接，正在重建会话…`);
       pendingReconfigure = true;
-      pendingSwitch = NEW_SESSION_ID;
       exitLoop();
       return;
     }
     showToast(result.error ?? "连接失败");
-    commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 } });
+    commit({ ...state, modal: { ...conn, key: "" } });
   };
 
   /** /compact：强制压缩 + 历史重写落盘 */
@@ -324,11 +325,6 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   const handleAction = (action: TuiAction): void => {
     switch (action.type) {
       case "send": {
-        // /connect 输入态：Enter 提交 API Key（不发送给模型）
-        if (state.connect) {
-          void submitConnectKey();
-          return;
-        }
         // 空输入 Enter：不再折叠最后一个可折叠块（展开/收起已改鼠标点击，Enter 保留发送）
         if (promptEmpty(state.prompt)) return;
         const text = state.prompt.lines.join("\n");
@@ -347,23 +343,25 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
             const option = ["allow", "allow-all", "deny"][state.modal.selected] as "allow" | "allow-all" | "deny";
             resolvePermission(option);
           } else if (state.modal.kind === "connect") {
-            // 选定供应商 → 关弹窗进入 key 输入态（输入区输 key，Enter 确认）
+            // 选定供应商 → 留在弹窗进入 key 输入态（弹窗内输 key，Enter 提交 / Esc 取消）
             const connModal = state.modal;
             const preset = PROVIDER_PRESETS.find((p) => p.id === connModal.providers[connModal.selected]?.id);
             if (preset) {
               commit({
                 ...state,
-                modal: undefined,
-                connect: {
+                modal: {
+                  kind: "connect-key",
                   providerId: preset.id,
                   providerName: preset.name,
                   apiKeyEnv: preset.apiKeyEnv,
                   defaultModel: preset.defaultModel,
+                  key: "",
                 },
-                prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
-                candidate: undefined,
               });
             }
+          } else if (state.modal.kind === "connect-key") {
+            // key 输入态 Enter：提交连接（写配置成功后由 submitConnectKey 请求重建）
+            void submitConnectKey();
           } else if (state.modal.kind === "model") {
             // 应用 /model：切模型（同一会话用新模型续跑）+ 思考等级即时生效
             const picked = state.modal.models[state.modal.selected];
@@ -417,6 +415,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           } else if (state.modal.kind === "model") {
             const max = state.modal.models.length - 1;
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
+          } else if (state.modal.kind === "connect-key") {
+            // key 输入态无列表导航（mapModalKey 已把方向键映射为 noop，这里是类型收尾）
+            return;
           } else {
             const max = state.modal.sessions.length;
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
@@ -436,12 +437,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "esc": {
-        // /connect 输入态 Esc = 取消连接
-        if (state.connect) {
-          commit({ ...state, connect: undefined, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 } });
-          return;
-        }
-        // Esc：有折叠聚焦先取消聚焦；运行中打断；空闲第一次 arm、窗口内第二次退出（decideEsc 纯判定）
+        // Esc：有折叠聚焦先取消聚焦；运行中打断；空闲第一次 arm、窗口内第二次退出（decideEsc 纯判定）。
+        // （/connect key 输入态 Esc 由 mapModalKey → cancel 分支关弹窗，不走到这里）
         const verdict = decideEsc({
           hasFocus: state.focusIndex >= 0,
           running: state.status === "running",
@@ -594,5 +591,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       // 会话结束事件处理失败不阻断退出
     }
   }
-  return pendingSwitch ? { switchTo: pendingSwitch, reconfigure: pendingReconfigure } : undefined;
+  // /session 切换到其它会话 / /connect 重建链：只有改会话或请求重建任一发生才返回信号；
+  // 仅 reconfigure（connect 保持同会话）时 switchTo 留空，由装配层加载同一会话
+  return pendingSwitch || pendingReconfigure ? { switchTo: pendingSwitch, reconfigure: pendingReconfigure } : undefined;
 }
