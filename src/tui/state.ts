@@ -208,7 +208,7 @@ export interface TuiState {
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
-  /** agent 树（/root=main() 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
+  /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;

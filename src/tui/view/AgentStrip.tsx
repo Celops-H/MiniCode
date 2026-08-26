@@ -47,10 +47,10 @@ function agentContent(a: AgentNode): string {
   return `( ) ${name}`;
 }
 
-/** 内容里括号中心列偏移：`( ) 名`/`(√) 名` → 括号中间空格列（起点+1）；`● main` 无括号 → 圆点列（0） */
+/** 内容里括号中心列偏移：子 agent 带状态括号 `( ) 名`/`(√) 名`/`(×) 名` → 括号中心列（起点+1）；
+ *  main `● main` 无括号 → 圆点列（0） */
 function parenCenterOffset(content: string): number {
-  const open = content.indexOf("(");
-  return open >= 0 && content[open + 1] === ")" ? open : open + 1;
+  return content.startsWith("(") ? 1 : 0;
 }
 
 /**

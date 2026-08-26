@@ -68,7 +68,7 @@ it("cycleThinkingLevel：默认→low→medium→high→默认", () => {
   expect(cycleThinkingLevel("high")).toBe(undefined);
 });
 
-it("AgentSpawned 追加到 agents 树（main() 恒在首位，去重；完成带时刻）", () => {
+it("AgentSpawned 追加到 agents 树（main 恒在首位，去重；完成带时刻）", () => {
   const base = initState([]);
   expect(base.agents).toEqual([{ path: "/root", status: "running", spawnedAt: null, completedAt: null }]);
   const spawned = reduceHook(base, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });

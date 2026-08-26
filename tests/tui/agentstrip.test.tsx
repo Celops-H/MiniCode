@@ -1,5 +1,5 @@
 /**
- * 层 1：底栏 agent 树（P1-5）——main 仅多 agent 显示、子 agent ( )/(√)+耗时、树线对齐括号中心列、10s 消失。
+ * 层 1：底栏 agent 树（P1-5）——main 仅多 agent 显示、子 agent ( )/(√)+耗时、树线对齐父圆点/括号中心列、10s 消失。
  */
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
