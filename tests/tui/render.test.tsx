@@ -42,7 +42,13 @@ describe("view/App 渲染链", () => {
 
   it("底栏显示 agent 树：main() + 子 agent 一行", async () => {
     const channel = createChannel([]);
-    const st: TuiState = { ...channel.state, agents: ["/root", "/root/task_1"] };
+    const st: TuiState = {
+      ...channel.state,
+      agents: [
+        { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+        { path: "/root/task_1", status: "running", spawnedAt: null, completedAt: null },
+      ],
+    };
     const setup = await testRender(
       () => <App state={st} model="m" sessionId="s" onAction={channel.onAction} />,
       { width: 64, height: 12 },
@@ -50,17 +56,17 @@ describe("view/App 渲染链", () => {
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
     expect(frame).toContain("main()");
-    expect(frame).toContain("task_1()");
+    expect(frame).toContain("( ) task_1");
   });
 
   it("live AgentSpawned 后底栏 agent 树刷新（曾因组件体常量 + App 布尔 memo 短路不刷新）", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     const setup = await testRender(() => <App state={state} model="m" sessionId="s" onAction={() => {}} />, { width: 64, height: 12 });
     await setup.waitForVisualIdle();
-    setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" }));
+    setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 0 }));
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
     expect(frame).toContain("main()");
-    expect(frame).toContain("task_1()");
+    expect(frame).toContain("( ) task_1");
   });
 });

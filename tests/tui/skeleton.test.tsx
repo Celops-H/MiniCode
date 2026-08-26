@@ -68,14 +68,20 @@ it("cycleThinkingLevel：默认→low→medium→high→默认", () => {
   expect(cycleThinkingLevel("high")).toBe(undefined);
 });
 
-it("AgentSpawned 追加到 agents 树（main() 恒在首位，去重）", () => {
+it("AgentSpawned 追加到 agents 树（main() 恒在首位，去重；完成带时刻）", () => {
   const base = initState([]);
-  expect(base.agents).toEqual(["/root"]);
+  expect(base.agents).toEqual([{ path: "/root", status: "running", spawnedAt: null, completedAt: null }]);
   const spawned = reduceHook(base, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });
-  expect(spawned.agents).toEqual(["/root", "/root/task_1"]);
+  expect(spawned.agents).toEqual([
+    { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+    { path: "/root/task_1", status: "running", spawnedAt: null, completedAt: null },
+  ]);
   // 重复事件去重
   const dup = reduceHook(spawned, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });
-  expect(dup.agents).toEqual(["/root", "/root/task_1"]);
+  expect(dup.agents).toHaveLength(2);
+  // 完成事件：状态改 completed + 记录完成时刻（loop 注入），派生时刻保留算耗时
+  const done = reduceHook(dup, { type: "AgentCompleted", path: "/root/task_1", parentPath: "/root", conclusion: "ok", completedAt: 1000 });
+  expect(done.agents[1]).toEqual({ path: "/root/task_1", status: "completed", spawnedAt: null, completedAt: 1000 });
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

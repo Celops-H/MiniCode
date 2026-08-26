@@ -549,9 +549,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     hooks.on("PreToolUse", (e) => commit(reduceHook(state, e))),
     hooks.on("PostToolUse", (e) => commit(reduceHook(state, e))),
     hooks.on("PostToolUseFailure", (e) => commit(reduceHook(state, e))),
-    hooks.on("AgentSpawned", (e) => commit(reduceHook(state, e))),
-    hooks.on("AgentCompleted", (e) => commit(reduceHook(state, e))),
-    hooks.on("AgentInterrupted", (e) => commit(reduceHook(state, e))),
+    hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
+    hooks.on("AgentCompleted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
+    hooks.on("AgentInterrupted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
     hooks.on("Stop", (e) => commit(reduceHook(state, e))),
   ];
 

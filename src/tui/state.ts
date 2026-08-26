@@ -58,6 +58,18 @@ export interface NoticeBlock {
 
 export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock;
 
+/** agent 树节点：路径 + 运行/完成状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），
+ *  完成条目在底栏树展示 10s 后消失，耗时 = completedAt - spawnedAt */
+export interface AgentNode {
+  path: string;
+  status: "running" | "completed" | "interrupted";
+  spawnedAt: number | null;
+  completedAt: number | null;
+}
+
+/** agent 生命周期 HookEvent 附带的时刻（loop 注入，state reducer 保持纯函数） */
+export type AgentEventMeta = HookEvent & { spawnedAt?: number; completedAt?: number };
+
 /** 输入行上限（UI-SPEC §1：多行输入最多 20 行，超出不再增高，靠光标移动查看） */
 export const MAX_PROMPT_LINES = 20;
 
@@ -190,8 +202,8 @@ export interface TuiState {
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
-  /** 可见 agent 路径列表（main() 恒在首位，AgentSpawned 追加）——底栏 agent 树数据源 */
-  agents: string[];
+  /** agent 树（/root=main() 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
+  agents: AgentNode[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
   /** 可折叠块聚焦（Tab 切换、Enter 翻折）：-1 无聚焦（Enter 发送） */
@@ -315,7 +327,7 @@ export function initState(messages: Message[]): TuiState {
     status: "idle",
     permissionMode: "default",
     thinkingLevel: undefined,
-    agents: ["/root"],
+    agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
@@ -521,8 +533,9 @@ function appendMessageBlock(
   };
 }
 
-/** HookEvent → 状态（用户输入 / 工具生命周期 / 子 agent 活动 / 会话边界） */
-export function reduceHook(state: TuiState, event: HookEvent): TuiState {
+/** HookEvent → 状态（用户输入 / 工具生命周期 / 子 agent 活动 / 会话边界）。
+ *  agent 生命周期事件可附带 spawnedAt/completedAt（loop 侧注入），state 本身保持纯函数 */
+export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
   switch (event.type) {
     case "UserPromptSubmit":
       return {
@@ -590,12 +603,17 @@ export function reduceHook(state: TuiState, event: HookEvent): TuiState {
     case "AgentSpawned":
       return {
         ...state,
-        agents: state.agents.includes(event.path) ? state.agents : [...state.agents, event.path],
+        agents: state.agents.some((a) => a.path === event.path)
+          ? state.agents
+          : [...state.agents, { path: event.path, status: "running", spawnedAt: event.spawnedAt ?? null, completedAt: null }],
         blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path }],
       };
     case "AgentCompleted":
       return {
         ...state,
+        agents: state.agents.map((a) =>
+          a.path === event.path ? { ...a, status: "completed", completedAt: event.completedAt ?? null } : a,
+        ),
         blocks: [
           ...state.blocks,
           {
@@ -610,6 +628,9 @@ export function reduceHook(state: TuiState, event: HookEvent): TuiState {
     case "AgentInterrupted":
       return {
         ...state,
+        agents: state.agents.map((a) =>
+          a.path === event.path ? { ...a, status: "interrupted", completedAt: event.completedAt ?? null } : a,
+        ),
         blocks: [...state.blocks, { kind: "agent", event: "interrupted", path: event.path }],
       };
     case "Stop":
