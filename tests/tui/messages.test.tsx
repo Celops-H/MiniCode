@@ -154,3 +154,41 @@ it("点思考展开内容中部收起——折叠命中扩到整个思考块", a
   await setup.mockMouse.click(30, 4);
   expect(calls).toEqual([0]);
 });
+
+/** 逐行扫描首列 ● 的 fg 颜色（hex），按出现顺序返回（fg.buffer 运行时为 RGBA 字节，类型标 Uint16Array 陈旧，按 ArrayLike 读） */
+function dotColors(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }): string[] {
+  const colors: string[] = [];
+  for (const line of frame.lines) {
+    for (const span of line.spans) {
+      if (span.text === "●") {
+        const buf = (span.fg as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+        if (!buf) continue;
+        colors.push(`#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`);
+      }
+    }
+  }
+  return colors;
+}
+
+it("圆点配色：你=紫、模型=蓝、工具/思考=灰、通知=橙", async () => {
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          { kind: "message", id: "u1", role: "user", text: "hi", thinkingCollapsed: true },
+          { kind: "message", id: "a1", role: "assistant", text: "hello", thinkingCollapsed: true },
+          { kind: "tool", index: 0, turn: 0, name: "read", args: "{}", status: "success", collapsedArgs: true, collapsedOutput: true },
+          { kind: "notice", id: "n1", text: "模型切换", time: "12:00:00" },
+        ]}
+        modelLabel="m"
+      />
+    ),
+    { width: 40, height: 12 },
+  );
+  await setup.waitForVisualIdle();
+  const colors = dotColors(setup.captureSpans());
+  expect(colors[0]).toBe("#9d7cd8"); // 你=强调紫
+  expect(colors[1]).toBe("#61afef"); // 模型=蓝
+  expect(colors[2]).toBe("#8f9096"); // 工具=灰
+  expect(colors[3]).toBe("#f0a94a"); // 通知=警示橙（路由切换等提醒保持醒目）
+});

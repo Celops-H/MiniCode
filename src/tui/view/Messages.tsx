@@ -1,6 +1,6 @@
 /**
  * 消息流：按 opencode 观感渲染 state.blocks 与流式尾（M4.4 收尾打磨批 + 新任务 5）。
- * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你=强调紫、模型=灰、工具=警示橙），
+ * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你=强调紫、模型=蓝、工具/思考/子agent=灰），
  * 后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
  * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
  * 子 agent 活动行带结论/合并；错误块红色标记。
@@ -26,10 +26,11 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型/子agent=灰、工具=警示橙、通知=警示橙） */
+/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型=蓝、工具/思考/子agent=灰、通知=警示橙） */
 function markerFor(b: BlockView): string {
-  if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.textMuted;
-  if (b.kind === "tool" || b.kind === "notice") return theme.warning;
+  if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.modelColor;
+  if (b.kind === "tool") return theme.textMuted;
+  if (b.kind === "notice") return theme.warning;
   return theme.textMuted;
 }
 

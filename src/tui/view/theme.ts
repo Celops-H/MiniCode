@@ -11,6 +11,8 @@ export const theme = {
   success: "#7fd88f",
   /** 强调色（选中项、子 agent 标点、链接等）——opencode accent 紫 */
   foregroundAccent: "#9d7cd8",
+  /** 模型消息点标记（模型蓝）——与强调紫（你）、灰（工具/思考/子agent）区分 */
+  modelColor: "#61afef",
   /** 界面背景（窗口底色） */
   background: "#16161a",
   /** 面板/局部区块背景（弹块、工具卡、输入区提亮） */
