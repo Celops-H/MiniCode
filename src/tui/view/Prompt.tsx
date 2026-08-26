@@ -33,7 +33,7 @@ function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
   );
 }
 
-export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate; blink?: boolean }): JSX.Element {
+export function PromptView(props: { prompt: PromptState; candidate?: SlashCandidate; blink?: boolean; showCursor?: boolean }): JSX.Element {
   // 光标闪烁：500ms 切换一次「亮/灭」色（反色块由强调色 ⇄ 低对比）；测试可传 blink=false 关掉
   const [cursorOn, setCursorOn] = createSignal(true);
   onMount(() => {
@@ -47,7 +47,9 @@ export function PromptView(props: { prompt: PromptState; candidate?: SlashCandid
     const p = props.prompt;
     return p.lines.map((line, i) => {
       const prefix = i === 0 ? "❯ " : "  ";
-      if (i !== p.curLine) return <text>{prefix + line}</text>;
+      // 模态（/connect key 弹窗）时隐藏输入框光标：key 在弹窗内输入，光标指示在弹窗
+      //（ConnectFlowModal），底部输入区不显示反色块（此路径不读 cursorOn，闪烁不触发重算）
+      if (i !== p.curLine || props.showCursor === false) return <text>{prefix + line}</text>;
       const chars = Array.from(line);
       const before = chars.slice(0, p.curCol).join("");
       const after = chars.slice(p.curCol).join("");

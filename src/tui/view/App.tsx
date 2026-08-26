@@ -57,7 +57,12 @@ export function App(props: AppProps): JSX.Element {
         </box>
       ) : null}
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
-      <PromptView prompt={props.state.prompt} candidate={props.state.candidate} />
+      <PromptView
+        prompt={props.state.prompt}
+        candidate={props.state.candidate}
+        // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
+        showCursor={props.state.modal?.kind !== "connect-key"}
+      />
       <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} permissionMode={props.state.permissionMode} />
       {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
     </box>

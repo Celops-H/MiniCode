@@ -6,7 +6,7 @@
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
  * 非 each 依赖的标量刷新），改用 createMemo 直接读 selected 重算——高亮随 ←→ 移动。
  */
-import { createMemo } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { ModalState, ConnectPickModalState, ConnectKeyModalState } from "../state.js";
@@ -114,9 +114,16 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
 function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModalState }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
+  // key 输入光标（闪烁）：key 在弹窗内输入，光标块指示实际输入位置（模态时底部输入框光标已隐藏）
+  const [cursorOn, setCursorOn] = createSignal(true);
+  onMount(() => {
+    const timer = setInterval(() => setCursorOn((c) => !c), 500);
+    onCleanup(() => clearInterval(timer));
+  });
   const rows = createMemo(() => {
     // key 输入阶段
     if (b.kind === "connect-key") {
+      const display = b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）";
       return [
         <text paddingX={1} paddingY={1} fg={theme.success}>
           输入 API Key · {b.providerName}
@@ -124,9 +131,12 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
         <text paddingX={1}>
           默认模型 {b.defaultModel} · {b.apiKeyEnv}：
         </text>,
-        /* key 展示：≤24 字符全文显示，超长截断保留末 12 位（通常是对照项），防整屏换行溢出 */
         <text paddingX={2} fg={theme.foregroundAccent}>
-          {b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）"}
+          {display}
+          {/* 反色块光标：亮/灭闪烁，指示 key 输入位置（未输入时光标在行首） */}
+          <span style={{ bg: cursorOn() ? theme.foregroundAccent : theme.backgroundRaised, fg: theme.background }}>
+            {" "}
+          </span>
         </text>,
         <text fg={theme.textMuted} paddingX={1} paddingY={1}>
           Enter 确认连接 · Backspace 删除 · Esc 取消
