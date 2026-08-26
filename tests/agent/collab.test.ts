@@ -111,8 +111,8 @@ describe("协作工具集（多 agent 环境）", () => {
     ).toBe(true);
   });
 
-  it("spawn_agent：深度守卫拒绝嵌套派生", async () => {
-    const team = new Team();
+  it("spawn_agent：深度守卫拒绝嵌套派生（maxDepth 1 时）", async () => {
+    const team = new Team({ maxDepth: 1 });
     // 直接经工具执行路径验证：子 agent 的协作工具在深度 2 时被拒绝
     let childToolResult = "";
     const root = new Agent({

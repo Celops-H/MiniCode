@@ -51,13 +51,32 @@ describe("Team（注册表与并发限制）", () => {
     expect(typeof team.reserveSpawn(AgentPath.root(), "task_1")).toBe("string");
   });
 
-  it("spawn 深度上限（默认 1 层）", () => {
-    const team = new Team();
+  it("spawn 深度上限：maxDepth 1 时深度 2 超限（守卫）", () => {
+    const team = new Team({ maxDepth: 1 });
     team.registerRoot(makeAgent());
     const child = team.reserveSpawn(AgentPath.root(), "task_1");
     expect(typeof child).not.toBe("string");
     // 深度 2（task_1 再派生）超限
     expect(typeof team.reserveSpawn(child as AgentPath, "task_2")).toBe("string");
+  });
+
+  it("默认深度 2：允许树形派生孙 agent，深度 3 超限（P4-4 树形协作）", () => {
+    const team = new Team(); // 默认 maxDepth=2（main→子→孙）
+    team.registerRoot(makeAgent());
+    const child = team.reserveSpawn(AgentPath.root(), "task_1");
+    expect(typeof child).not.toBe("string");
+    const grand = team.reserveSpawn(child as AgentPath, "task_2"); // 深度 2（孙）允许
+    expect(typeof grand).not.toBe("string");
+    expect(typeof team.reserveSpawn(grand as AgentPath, "task_3")).toBe("string"); // 深度 3 超限
+  });
+
+  it("默认派生总数 15：第 16 个超限（P4-4）", () => {
+    const team = new Team(); // 默认 maxAgents=15（root 不计）
+    team.registerRoot(makeAgent());
+    for (let i = 0; i < 15; i++) {
+      expect(typeof team.reserveSpawn(AgentPath.root(), `a${i}`)).not.toBe("string");
+    }
+    expect(typeof team.reserveSpawn(AgentPath.root(), "overflow")).toBe("string");
   });
 
   it("spawn 总数上限", () => {

@@ -15,16 +15,16 @@ export interface TeamMember {
   agent: Agent | undefined;
   path: AgentPath;
   parentPath?: AgentPath;
-  /** spawn 深度（root=0），递归防护用（DESIGN 11.4 深度默认 1） */
+  /** spawn 深度（root=0），递归防护用（DESIGN 11.4 深度默认 2） */
   depth: number;
   /** Git Worktree 信息（worktrees 开启且为 git 仓库时）：并行隔离的工作区与分支（DESIGN 4.2） */
   worktree?: WorktreeInfo;
 }
 
 export interface TeamOptions {
-  /** spawn 总数上限；缺省不限制 */
+  /** spawn 派生总数上限（root 不计）；缺省 15（用户对齐 2026-08-27：限制派生的 agent 总数） */
   maxAgents?: number;
-  /** spawn 深度上限（递归防护）；缺省 1 */
+  /** spawn 深度上限（root=0，递归防护）；缺省 2（main→子→孙，用户对齐 2026-08-27：树形协作） */
   maxDepth?: number;
   /** 同时推进的 agent 数上限；缺省 4（DESIGN 11.7） */
   maxConcurrent?: number;
@@ -50,8 +50,8 @@ export class Team {
   private readonly pendingDrives = new Set<Agent>();
 
   constructor(options: TeamOptions = {}) {
-    this.maxAgents = options.maxAgents ?? Infinity;
-    this.maxDepth = options.maxDepth ?? 1;
+    this.maxAgents = options.maxAgents ?? 15;
+    this.maxDepth = options.maxDepth ?? 2;
     this.maxConcurrent = options.maxConcurrent ?? 4;
     this.worktrees = options.worktrees ?? false;
     this.onRootEvent = options.onRootEvent;
