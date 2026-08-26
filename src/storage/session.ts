@@ -11,6 +11,12 @@ export interface SessionMeta {
   formatVersion: number;
 }
 
+/** 会话列表项：元数据 + 消息文件大小（运行时补充，不落盘；/session 面板副行展示用） */
+export interface SessionListItem extends SessionMeta {
+  /** 消息 JSONL 文件大小（字节）；文件缺失为 0 */
+  sizeBytes: number;
+}
+
 /** 会话：元数据 + 内存消息列表（JSONL 是持久化副本，此处为运行时镜像） */
 export class Session {
   readonly meta: SessionMeta;

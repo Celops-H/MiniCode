@@ -1,9 +1,9 @@
-import { readFile, writeFile, readdir, mkdir, rename, rm } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, rename, rm, stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message } from "../core/index.js";
 import { appendJsonlBatch, readJsonl } from "./jsonl.js";
-import { Session, type SessionMeta } from "./session.js";
+import { Session, type SessionMeta, type SessionListItem } from "./session.js";
 
 /**
  * 会话存储：消息以 JSONL 一行一条落盘（唯一数据源），元数据独立成文件便于索引。
@@ -127,24 +127,32 @@ export class SessionStore {
   }
 
   /**
-   * 列出全部会话元数据。
-   * @returns 会话元数据数组，按更新时间倒序
+   * 列出全部会话元数据（附每会话消息文件大小，/session 面板副行展示用）。
+   * @returns 会话列表项数组，按更新时间倒序
    */
-  async listSessions(): Promise<SessionMeta[]> {
+  async listSessions(): Promise<SessionListItem[]> {
     let files: string[];
     try {
       files = await readdir(this.dir);
     } catch {
       return [];
     }
-    const metas: SessionMeta[] = [];
+    const items: SessionListItem[] = [];
     for (const file of files) {
       if (file.endsWith(".meta.json")) {
+        const id = file.slice(0, -".meta.json".length);
         const raw = await readFile(path.join(this.dir, file), "utf8");
-        metas.push(JSON.parse(raw) as SessionMeta);
+        const meta = JSON.parse(raw) as SessionMeta;
+        let sizeBytes = 0;
+        try {
+          sizeBytes = (await stat(this.messageFile(id))).size;
+        } catch {
+          // 消息文件缺失（异常会话）：大小按 0 计，列表仍正常展示
+        }
+        items.push({ ...meta, sizeBytes });
       }
     }
-    return metas.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   /**

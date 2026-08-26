@@ -79,6 +79,19 @@ describe("会话持久化与续跑", () => {
     expect(list.map((m) => m.id)).toEqual([a.meta.id, b.meta.id]);
   });
 
+  it("listSessions 附每会话消息文件大小：空会话 0、有消息 >0", async () => {
+    const store = setup();
+    const empty = await store.createSession({ model: "m" }); // 无 jsonl，大小 0
+    const a = await store.createSession({ model: "m" });
+    await store.appendMessage(a, userMessage("一行消息"));
+    await store.flush();
+
+    const list = await store.listSessions();
+    const byId = new Map(list.map((m) => [m.id, m]));
+    expect(byId.get(a.meta.id)?.sizeBytes).toBeGreaterThan(0);
+    expect(byId.get(empty.meta.id)?.sizeBytes).toBe(0);
+  });
+
   it("deleteSession：删除消息与元数据文件，列表不再包含该会话", async () => {
     const store = setup();
     const a = await store.createSession({ model: "m" });
