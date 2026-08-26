@@ -1,7 +1,9 @@
 /**
- * 嵌入弹块（R4 + 收尾打磨批 ⑪）：权限确认 / 会话切换面板。
- * state.modal 由 loop 的 approver（权限请求）与 /session 命令写入；组件只读呈现。
+ * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P5 C 组统一黑白）：权限确认 / 会话面板 / /connect / /model。
+ * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
  * 框线风格与消息区工具卡一体：rounded 边框 + 边框内标题，分区（标题/参数/选项/键位提示）。
+ * C 组统一：弹窗整体黑白灰阶（边框/标题/高亮去彩），错误/API error 文本才用红色（严重语义）；
+ * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）。
  * 键位：权限三决策 1/2/3 或 ←→ 选择 Enter 确认 Esc 拒绝；会话列表 ↑↓ 选择 Enter 切换 Esc 取消。
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
  * 非 each 依赖的标量刷新），改用 createMemo 直接读 selected 重算——高亮随 ←→ 移动。
@@ -14,15 +16,21 @@ import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
 import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "./fit.js";
 
-/** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项高亮 chip，随 ←→ 移动） */
+/** 弹窗内层 box 固定宽度：终端宽 - 四周余量（C-2 固定大小，不随内容自适应抖动） */
+function modalWidth(dims: { width?: number }): number {
+  return Math.max(30, (dims.width ?? 80) - 6);
+}
+
+/** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项灰阶 chip，随 ←→ 移动） */
 function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission" }> }): JSX.Element {
   const b = props.modal;
+  const dims = useTerminalDimensions();
   // 选项行：memo 读 b.selected 重算（For+条件在此渲染器下不刷新标量，见文件头注释）
   const optionLine = createMemo(() =>
     PERMISSION_OPTIONS.map((opt, i) => {
       const sel = b.selected === i;
       return sel ? (
-        <span style={{ bg: theme.foregroundAccent, fg: theme.text }}>
+        <span style={{ bg: theme.backgroundRaised, fg: theme.text }}>
           [{opt.key}] {opt.label} ◀
         </span>
       ) : (
@@ -32,10 +40,10 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.warning} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        title="⚠ 权限确认" titleColor={theme.warning}>
+      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+        width={modalWidth(dims())} title="权限确认" titleColor={theme.textMuted}>
         <text paddingX={1} paddingY={1}>
-          工具 <span style={{ fg: theme.foregroundAccent }}>{b.toolName}</span>
+          工具 <span style={{ fg: theme.text }}>{b.toolName}</span>
           {b.content ? ` · ${b.content}` : ""}
         </text>
         {b.argsText ? (
@@ -54,51 +62,53 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板（P4-3 全屏化）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
- *  左对齐布局、每会话两行——主行「哈希 标题 模型」三列各自对齐（列宽截断不顶开模型），
- *  副行「最近活跃 xx ago · 消息文件大小 N KB」；条目间空一行加大间距；
+/** 会话切换面板（P4-3 全屏化 + P5 C-3/4/5/6）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
+ *  四周留边距、标题与列表间空行分隔；每会话两行——主行「哈希 标题 模型」三列各自定宽对齐、
+ *  列间距固定（C-4/72），副行缩进对齐标题列；条目间空行加大间距（C-5）；
  *  当前活跃会话不在列表（loop 已过滤）；选中行操作态进入/删除 ←→ 切换（P4-2）。
- *  列表超视口窗口渲染：选中项滚动入视野、越界贴边 clamp。 */
+ *  滚动：选中项落在页底、到本页最后一个再按 ↓ 才滚下一页（C-6）。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
-  // 列表区可用高度：标题 2 + 提示 3 + 底部余量 1；选中项居中滚动、越界贴边
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    const avail = Math.max(6, (dims().height ?? 20) - 7);
-    // 每条占 2 行（主+副）+ 条目间 1 行空：可见条数按实际总行数预算
-    const perRow = 3; // 主行 + 副行 + 间距
+    // 列表区可用高度：标题(1) + 标题下空行(1) + 提示(1) + 底部余量(1)
+    const avail = Math.max(8, (dims().height ?? 20) - 7);
+    // 每条占 3 行：主行 + 副行 + 条目间空行
+    const perRow = 3;
     const sessRows = Math.max(1, Math.min(total, Math.floor(avail / perRow)));
-    const start = Math.max(0, Math.min(b.selected - Math.floor((sessRows - 1) / 2), total - sessRows));
+    // 滚动（C-6）：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）
+    const start = Math.max(0, Math.min(b.selected - (sessRows - 1), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
-    // 三列宽度：终端宽内分配——模型列随内容自适应（最长不超 26），标题吃中间剩余预算
-    const termW = Math.max(30, (dims().width ?? 80) - 4);
-    const idCols = 6; // 哈希显示固定 6 位
-    const PREFIX_COLS = 2 + idCols + 3; // ▸/空格(2) + id + 「 · 」(3)
-    const modelCol = Math.min(26, Math.max(8, ...visible.map((s) => colWidth(s.model) + 2)));
-    const titleBudget = Math.max(2, termW - modelCol - PREFIX_COLS - 10); // 预留操作态 10 列
+    // 三列定宽（C-4/72）：哈希固定 6、标题/模型按可见内容取最大（截断上限防顶开），列间距固定
+    const idCols = 6;
+    const titleCols = Math.min(30, Math.max(4, ...visible.map((s) => colWidth(s.title || "新会话"))));
+    const modelCols = Math.min(22, Math.max(4, ...visible.map((s) => colWidth(s.model))));
+    const GAP = 3; // 列间空格
     const items: JSX.Element[] = [];
     visible.forEach((s, i) => {
       const sel = start + i === b.selected;
-      const idCell = s.id.slice(-idCols);
-      const title = fitWidth(s.title || "新会话", titleBudget);
+      const idCell = padCols(s.id.slice(-idCols), idCols);
+      const title = padCols(fitWidth(s.title || "新会话", titleCols), titleCols);
+      const model = fitWidth(s.model, modelCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
-      // 主行：哈希 / 标题 / 模型三列各自对齐（padCols 补齐定宽列，长内容截断不顶开后续列）
       items.push(
-        <text paddingLeft={1} paddingTop={i === 0 ? 0 : 1} fg={sel ? (b.action === "delete" ? theme.error : theme.foregroundAccent) : theme.text}>
-          {`${sel ? "▸ " : "  "}${padCols(idCell, idCols)} · ${padCols(title, titleBudget)}${fitWidth(s.model, modelCol)}${actionTag}`}
-        </text>,
+        <box flexDirection="column">
+          <text paddingLeft={2} fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
+            {`${sel ? "▸ " : "  "}${idCell}${" ".repeat(GAP)}${title}${" ".repeat(GAP)}${model}${actionTag}`}
+          </text>
+          <text paddingLeft={2 + idCols + GAP} fg={theme.textMuted}>
+            {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
+          </text>
+        </box>,
       );
-      items.push(
-        <text paddingLeft={3} fg={theme.textMuted}>
-          {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
-        </text>,
-      );
+      // 条目间空行（最后一条后不加，避免底部多余空隙）
+      if (i < visible.length - 1) items.push(<text> </text>);
     });
     const newSel = b.selected === total;
     items.push(
       newSel ? (
-        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+        <text paddingX={1} paddingTop={1} fg={theme.text}>
           ▸ ── 新建会话 ──
         </text>
       ) : (
@@ -116,13 +126,12 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     return items;
   });
   return (
-    <box flexDirection="column" flexGrow={1} flexShrink={0} backgroundColor={theme.background}>
+    <box flexDirection="column" flexGrow={1} flexShrink={0} backgroundColor={theme.background} paddingX={2} paddingY={1}>
       <box flexDirection="row">
-        <text fg={theme.foregroundAccent} paddingLeft={1}>
-          会话列表
-        </text>
+        <text fg={theme.text}>会话列表</text>
         <text fg={theme.textMuted}>（{b.sessions.length} 个其它会话，Esc 返回当前会话）</text>
       </box>
+      <text> </text>
       {rows()}
     </box>
   );
@@ -145,16 +154,16 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
     if (b.kind === "connect-key") {
       const display = b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）";
       return [
-        <text paddingX={1} paddingY={1} fg={theme.success}>
+        <text paddingX={1} paddingY={1} fg={theme.textMuted}>
           输入 API Key · {b.providerName}
         </text>,
         <text paddingX={1}>
           默认模型 {b.defaultModel} · {b.apiKeyEnv}：
         </text>,
-        <text paddingX={2} fg={theme.foregroundAccent}>
+        <text paddingX={2} fg={theme.text}>
           {display}
           {/* 竖线光标（P4-5）：key 输入位置细竖线指示，明灭闪烁 */}
-          <span style={{ fg: cursorOn() ? theme.foregroundAccent : theme.background }}>│</span>
+          <span style={{ fg: cursorOn() ? theme.text : theme.background }}>│</span>
         </text>,
         <text fg={theme.textMuted} paddingX={1} paddingY={1}>
           Enter 确认连接 · Backspace 删除 · Esc 取消
@@ -167,18 +176,19 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
     const visible = Math.max(1, Math.min(total, avail - 6));
     const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
     const items = [
-      <text paddingX={1} paddingY={1} fg={theme.success}>
+      <text paddingX={1} paddingY={1} fg={theme.textMuted}>
         连接供应商
       </text>,
+      // 供应商名只显名称、不附默认模型（C-7=62）
       ...b.providers.slice(start, start + visible).map((p, i) =>
         start + i === b.selected ? (
-          <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
-            ▸ {p.name}（{p.defaultModel}）
+          <text paddingX={1} paddingTop={1} fg={theme.text}>
+            ▸ {fitWidth(p.name, modalWidth(dims()) - 6)}
           </text>
         ) : (
-          <text paddingX={1} paddingTop={1} fg={theme.text}>
+          <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
             {"  "}
-            {p.name}（{p.defaultModel}）
+            {fitWidth(p.name, modalWidth(dims()) - 6)}
           </text>
         ),
       ),
@@ -193,7 +203,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}>
+      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel} width={modalWidth(dims())}>
         {rows()}
       </box>
     </box>
@@ -230,7 +240,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
           ● {d.name}
         </text>
       ) : (
-        <text paddingX={1} fg={d.index === b.selected ? theme.foregroundAccent : theme.text}>
+        <text paddingX={1} fg={theme.text}>
           {"    "}
           {d.index === b.selected ? `▸ ${b.models[d.index]!.id}` : `  ${b.models[d.index]!.id}`}
         </text>
@@ -254,8 +264,8 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        title="选择模型" titleColor={theme.foregroundAccent}>
+      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+        width={modalWidth(dims())} title="选择模型" titleColor={theme.textMuted}>
         {rows()}
       </box>
     </box>

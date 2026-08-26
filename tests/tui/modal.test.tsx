@@ -28,6 +28,28 @@ it("权限弹块：工具名/参数/三决策与选中高亮", async () => {
   expect(frame).toContain("◀");
   // 框线（视觉分隔体系：权限弹窗 rounded 边框 + 边框内标题）
   expect(frame).toContain("╭");
+  // C-1=50 黑白化：标题去 ⚠ 符号（红色警示符不再用于弹窗美化）
+  expect(frame).not.toContain("⚠");
+});
+
+it("connect 供应商列表：只显供应商名、不附默认模型（C-7=62）", async () => {
+  const modal: ModalState = {
+    kind: "connect",
+    providers: [
+      { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" },
+      { id: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("连接供应商");
+  expect(frame).toContain("DeepSeek");
+  expect(frame).toContain("OpenAI");
+  // 不附默认模型名（用户定论：供应商列表只需名称）
+  expect(frame).not.toContain("deepseek-chat");
+  expect(frame).not.toContain("gpt-4o");
 });
 
 it("高亮随 selected 挪动（◀ 跟着选中项走）——For+条件曾在此渲染器下不刷新标量的回归", async () => {

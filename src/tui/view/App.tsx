@@ -68,13 +68,19 @@ export function App(props: AppProps): JSX.Element {
           onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
         />
       </Show>
-      {/* toast 全屏页同样显示（P4-2 删除会话等操作反馈发生在面板打开期间，吞掉用户就看不到） */}
-      {props.state.toast ? (
+      {/* toast：非全屏页在 Modal 之前（操作反馈在弹窗上方）；全屏会话页移到底部（Modal 之后），
+          不挤开「会话列表」标题行（C-3=58） */}
+      <Show when={!fullscreen() && props.state.toast}>
         <box flexShrink={0} paddingX={1}>
-          <text fg={theme.textMuted}>{props.state.toast.text}</text>
+          <text fg={theme.textMuted}>{props.state.toast?.text}</text>
         </box>
-      ) : null}
+      </Show>
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
+      <Show when={fullscreen() && props.state.toast}>
+        <box flexShrink={0} paddingX={1} paddingBottom={1}>
+          <text fg={theme.textMuted}>{props.state.toast?.text}</text>
+        </box>
+      </Show>
       <Show when={!fullscreen()}>
         <PromptView
           prompt={props.state.prompt}
