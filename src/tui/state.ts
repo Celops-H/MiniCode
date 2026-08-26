@@ -687,6 +687,18 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       const prompt = deleteForward(state.prompt);
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
+    case "delete-line": {
+      const prompt = deleteLine(state.prompt);
+      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
+    }
+    case "delete-to-end": {
+      const prompt = deleteToEnd(state.prompt);
+      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
+    }
+    case "delete-word": {
+      const prompt = deleteWord(state.prompt);
+      return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
+    }
     case "cursor": {
       return { ...state, prompt: moveCursor(state.prompt, action.dir) };
     }
@@ -832,11 +844,15 @@ function deleteForward(prompt: PromptState): PromptState {
   return { ...prompt, lines };
 }
 
-/** 光标移动（跨行时保持目标列到行末截断） */
-function moveCursor(prompt: PromptState, dir: "left" | "right" | "up" | "down"): PromptState {
+/** 光标移动（跨行时保持目标列到行末截断）；start/end = 行首/行尾（Ctrl+A/E） */
+function moveCursor(prompt: PromptState, dir: "left" | "right" | "up" | "down" | "start" | "end"): PromptState {
   const line = prompt.lines[prompt.curLine] ?? "";
   const colCount = Array.from(line).length;
   switch (dir) {
+    case "start":
+      return { ...prompt, curCol: 0 };
+    case "end":
+      return { ...prompt, curCol: colCount };
     case "left": {
       if (prompt.curCol > 0) return { ...prompt, curCol: prompt.curCol - 1 };
       if (prompt.curLine === 0) return prompt;
@@ -858,4 +874,35 @@ function moveCursor(prompt: PromptState, dir: "left" | "right" | "up" | "down"):
       const next = prompt.lines[prompt.curLine + 1] ?? "";
       return { ...prompt, curLine: prompt.curLine + 1, curCol: Math.min(prompt.curCol, Array.from(next).length) };
   }
+}
+
+/** 删到行尾：光标后整段清除（Ctrl+K，光标不动） */
+function deleteToEnd(prompt: PromptState): PromptState {
+  const line = prompt.lines[prompt.curLine] ?? "";
+  const chars = Array.from(line);
+  const before = chars.slice(0, prompt.curCol).join("");
+  const lines = [...prompt.lines];
+  lines[prompt.curLine] = before;
+  return { ...prompt, lines };
+}
+
+/** 删整行：清空当前行、光标回行首（Ctrl+U） */
+function deleteLine(prompt: PromptState): PromptState {
+  const lines = [...prompt.lines];
+  lines[prompt.curLine] = "";
+  return { ...prompt, lines, curCol: 0 };
+}
+
+/** 删前词：先退过连续空格，再退过连续非空格（Ctrl+W；行首无词则不动） */
+function deleteWord(prompt: PromptState): PromptState {
+  const line = prompt.lines[prompt.curLine] ?? "";
+  const chars = Array.from(line);
+  let col = prompt.curCol;
+  while (col > 0 && chars[col - 1] === " ") col--;
+  while (col > 0 && chars[col - 1] !== " ") col--;
+  const before = chars.slice(0, col).join("");
+  const after = chars.slice(prompt.curCol).join("");
+  const lines = [...prompt.lines];
+  lines[prompt.curLine] = before + after;
+  return { ...prompt, lines, curCol: col };
 }

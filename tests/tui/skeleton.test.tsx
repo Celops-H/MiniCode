@@ -119,6 +119,36 @@ it("Ctrl+J 换行（主流编辑习惯），映射到软换行 newline", () => {
   expect(opentuiKeyToKey({ name: "\r" })).toEqual({ kind: "enter" });
 });
 
+it("输入编辑键 Ctrl+A/E/U/K/W 从 opentui 键映射到结构键（普通字母不受影响）", () => {
+  expect(opentuiKeyToKey({ name: "a", ctrl: true })).toEqual({ kind: "ctrl-a" });
+  expect(opentuiKeyToKey({ name: "e", ctrl: true })).toEqual({ kind: "ctrl-e" });
+  expect(opentuiKeyToKey({ name: "u", ctrl: true })).toEqual({ kind: "ctrl-u" });
+  expect(opentuiKeyToKey({ name: "k", ctrl: true })).toEqual({ kind: "ctrl-k" });
+  expect(opentuiKeyToKey({ name: "w", ctrl: true })).toEqual({ kind: "ctrl-w" });
+  expect(opentuiKeyToKey({ name: "a" })).toEqual({ kind: "char", char: "a" });
+});
+
+it("输入编辑键落地 reducer：Ctrl+A/E 行首尾、U 清行、K 删到行尾、W 删前词", () => {
+  const typed = reduceAction(reduceAction(initState([]), { type: "input", text: "hello world" }), { type: "input", text: "!" });
+  let s = reduceAction(typed, { type: "cursor", dir: "start" });
+  expect(s.prompt.curCol).toBe(0);
+  s = reduceAction(s, { type: "cursor", dir: "end" });
+  expect(s.prompt.curCol).toBe(12);
+  // Ctrl+W 删前词：光标在 "hello world!" 末尾 → 删 "world!" 词（词前空格保留）→ "hello "
+  s = reduceAction(s, { type: "delete-word" });
+  expect(s.prompt.lines[0]).toBe("hello ");
+  // Ctrl+U 清整行
+  s = reduceAction(s, { type: "delete-line" });
+  expect(s.prompt.lines[0]).toBe("");
+  // Ctrl+K 删到行尾：光标放 "ab|cdef" 的 c 后
+  s = reduceAction(s, { type: "input", text: "abcdef" });
+  s = reduceAction(s, { type: "cursor", dir: "start" });
+  s = reduceAction(s, { type: "cursor", dir: "right" });
+  s = reduceAction(s, { type: "cursor", dir: "right" });
+  s = reduceAction(s, { type: "delete-to-end" });
+  expect(s.prompt.lines[0]).toBe("ab");
+});
+
 it("channel.onAction 走 store 整树替换（不依赖渲染）", () => {
   const channel = createChannel([]);
   channel.onAction({ type: "input", text: "hi" });

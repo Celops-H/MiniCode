@@ -15,6 +15,14 @@ it("normal 态：字符→input、回车→send、Esc→esc、Ctrl+C→noop（�
   expect(mapKey({ kind: "pageup" })).toEqual({ type: "scroll", dir: 1 });
 });
 
+it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删前词", () => {
+  expect(mapKey({ kind: "ctrl-a" })).toEqual({ type: "cursor", dir: "start" });
+  expect(mapKey({ kind: "ctrl-e" })).toEqual({ type: "cursor", dir: "end" });
+  expect(mapKey({ kind: "ctrl-u" })).toEqual({ type: "delete-line" });
+  expect(mapKey({ kind: "ctrl-k" })).toEqual({ type: "delete-to-end" });
+  expect(mapKey({ kind: "ctrl-w" })).toEqual({ type: "delete-word" });
+});
+
 it("modal 态：1/2/3→权限决策、Esc→取消、Ctrl+C 弃用、Ctrl+D 保留退出", () => {
   const m = { popup: "modal" as const };
   expect(mapKey({ kind: "char", char: "1" }, m)).toEqual({ type: "permission", decision: "allow" });

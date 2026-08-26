@@ -21,5 +21,11 @@ export type Key =
   | { kind: "end" }
   | { kind: "ctrl-c" }
   | { kind: "ctrl-d" }
+  /** 输入编辑键（emacs 系习惯）：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删前词 */
+  | { kind: "ctrl-a" }
+  | { kind: "ctrl-e" }
+  | { kind: "ctrl-u" }
+  | { kind: "ctrl-k" }
+  | { kind: "ctrl-w" }
   /** 不支持的转义序列（鼠标、组合键等），消费掉但不产生键 */
   | { kind: "ignore" };

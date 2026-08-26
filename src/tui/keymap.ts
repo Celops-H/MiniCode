@@ -12,7 +12,10 @@ export type TuiAction =
   | { type: "send" }
   | { type: "clear-input" }
   | { type: "newline" }
-  | { type: "cursor"; dir: "left" | "right" | "up" | "down" }
+  | { type: "cursor"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
+  | { type: "delete-line" }
+  | { type: "delete-to-end" }
+  | { type: "delete-word" }
   | { type: "history"; dir: -1 | 1 }
   | { type: "scroll"; dir: 1 | -1 }
   | { type: "scroll-end" }
@@ -98,6 +101,16 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       return { type: "noop" };
     case "ctrl-d":
       return { type: "exit" };
+    case "ctrl-a":
+      return { type: "cursor", dir: "start" };
+    case "ctrl-e":
+      return { type: "cursor", dir: "end" };
+    case "ctrl-u":
+      return { type: "delete-line" };
+    case "ctrl-k":
+      return { type: "delete-to-end" };
+    case "ctrl-w":
+      return { type: "delete-word" };
     case "esc":
       // 运行中打断；空闲时连按两次退出（loop 层处理状态与计时）
       return { type: "esc" };
