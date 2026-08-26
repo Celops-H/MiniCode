@@ -319,8 +319,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       ...state,
       modal: {
         kind: "session",
-        sessions: sessions.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
+        // 当前活跃会话不展示（列表=切换其它会话用，P4-2：删除只作用于其它会话，避免误删本会话）
+        sessions: sessions
+          .filter((s) => s.id !== session.meta.id)
+          .map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
         selected: 0,
+        action: "enter",
       },
     });
   };
@@ -401,13 +405,36 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
               showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
             }
           } else {
-            // /session 会话面板：选中切换目标后退出循环由装配层重建
+            // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表
             const targetIndex = state.modal.selected;
-            pendingSwitch =
-              targetIndex < state.modal.sessions.length
-                ? state.modal.sessions[targetIndex]!.id
-                : NEW_SESSION_ID;
-            exitLoop();
+            if (state.modal.action === "delete" && targetIndex < state.modal.sessions.length) {
+              const targetId = state.modal.sessions[targetIndex]!.id;
+              void (async () => {
+                try {
+                  await store.deleteSession(targetId);
+                  const sessions = await store.listSessions();
+                  const remaining = sessions.filter((s) => s.id !== session.meta.id);
+                  commit({
+                    ...state,
+                    modal: {
+                      kind: "session",
+                      sessions: remaining.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
+                      selected: Math.min(targetIndex, remaining.length),
+                      action: "enter",
+                    },
+                  });
+                  showToast("会话已删除");
+                } catch {
+                  showToast("删除会话失败");
+                }
+              })();
+            } else {
+              pendingSwitch =
+                targetIndex < state.modal.sessions.length
+                  ? state.modal.sessions[targetIndex]!.id
+                  : NEW_SESSION_ID;
+              exitLoop();
+            }
           }
           return;
         }
@@ -439,10 +466,24 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
             return;
           } else {
             const max = state.modal.sessions.length;
-            commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
+            // 移动选中行时操作态重置为「进入」（删除是瞬态选择，换行后默认进入）
+            commit({
+              ...state,
+              modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)), action: "enter" },
+            });
           }
         } else {
           commit(reduceAction(state, action));
+        }
+        return;
+      }
+      case "session-action-toggle": {
+        // /session 面板 ←→：切换当前行操作态（进入 ↔ 删除）
+        if (state.modal?.kind === "session") {
+          commit({
+            ...state,
+            modal: { ...state.modal, action: state.modal.action === "enter" ? "delete" : "enter" },
+          });
         }
         return;
       }

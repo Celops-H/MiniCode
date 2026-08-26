@@ -22,6 +22,8 @@ export type TuiAction =
   | { type: "complete" }
   | { type: "modal-nav"; dir: 1 | -1 }
   | { type: "modal-confirm" }
+  /** /session 面板切换当前行的操作态：进入 ↔ 删除（←→ 触发，P4-2） */
+  | { type: "session-action-toggle" }
   /** /model 弹窗左右调整思考等级 */
   | { type: "thinking-adjust"; dir: 1 | -1 }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
@@ -156,6 +158,27 @@ function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiActio
       case "left":
       case "right":
         return { type: "thinking-adjust", dir: key.kind === "left" ? -1 : 1 };
+      case "enter":
+        return { type: "modal-confirm" };
+      case "esc":
+        return { type: "cancel" };
+      case "ctrl-c":
+        return { type: "noop" };
+      case "ctrl-d":
+        return { type: "exit" };
+      default:
+        return { type: "noop" };
+    }
+  }
+  if (modalKind === "session") {
+    switch (key.kind) {
+      case "up":
+      case "down":
+        return { type: "modal-nav", dir: key.kind === "up" ? -1 : 1 };
+      case "left":
+      case "right":
+        // 左右切当前行操作态：进入 ↔ 删除（P4-2；模型弹窗 ←→ 是思考等级，这里不冲突）
+        return { type: "session-action-toggle" };
       case "enter":
         return { type: "modal-confirm" };
       case "esc":

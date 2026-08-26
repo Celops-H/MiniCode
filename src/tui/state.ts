@@ -105,12 +105,15 @@ export interface PermissionModalState {
   selected: number;
 }
 
-/** 会话切换面板：最近会话列表 + 新建入口（选中项 = 下标，新建占末位） */
+/** 会话切换面板：最近会话列表 + 新建入口（选中项 = 下标，新建占末位）；
+ *  当前活跃会话不展示（列表=切换其它会话，P4-2 防误删本会话）；选中行动作态 ←→ 切换 */
 export interface SessionModalState {
   kind: "session";
   /** 会话列表（title 随 /rename 更新：listSessions 每次重读磁盘 meta，面板显示改名即时生效） */
   sessions: Array<{ id: string; title: string; model: string; updatedAt: string }>;
   selected: number;
+  /** 当前选中行的操作态：进入（缺省/默认）或删除（一步删除，P4-2；←→ 切换） */
+  action?: "enter" | "delete";
 }
 
 /** /connect 供应商选择弹窗：可选供应商列表（选中后留在弹窗进入 key 输入态，见 connect-key） */
@@ -813,6 +816,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "esc":
     case "mode-cycle":
     case "thinking-adjust":
+    case "session-action-toggle":
     case "noop":
       return state;
   }

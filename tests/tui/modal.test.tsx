@@ -64,6 +64,21 @@ it("会话面板：列表/新建入口/键位提示", async () => {
   expect(frame).toContain("新建会话");
 });
 
+it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换 P4-2）", async () => {
+  const sessions = [{ id: "ab3f90", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: "now" }];
+  const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 0, action: "enter" });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  await setup.waitForVisualIdle();
+  // 进入态：选中行尾显示 ◀ 进入
+  expect(setup.captureCharFrame()).toContain("◀ 进入");
+  // ←→ 切删除态：行尾显示 ✕ 删除、键位提示同步
+  setModal({ kind: "session", sessions, selected: 0, action: "delete" });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("✕ 删除");
+  expect(frame).toContain("←→ 进入/删除");
+});
+
 it("会话面板等宽卡片居中：不铺满全宽、左右留白对称，下边界框线可见", async () => {
   const modal: ModalState = {
     kind: "session",

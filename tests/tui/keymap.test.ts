@@ -51,6 +51,17 @@ it("candidate 态：回车→modal-confirm（执行选中命令）、Tab→compl
   expect(mapKey({ kind: "up" }, c)).toEqual({ type: "modal-nav", dir: -1 });
 });
 
+it("session 弹窗：↑↓ 选行、←→ 切进入/删除、Enter 确定、Esc 取消", () => {
+  const m = { popup: "modal" as const, modalKind: "session" as const };
+  expect(mapKey({ kind: "up" }, m)).toEqual({ type: "modal-nav", dir: -1 });
+  expect(mapKey({ kind: "down" }, m)).toEqual({ type: "modal-nav", dir: 1 });
+  expect(mapKey({ kind: "left" }, m)).toEqual({ type: "session-action-toggle" });
+  expect(mapKey({ kind: "right" }, m)).toEqual({ type: "session-action-toggle" });
+  expect(mapKey({ kind: "enter" }, m)).toEqual({ type: "modal-confirm" });
+  expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
+  expect(mapKey({ kind: "ctrl-d" }, m)).toEqual({ type: "exit" });
+});
+
 it("model 弹窗：↑↓ 选模型、←→ 调思考等级、Enter 应用", () => {
   const m = { popup: "modal" as const, modalKind: "model" as const };
   expect(mapKey({ kind: "up" }, m)).toEqual({ type: "modal-nav", dir: -1 });

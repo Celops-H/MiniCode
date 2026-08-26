@@ -80,11 +80,15 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       // 固定列：▸(2) + id6(6) + 分隔 · (3) × 2 = 14；模型预算随卡宽自适应（窄卡多截模型、保整行 1 行）
       const modelMaxCols = Math.min(18, Math.max(3, usable - 17)); // 14 固定 + 标题下限 3
       const model = fitWidth(s.model, modelMaxCols);
-      const title = fitWidth(s.title || "新会话", Math.max(2, usable - 14 - colWidth(model)));
+      // title 预算预留选中行尾的操作态指示（「  ◀ 进入」/「  ✕ 删除」约 5 列），选中行不溢出
+      const title = fitWidth(s.title || "新会话", Math.max(2, usable - 14 - colWidth(model) - 5));
       const line = `${s.id.slice(-6)} · ${title} · ${model}`;
+      // 选中行尾追加当前操作态：进入（默认）/ 删除（←→ 切换，红色提示危险）
+      const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       return sel ? (
-        <text paddingX={1} fg={theme.foregroundAccent}>
+        <text paddingX={1} fg={b.action === "delete" ? theme.error : theme.foregroundAccent}>
           ▸ {line}
+          {actionTag}
         </text>
       ) : (
         <text paddingX={1} fg={theme.text}>
@@ -108,7 +112,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     const overflow = total > sessRows ? `（${start + 1}-${Math.min(start + sessRows, total)}/${total}）` : "";
     items.push(
       <text fg={theme.textMuted} paddingX={1} paddingY={1}>
-        ↑↓ 选择 · Enter 切换/新建 · Esc 取消{overflow}
+        ↑↓ 选择 · ←→ 进入/删除 · Enter 确定 · Esc 取消{overflow}
       </text>,
     );
     return items;
