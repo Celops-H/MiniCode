@@ -28,11 +28,12 @@ it("仅 main（无子 agent）不显示底栏——main 只多 agent 启用时�
   expect(setup.captureCharFrame()).not.toContain("main");
 });
 
-it("子 agent 运行中显示 ( ) 名称，main() 在首行", async () => {
+it("子 agent 运行中显示 ( ) 名称，main 在首行不带括号", async () => {
   const setup = await render([running("/root"), running("/root/task_1")]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("● main()");
+  expect(frame).toContain("● main");
+  expect(frame).not.toContain("main()");
   expect(frame).toContain("( ) task_1");
 });
 
@@ -61,13 +62,13 @@ it("完成父被剪（超 10s）时运行中的子 agent 重挂最近存活祖�
   ]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("● main()");
+  expect(frame).toContain("● main");
   expect(frame).toContain("( ) sub"); // 运行中子仍显示
   expect(frame).not.toContain("task_1"); // 完成父消失
-  // sub 重挂为 main 直接子级（唯一子级 → └ 连接线对齐 main 括号列）
-  const mainLine = frame.split("\n").find((l) => l.includes("● main()")) ?? "";
+  // sub 重挂为 main 直接子级（唯一子级 → └ 连接线对齐 main 圆点列）
+  const mainLine = frame.split("\n").find((l) => l.includes("● main")) ?? "";
   const sub = frame.split("\n").find((l) => l.includes("( ) sub")) ?? "";
-  expect(sub.indexOf("└")).toBe(mainLine.indexOf("("));
+  expect(sub.indexOf("└")).toBe(mainLine.indexOf("●"));
 });
 
 it("中断 (×) 名称 显示且 10s 后消失", async () => {
@@ -84,7 +85,7 @@ it("中断 (×) 名称 显示且 10s 后消失", async () => {
   expect(setup2.captureCharFrame()).not.toContain("task_2");
 });
 
-it("树线对齐父括号中心列：├─/└─ 放 main 括号列、子层 │ 对齐父 ( ) 括号中心", async () => {
+it("树线对齐父圆点/括号中心列：├─/└─ 放 main 圆点列、子层 │ 对齐父 ( ) 括号中心", async () => {
   const t = Date.now();
   const setup = await render([
     running("/root"),
@@ -95,18 +96,18 @@ it("树线对齐父括号中心列：├─/└─ 放 main 括号列、子层 �
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   const lines = frame.split("\n");
-  const mainLine = lines.find((l) => l.includes("● main()")) ?? "";
+  const mainLine = lines.find((l) => l.includes("● main")) ?? "";
   const t1 = lines.find((l) => l.includes("( ) task_1")) ?? "";
   const t2 = lines.find((l) => l.includes("(√) task_2")) ?? "";
   const sub = lines.find((l) => l.includes("(√) sub")) ?? "";
-  // main 括号列（● main() 的 `(`，AgentStrip paddingX=1 后实际列）
-  const mainParenCol = mainLine.indexOf("(");
-  // 子行连接线 ├─/└─ 放 main 括号列（层级竖线对齐父括号中心列）
-  expect(t1.indexOf("├")).toBe(mainParenCol);
-  expect(t2.indexOf("└")).toBe(mainParenCol);
+  // main 圆点列（● main 的 ●，AgentStrip paddingX=1 后实际列）
+  const mainDotCol = mainLine.indexOf("●");
+  // 子行连接线 ├─/└─ 放 main 圆点列（main 无括号，层级竖线对齐父圆点）
+  expect(t1.indexOf("├")).toBe(mainDotCol);
+  expect(t2.indexOf("└")).toBe(mainDotCol);
   // task_1 括号中心列 = ( ) 中间空格列
   const t1Center = t1.indexOf("(") + 1;
-  // sub 行：│ 在 main 括号列（main 还有 task_2 兄弟）、└ 在 task_1 括号中心列
-  expect(sub[mainParenCol]).toBe("│");
+  // sub 行：│ 在 main 圆点列（main 还有 task_2 兄弟）、└ 在 task_1 括号中心列
+  expect(sub[mainDotCol]).toBe("│");
   expect(sub.indexOf("└")).toBe(t1Center);
 });

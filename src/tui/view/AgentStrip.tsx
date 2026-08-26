@@ -1,7 +1,8 @@
 /**
- * 底栏 agent 树（P1-5 定稿）：`● main()` 仅多 agent 启用（存在子 agent）时显示；
+ * 底栏 agent 树（P1-5 定稿 + 用户复核）：`● main` 仅多 agent 启用（存在子 agent）时显示；
  * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`（中断 `(×)`），完成/中断 10s 后从树消失；
- * 层级树线 `├─`/`└─`/`│`，各层竖线对齐父 `( )`/`(√)`/`main()` 括号中心列；main 首行、子 agent 次行紧凑。
+ * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)` 括号中心列；
+ * main 首行、子 agent 次行紧凑。
  * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。完成条目消失由本组件定时器过滤（state 保留，
  * 长会话内存由 blocks 消息承担，树只读当前活动子集）。
  */
@@ -32,9 +33,10 @@ function durText(ms: number | null): string {
   return sec < 1 ? "<1s" : `${Math.round(sec)}s`;
 }
 
-/** 单条内容：main=`● main()`；子 agent=`( ) 名` / `(√) 名 耗时` / `(×) 名` */
+/** 单条内容：main=`● main`（无状态括号——括号是子 agent 状态占位，main 恒运行）；
+ *  子 agent=`( ) 名` / `(√) 名 耗时` / `(×) 名` */
 function agentContent(a: AgentNode): string {
-  if (a.path === "/root") return "● main()";
+  if (a.path === "/root") return "● main";
   const name = agentName(a.path);
   if (a.status === "completed") {
     // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
@@ -45,15 +47,15 @@ function agentContent(a: AgentNode): string {
   return `( ) ${name}`;
 }
 
-/** 内容里括号中心列偏移：`( ) 名`/`(√) 名` → 括号中间空格列（起点+1）；`● main()` → `(` 列（无中间空格） */
+/** 内容里括号中心列偏移：`( ) 名`/`(√) 名` → 括号中间空格列（起点+1）；`● main` 无括号 → 圆点列（0） */
 function parenCenterOffset(content: string): number {
   const open = content.indexOf("(");
   return open >= 0 && content[open + 1] === ")" ? open : open + 1;
 }
 
 /**
- * 树渲染：DFS 从 /root 起，子 agent 连接线放父「括号中心列」；
- * 祖先层的竖线（│/空格）放各自括号中心列——层级竖线对齐父括号中心。
+ * 树渲染：DFS 从 /root 起，子 agent 连接线放父「中心列」——main（`● main` 无括号）为中心 0 即圆点列，
+ * 子 agent 放各自括号中心列；祖先层的竖线（│/空格）放各自中心列——层级竖线对齐父圆点/括号中心。
  * 返回逐行字符串（行内左侧用空格补齐，保证竖线列对齐）。
  */
 function renderTree(nodes: AgentNode[]): string[] {

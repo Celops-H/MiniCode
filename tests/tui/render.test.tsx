@@ -40,7 +40,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("模式[default]");
   });
 
-  it("底栏显示 agent 树：main() + 子 agent 一行", async () => {
+  it("底栏显示 agent 树：main + 子 agent 一行", async () => {
     const channel = createChannel([]);
     const st: TuiState = {
       ...channel.state,
@@ -55,7 +55,8 @@ describe("view/App 渲染链", () => {
     );
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("main()");
+    expect(frame).toContain("● main");
+    expect(frame).not.toContain("main()");
     expect(frame).toContain("( ) task_1");
   });
 
@@ -66,7 +67,8 @@ describe("view/App 渲染链", () => {
     setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 0 }));
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("main()");
+    expect(frame).toContain("● main");
+    expect(frame).not.toContain("main()");
     expect(frame).toContain("( ) task_1");
   });
 });
