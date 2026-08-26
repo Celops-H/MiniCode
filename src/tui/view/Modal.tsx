@@ -64,9 +64,13 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   // 列表行：窗口渲染（memo 读 selected/dims 重算）。卡内固定开销（外边距 2 + 边框标题 1 + 新建 1 + 提示 3 + 底框 1）=8 行；
   // 终端高减 9 行给卡下固定内容（输入框 5 + 状态行 2 + agent/通知 2）占位，剩余高度按 1 行/条分配会话可见条数，
   // 选中项居中滚动、越界贴边——卡与底部状态行都不被顶出视口。
-  // 模型名预算：卡宽 - 边框 2 - 行 paddingX 2 - 行前缀（▸ 6位id · ）11 ≈ 15；超出截断加省略号防折行破 1 行/条假设。
-  const modelMax = cardWidth - 15;
-  const fitModel = (m: string): string => (Array.from(m).length > modelMax ? `${Array.from(m).slice(0, modelMax).join("")}…` : m);
+  // 行内容 = id6 · 标题 · 模型：标题/模型按卡宽截断加省略号，防折行破 1 行/条假设。
+  //   /rename 改会话标题经 rewriteMessages 落盘，listSessions 每次重读 meta，面板标题即时同步。
+  const fit = (t: string, max: number): string => {
+    const chars = Array.from(t);
+    return chars.length <= max ? t : `${chars.slice(0, Math.max(1, max - 1)).join("")}…`;
+  };
+  const usable = cardWidth - 4; // 边框 2 + 行 paddingX 2
   const rows = createMemo(() => {
     const total = b.sessions.length;
     const avail = Math.max(10, (dims().height ?? 20) - 9);
@@ -75,15 +79,17 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     const visible = b.sessions.slice(start, start + sessRows);
     const items = visible.map((s, i) => {
       const sel = start + i === b.selected;
-      const model = fitModel(s.model);
+      const model = fit(s.model, 18);
+      const title = fit(s.title || "未命名", Math.max(1, usable - 2 - 6 - 6 - Array.from(model).length));
+      const line = `${s.id.slice(-6)} · ${title} · ${model}`;
       return sel ? (
         <text paddingX={1} fg={theme.foregroundAccent}>
-          ▸ {s.id.slice(-6)} · {model}
+          ▸ {line}
         </text>
       ) : (
         <text paddingX={1} fg={theme.text}>
           {"  "}
-          {s.id.slice(-6)} · {model}
+          {line}
         </text>
       );
     });

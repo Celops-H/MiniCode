@@ -106,7 +106,8 @@ export interface PermissionModalState {
 /** 会话切换面板：最近会话列表 + 新建入口（选中项 = 下标，新建占末位） */
 export interface SessionModalState {
   kind: "session";
-  sessions: Array<{ id: string; model: string; updatedAt: string }>;
+  /** 会话列表（title 随 /rename 更新：listSessions 每次重读磁盘 meta，面板显示改名即时生效） */
+  sessions: Array<{ id: string; title: string; model: string; updatedAt: string }>;
   selected: number;
 }
 

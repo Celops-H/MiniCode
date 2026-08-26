@@ -132,6 +132,20 @@ describe("会话持久化与续跑", () => {
     await expect(store.deleteSession("not-exist")).resolves.toBeUndefined();
   });
 
+  it("/rename 链路：改 session.meta.title + rewriteMessages 落盘后，listSessions 同步新标题", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "deepseek-chat", title: "旧会话名" });
+    // /rename 命令的两步：改内存 meta + rewriteMessages 持久化（meta 文件一并重写）
+    session.meta.title = "重构 partition 并发分区";
+    await store.rewriteMessages(session, session.getMessages());
+
+    const list = await store.listSessions();
+    expect(list.find((m) => m.id === session.meta.id)?.title).toBe("重构 partition 并发分区");
+    // 重载会话也拿到新标题（内存与磁盘一致）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.title).toBe("重构 partition 并发分区");
+  });
+
   it("rewriteMessages：重写整份 JSONL，重载后与替换内容一致（/compact 用）", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });

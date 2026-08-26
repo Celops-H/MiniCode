@@ -312,7 +312,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       ...state,
       modal: {
         kind: "session",
-        sessions: sessions.map((s) => ({ id: s.id, model: s.model, updatedAt: s.updatedAt })),
+        sessions: sessions.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
         selected: 0,
       },
     });

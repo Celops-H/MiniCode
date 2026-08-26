@@ -51,7 +51,7 @@ it("高亮随 selected 挪动（◀ 跟着选中项走）——For+条件曾在�
 it("会话面板：列表/新建入口/键位提示", async () => {
   const modal: ModalState = {
     kind: "session",
-    sessions: [{ id: "ab3f90", model: "deepseek-v4-flash", updatedAt: "now" }],
+    sessions: [{ id: "ab3f90", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: "now" }],
     selected: 0,
   };
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
@@ -59,6 +59,7 @@ it("会话面板：列表/新建入口/键位提示", async () => {
   const frame = setup.captureCharFrame();
   expect(frame).toContain("切换会话");
   expect(frame).toContain("ab3f90");
+  expect(frame).toContain("重构 partition");
   expect(frame).toContain("deepseek-v4-flash");
   expect(frame).toContain("新建会话");
 });
@@ -67,8 +68,8 @@ it("会话面板等宽卡片居中：不铺满全宽、左右留白对称，下�
   const modal: ModalState = {
     kind: "session",
     sessions: [
-      { id: "ab3f90", model: "claude-sonnet-4-5", updatedAt: "now" },
-      { id: "88bf1e", model: "deepseek-chat", updatedAt: "now" },
+      { id: "ab3f90", title: "重构 partition 并发分区", model: "claude-sonnet-4-5", updatedAt: "now" },
+      { id: "88bf1e", title: "修复 readJsonl 坏行", model: "deepseek-chat", updatedAt: "now" },
     ],
     selected: 0,
   };
@@ -89,6 +90,7 @@ it("会话面板等宽卡片居中：不铺满全宽、左右留白对称，下�
 it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不溢出", async () => {
   const sessions = Array.from({ length: 12 }, (_, i) => ({
     id: `sxx-${String(i).padStart(2, "0")}`,
+    title: `会话 ${i}`,
     model: "m",
     updatedAt: "now",
   }));
@@ -124,8 +126,8 @@ it("会话面板长模型名按卡宽截断：不折行、保持每行 1 条", a
   const modal: ModalState = {
     kind: "session",
     sessions: [
-      { id: "ab3f90", model: "bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0", updatedAt: "now" },
-      { id: "88bf1e", model: "deepseek-chat", updatedAt: "now" },
+      { id: "ab3f90", title: "Bedrock 长模型", model: "bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0", updatedAt: "now" },
+      { id: "88bf1e", title: "DeepSeek", model: "deepseek-chat", updatedAt: "now" },
     ],
     selected: 0,
   };
