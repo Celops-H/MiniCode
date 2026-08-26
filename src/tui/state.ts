@@ -131,7 +131,8 @@ export interface ConnectKeyModalState {
 /** /model 模型选择弹窗：列出全部配置模型（↑↓ 选模型、←→ 调思考等级），Enter 应用 */
 export interface ModelModalState {
   kind: "model";
-  models: Array<{ id: string }>;
+  /** 模型列表带厂商（providerId/名称）：/model 弹窗按厂商分组展示（组头不可选中） */
+  models: Array<{ id: string; providerId?: string; providerName?: string }>;
   selected: number;
   thinkingLevel: ThinkingLevel | undefined;
 }

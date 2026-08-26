@@ -268,3 +268,30 @@ it("connect 选供应商 → key 输入态：modal 对象切换后界面切到�
   expect(frame).toContain("DEEPSEEK_API_KEY");
   expect(frame).not.toContain("连接供应商");
 });
+it("/model 按厂商分组：● 厂商名 组头 + 缩进模型行（组头不选中、模型行与厂商名不对齐）", async () => {
+  const modal: ModalState = {
+    kind: "model",
+    models: [
+      { id: "deepseek-chat", providerId: "deepseek", providerName: "DeepSeek" },
+      { id: "deepseek-v4-flash", providerId: "deepseek", providerName: "DeepSeek" },
+      { id: "gpt-4o", providerId: "openai", providerName: "OpenAI" },
+    ],
+    selected: 1,
+    thinkingLevel: "medium",
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 12 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 组头 ● 厂商名 + 模型都渲染
+  expect(frame).toContain("● DeepSeek");
+  expect(frame).toContain("● OpenAI");
+  expect(frame).toContain("deepseek-chat");
+  expect(frame).toContain("gpt-4o");
+  // 模型行缩进（4 空格前缀）与组头不对齐：模型文本列 > 组头 ● 列
+  const groupRow = frame.split("\n").find((l) => l.includes("● DeepSeek")) ?? "";
+  const modelRow = frame.split("\n").find((l) => l.includes("deepseek-chat")) ?? "";
+  expect(modelRow.indexOf("deepseek-chat")).toBeGreaterThan(groupRow.indexOf("●"));
+  // 选中高亮（▸）在缩进模型行上（组头不选中）
+  const selRow = frame.split("\n").find((l) => l.includes("▸")) ?? "";
+  expect(selRow).toContain("deepseek-v4-flash");
+});

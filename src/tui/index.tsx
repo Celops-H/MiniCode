@@ -107,7 +107,7 @@ async function runTuiSession(
     modelLabel: modelId,
     permissionMode: permissionModeBox,
     thinkingLevel: thinkingLevelBox,
-    modelList: models.listModels().map((m) => ({ id: m.id })),
+    modelList: models.listModels().map((m) => ({ id: m.id, providerId: m.providerId, providerName: models.provider(m.providerId)?.name })),
     assemble: ({ approver, feedRoot }) => {
       const tools = createBuiltinTools();
       const pipelineOptions: PermissionPipelineOptions = {

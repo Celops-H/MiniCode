@@ -217,24 +217,37 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
   );
 }
 
-/** /model 模型选择：模型列表（↑↓ 选）+ 思考等级行（←→ 调）+ 键位提示；窗口渲染防超页 */
+/** /model 模型选择：按厂商分组（● 厂商名 组头 + 缩进模型行，组头不可选中、模型行与厂商名不对齐）
+ *  + 思考等级行（←→ 调）+ 键位提示；窗口渲染防超页（选中模型居中滚动、越界贴边） */
 function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
   const rows = createMemo(() => {
-    const total = b.models.length;
+    // 平铺分组显示行：厂商变化时插组头「● 厂商名」，其后是该厂商模型行（缩进 4 列，与组头不对齐）
+    const display: Array<{ kind: "group"; name: string } | { kind: "model"; index: number }> = [];
+    let lastProvider = "";
+    for (let i = 0; i < b.models.length; i++) {
+      const provider = b.models[i]!.providerName ?? b.models[i]!.providerId ?? "其他";
+      if (provider !== lastProvider) {
+        display.push({ kind: "group", name: provider });
+        lastProvider = provider;
+      }
+      display.push({ kind: "model", index: i });
+    }
+    const total = display.length;
+    const selPos = Math.max(0, display.findIndex((d) => d.kind === "model" && d.index === b.selected));
     const avail = dims().height ?? 20;
     const visible = Math.max(1, Math.min(total, avail - 7));
-    const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
-    const items = b.models.slice(start, start + visible).map((m, i) =>
-      start + i === b.selected ? (
-        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
-          ▸ {m.id}
+    const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), total - visible));
+    const items = display.slice(start, start + visible).map((d) =>
+      d.kind === "group" ? (
+        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+          ● {d.name}
         </text>
       ) : (
-        <text paddingX={1} paddingTop={1} fg={theme.text}>
-          {"  "}
-          {m.id}
+        <text paddingX={1} paddingTop={1} fg={d.index === b.selected ? theme.foregroundAccent : theme.text}>
+          {"    "}
+          {d.index === b.selected ? `▸ ${b.models[d.index]!.id}` : `  ${b.models[d.index]!.id}`}
         </text>
       ),
     );
