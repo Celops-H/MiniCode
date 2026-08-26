@@ -198,6 +198,24 @@ describe("loadConfig", () => {
     expect(config.providers?.[0]?.models).toEqual([{ id: "a-2" }]);
   });
 
+  it("任一层 providers 非法（非数组/项缺 id）整体透传，schema 校验报错不静默吞", async () => {
+    await expect(
+      loadConfig({ paths: setup({ global: { providers: "oops" } }) }),
+    ).rejects.toThrow();
+    await expect(
+      loadConfig({
+        paths: setup({
+          project: {
+            providers: [
+              { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [] },
+              { baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [] }, // 缺 id
+            ],
+          },
+        }),
+      }),
+    ).rejects.toThrow();
+  });
+
   it("非法 providers 配置（baseUrl 非 URL）直接报错", async () => {
     await expect(
       loadConfig({
