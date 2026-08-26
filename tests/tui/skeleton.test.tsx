@@ -126,6 +126,10 @@ it("输入编辑键 Ctrl+A/E/U/K/W 从 opentui 键映射到结构键（普通字
   expect(opentuiKeyToKey({ name: "k", ctrl: true })).toEqual({ kind: "ctrl-k" });
   expect(opentuiKeyToKey({ name: "w", ctrl: true })).toEqual({ kind: "ctrl-w" });
   expect(opentuiKeyToKey({ name: "a" })).toEqual({ kind: "char", char: "a" });
+  // Shift+编辑键字母：大写还原不受影响（opentui 对 A-Z 统一小写 + shift 标志）
+  expect(opentuiKeyToKey({ name: "a", shift: true })).toEqual({ kind: "char", char: "A" });
+  expect(opentuiKeyToKey({ name: "e", shift: true })).toEqual({ kind: "char", char: "E" });
+  expect(opentuiKeyToKey({ name: "j", shift: true })).toEqual({ kind: "char", char: "J" });
 });
 
 it("输入编辑键落地 reducer：Ctrl+A/E 行首尾、U 清行、K 删到行尾、W 删前词", () => {
@@ -147,6 +151,20 @@ it("输入编辑键落地 reducer：Ctrl+A/E 行首尾、U 清行、K 删到行�
   s = reduceAction(s, { type: "cursor", dir: "right" });
   s = reduceAction(s, { type: "delete-to-end" });
   expect(s.prompt.lines[0]).toBe("ab");
+  // 边界：空行删词不动、行首删词不动、全空格行删词清空、连续空格删词只删词
+  s = reduceAction(initState([]), { type: "delete-word" });
+  expect(s.prompt.lines[0]).toBe("");
+  let sp = reduceAction(initState([]), { type: "input", text: "word" });
+  sp = reduceAction(sp, { type: "cursor", dir: "start" });
+  sp = reduceAction(sp, { type: "delete-word" });
+  expect(sp.prompt.lines[0]).toBe("word");
+  sp = reduceAction(initState([]), { type: "input", text: "   " });
+  sp = reduceAction(sp, { type: "delete-word" });
+  expect(sp.prompt.lines[0]).toBe("");
+  sp = reduceAction(initState([]), { type: "input", text: "aa  bb" });
+  sp = reduceAction(sp, { type: "cursor", dir: "end" });
+  sp = reduceAction(sp, { type: "delete-word" });
+  expect(sp.prompt.lines[0]).toBe("aa  ");
 });
 
 it("channel.onAction 走 store 整树替换（不依赖渲染）", () => {

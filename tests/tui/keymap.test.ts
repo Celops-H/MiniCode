@@ -23,6 +23,15 @@ it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删�
   expect(mapKey({ kind: "ctrl-w" })).toEqual({ type: "delete-word" });
 });
 
+it("编辑键在模态/候选态不落入输入：Ctrl+A/E/U/K/W → noop", () => {
+  const m = { popup: "modal" as const };
+  const c = { popup: "candidate" as const };
+  for (const k of ["ctrl-a", "ctrl-e", "ctrl-u", "ctrl-k", "ctrl-w"] as const) {
+    expect(mapKey({ kind: k }, m)).toEqual({ type: "noop" });
+    expect(mapKey({ kind: k }, c)).toEqual({ type: "noop" });
+  }
+});
+
 it("modal 态：1/2/3→权限决策、Esc→取消、Ctrl+C 弃用、Ctrl+D 保留退出", () => {
   const m = { popup: "modal" as const };
   expect(mapKey({ kind: "char", char: "1" }, m)).toEqual({ type: "permission", decision: "allow" });

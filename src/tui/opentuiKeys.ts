@@ -32,22 +32,23 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
     case "j":
       // Ctrl+J 换行（kitty 键盘协议下 ctrl+j 带 ctrl 标志独立到达）
       if (ctrl) return { kind: "shift-enter" };
-      return { kind: "char", char: "j" };
+      // 无 ctrl 时与 default 一致：shift 还原大写（opentui 对 A-Z 统一小写上报 + shift 标志）
+      return shift ? { kind: "char", char: "J" } : { kind: "char", char: "j" };
     case "a":
       if (ctrl) return { kind: "ctrl-a" };
-      return { kind: "char", char: "a" };
+      return shift ? { kind: "char", char: "A" } : { kind: "char", char: "a" };
     case "e":
       if (ctrl) return { kind: "ctrl-e" };
-      return { kind: "char", char: "e" };
+      return shift ? { kind: "char", char: "E" } : { kind: "char", char: "e" };
     case "u":
       if (ctrl) return { kind: "ctrl-u" };
-      return { kind: "char", char: "u" };
+      return shift ? { kind: "char", char: "U" } : { kind: "char", char: "u" };
     case "k":
       if (ctrl) return { kind: "ctrl-k" };
-      return { kind: "char", char: "k" };
+      return shift ? { kind: "char", char: "K" } : { kind: "char", char: "k" };
     case "w":
       if (ctrl) return { kind: "ctrl-w" };
-      return { kind: "char", char: "w" };
+      return shift ? { kind: "char", char: "W" } : { kind: "char", char: "w" };
     case "tab":
       return { kind: shift ? "shift-tab" : "tab" };
     case "escape":
