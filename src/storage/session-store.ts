@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message } from "../core/index.js";
@@ -145,5 +145,17 @@ export class SessionStore {
       }
     }
     return metas.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * 删除会话：移除消息 JSONL 与元数据文件，并清理该会话的待落盘攒批。
+   * 持久化删除不可逆，调用方负责确认目标（/session 面板一步删除只作用于非当前会话）。
+   * @param id 会话 id
+   */
+  async deleteSession(id: string): Promise<void> {
+    this.pending.delete(id); // 丢弃该会话未 flush 的攒批消息，不留残留
+    await this.ensureDir();
+    await rm(this.messageFile(id), { force: true });
+    await rm(this.metaFile(id), { force: true });
   }
 }

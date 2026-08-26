@@ -79,6 +79,36 @@ describe("会话持久化与续跑", () => {
     expect(list.map((m) => m.id)).toEqual([a.meta.id, b.meta.id]);
   });
 
+  it("deleteSession：删除消息与元数据文件，列表不再包含该会话", async () => {
+    const store = setup();
+    const a = await store.createSession({ model: "m" });
+    const b = await store.createSession({ model: "m" });
+    await store.appendMessage(a, userMessage("消息"));
+    await store.flush();
+
+    await store.deleteSession(a.meta.id);
+
+    const list = await store.listSessions();
+    expect(list.map((m) => m.id)).toEqual([b.meta.id]);
+    await expect(store.loadSession(a.meta.id)).rejects.toThrow(); // 文件已移除
+  });
+
+  it("deleteSession：清理该会话未 flush 的攒批残留，后续 flush 不写回已删会话", async () => {
+    const store = setup();
+    const a = await store.createSession({ model: "m" });
+    await store.appendMessage(a, userMessage("未落盘"));
+    await store.deleteSession(a.meta.id); // 未 flush 即删：pending 中该会话消息一并丢弃
+    await store.flush(); // 不报错、不写回已删会话
+
+    const list = await store.listSessions();
+    expect(list).toHaveLength(0);
+  });
+
+  it("deleteSession：删除不存在的会话幂等", async () => {
+    const store = setup();
+    await expect(store.deleteSession("not-exist")).resolves.toBeUndefined();
+  });
+
   it("rewriteMessages：重写整份 JSONL，重载后与替换内容一致（/compact 用）", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
