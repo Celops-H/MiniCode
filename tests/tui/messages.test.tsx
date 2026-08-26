@@ -193,8 +193,9 @@ it("点思考展开内容中部收起——折叠命中扩到整个思考块", a
     { width: 60, height: 16 },
   );
   await setup.waitForVisualIdle();
-  // 点思考展开内容（折叠头在「▼ 思考」行，内容行非头部）：也应触发 fold-at(0)
-  await setup.mockMouse.click(30, 4);
+  // 思考在前布局：y0=消息头、y1=▼ 思考 折叠头、y2=思考内容（非头部行）、y3=结论文本。
+  // 点思考展开内容（y2）也应触发 fold-at(0)
+  await setup.mockMouse.click(30, 2);
   await setup.waitForVisualIdle();
   expect(calls).toEqual([0]);
 });
@@ -271,4 +272,17 @@ it("思考/工具展开后内容保持灰色（与折叠提示同灰调，用户
   const spans = setup.captureSpans();
   expect(textFg(spans, "这一步要核对分区逻辑…")).toBe("#8f9096"); // 思考展开内容=灰
   expect(textFg(spans, "export function a() {}")).toBe("#8f9096"); // 工具输出展开=灰
+});
+
+it("思考块渲染在消息文本之前（思考在前、结论在后，用户复核反馈）", async () => {
+  const setup = await app([
+    { kind: "message", id: "a1", role: "assistant", text: "先看结论", thinking: "思考步骤…", thinkingCollapsed: false },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  const lines = frame.split("\n");
+  const thinkingIdx = lines.findIndex((l) => l.includes("▼ 思考"));
+  const textIdx = lines.findIndex((l) => l.includes("先看结论"));
+  expect(thinkingIdx).toBeGreaterThanOrEqual(0); // 思考块存在
+  expect(textIdx).toBeGreaterThan(thinkingIdx); // 思考行在消息文本之前
 });

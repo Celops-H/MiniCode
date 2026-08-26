@@ -103,11 +103,12 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
         </span>{" "}
         {props.b.time ?? ""}
       </text>
-      <Show when={props.b.text}>
-        <text>{props.b.text}</text>
-      </Show>
+      {/* 思考在前、结论文本在后（用户复核：先看到思考，再看到结论） */}
       <Show when={props.b.thinking}>
         <ThinkingFold text={props.b.thinking!} collapsed={props.b.thinkingCollapsed} onFold={props.onFold} />
+      </Show>
+      <Show when={props.b.text}>
+        <text>{props.b.text}</text>
       </Show>
     </box>
   );
