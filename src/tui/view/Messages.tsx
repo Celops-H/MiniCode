@@ -84,7 +84,8 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
         </text>
       </box>
       <Show when={!props.collapsed}>
-        <text>{props.text}</text>
+        {/* 展开内容保持灰色调（与折叠提示同灰，用户复核：展开后也应灰色显示） */}
+        <text fg={theme.textMuted}>{props.text}</text>
       </Show>
     </box>
   );
@@ -146,7 +147,10 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         </box>
       ) : null}
       <Show when={props.b.output && !props.b.collapsedOutput}>
-        <text paddingX={1}>{props.b.output}</text>
+        {/* 工具输出展开后保持灰色调（与折叠提示同灰，用户复核：展开后也应灰色显示）；错误保持红色区分 */}
+        <text fg={theme.textMuted} paddingX={1}>
+          {props.b.output}
+        </text>
       </Show>
       <Show when={props.b.error && !props.b.collapsedOutput}>
         <text fg={theme.error} paddingX={1}>

@@ -261,3 +261,14 @@ it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧�
   expect(textFg(spans, "test-model")).toBe("#61afef"); // 模型名=蓝
   expect(textFg(spans, "你")).toBe("#9d7cd8"); // 你=强调紫
 });
+
+it("思考/工具展开后内容保持灰色（与折叠提示同灰调，用户复核反馈）", async () => {
+  const setup = await app([
+    { kind: "message", id: "a1", role: "assistant", text: "结论", thinking: "这一步要核对分区逻辑…", thinkingCollapsed: false },
+    { kind: "tool", index: 0, turn: 0, name: "read", args: "{}", status: "success", collapsedArgs: true, collapsedOutput: false, output: "export function a() {}" },
+  ]);
+  await setup.waitForVisualIdle();
+  const spans = setup.captureSpans();
+  expect(textFg(spans, "这一步要核对分区逻辑…")).toBe("#8f9096"); // 思考展开内容=灰
+  expect(textFg(spans, "export function a() {}")).toBe("#8f9096"); // 工具输出展开=灰
+});
