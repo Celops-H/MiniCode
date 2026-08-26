@@ -133,4 +133,17 @@ describe("Team（注册表与并发限制）", () => {
     expect(team.resolveAgent(path)).toBeUndefined();
     expect(team.resolveAgent(AgentPath.root())).toBeUndefined();
   });
+
+  it("clear 清空成员收件箱：排队消息不再让中断 agent 复活续跑（M1 整体审视）", () => {
+    const team = new Team();
+    team.registerRoot(makeAgent());
+    const child = makeAgent();
+    const path = team.reserveSpawn(AgentPath.root(), "task_1") as AgentPath;
+    team.commitSpawn(path, child);
+    // 投递排队消息（不唤醒）：收件箱有内容
+    void team.sendMessage(path, { type: "MESSAGE", from: AgentPath.root(), content: "hi", triggerTurn: false });
+    expect(child.hasPendingMail()).toBe(true);
+    team.clear();
+    expect(child.hasPendingMail()).toBe(false);
+  });
 });

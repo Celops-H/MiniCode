@@ -267,6 +267,12 @@ export class Agent {
     return this.mailbox.hasPending();
   }
 
+  /** 清空收件箱（Team 会话收尾调用）：排队消息会让中断的 agent 在 resume 里复活续跑——
+   *  重新拉起模型流吊住进程（M1 整体审视，对齐 A-4 退出清理目标） */
+  clearMailbox(): void {
+    this.mailbox.drain();
+  }
+
 /**
    * 会话驱动入口（宿主调用，DESIGN 13）：推进 turn 直到会话结束。
    * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发——

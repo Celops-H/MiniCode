@@ -199,6 +199,8 @@ export class Team {
     // 先按 releaseSpawn 同款清理各成员挂的 worktree（避免 clear 绕过清理变孤儿目录），再清注册表
     for (const member of [...this.members.values()]) {
       if (member.worktree) this.abortChildWorktree(member.path);
+      // 清收件箱：排队消息会让中断的 agent 在 resume 里复活续跑（M1 整体审视，退出残留）
+      member.agent?.clearMailbox();
     }
     this.members.clear();
     this.pendingDrives.clear();
