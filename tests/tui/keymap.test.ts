@@ -15,12 +15,14 @@ it("normal 态：字符→input、回车→send、Esc→esc、Ctrl+C→copy（�
   expect(mapKey({ kind: "pageup" })).toEqual({ type: "scroll", dir: 1 });
 });
 
-it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删前词", () => {
+it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删前词、Ctrl+Shift+U 一键清空", () => {
   expect(mapKey({ kind: "ctrl-a" })).toEqual({ type: "cursor", dir: "start" });
   expect(mapKey({ kind: "ctrl-e" })).toEqual({ type: "cursor", dir: "end" });
   expect(mapKey({ kind: "ctrl-u" })).toEqual({ type: "delete-line" });
   expect(mapKey({ kind: "ctrl-k" })).toEqual({ type: "delete-to-end" });
   expect(mapKey({ kind: "ctrl-w" })).toEqual({ type: "delete-word" });
+  // D-3=49：Ctrl+Shift+U 一键清空输入框
+  expect(mapKey({ kind: "ctrl-shift-u" })).toEqual({ type: "clear-input" });
 });
 
 it("编辑键在模态/候选态不落入输入：Ctrl+A/E/U/K/W → noop", () => {

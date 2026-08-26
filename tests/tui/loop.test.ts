@@ -149,17 +149,70 @@ describe("paste（bracketed paste 整段插入）", () => {
     expect(s.prompt.lines).toEqual(["a", "b", "c"]);
   });
 
-  it("粘贴超 20 行截断：保留前 20 行、光标贴底", () => {
+  it("粘贴超 20 行截断：保头尾（head 接光标前、tail 接光标后）、中间段截断、光标贴底", () => {
     let s = initState([]);
     s = reduceAction(s, { type: "paste", text: Array.from({ length: 25 }, (_, i) => `行${i}`).join("\n") });
     expect(s.prompt.lines).toHaveLength(20);
-    expect(s.prompt.lines[19]).toBe("行19");
+    // 头段（接光标前空内容）= 粘贴首行，尾段（接光标后空内容）= 粘贴末行——不再是旧实现「保前 20 丢尾」
+    expect(s.prompt.lines[0]).toBe("行0");
+    expect(s.prompt.lines[19]).toBe("行24");
     expect(s.prompt.curLine).toBe(19);
+    // 中间被截断（丢了第 19~23 行中的一部分，保中间前段）
+    expect(s.prompt.lines).not.toContain("行23");
+  });
+
+  it("粘贴超行截断：已有内容 + 光标在中间，光标后文本不丢（D-6=45）", () => {
+    let s = initState([]);
+    // 两行已有内容：第一行 aaaa、第二行 bbbb；光标在第一行末尾
+    s = reduceAction(s, { type: "input", text: "aaaa" });
+    s = reduceAction(s, { type: "newline" });
+    s = reduceAction(s, { type: "input", text: "bbbb" });
+    s = reduceAction(s, { type: "cursor", dir: "up" });
+    // 光标在 (0,4)，粘贴 20 行（含换行）→ 结果 20 行封顶，光标后的 bbbb 必须保留
+    s = reduceAction(s, { type: "paste", text: Array.from({ length: 20 }, (_, i) => `p${i}`).join("\n") });
+    expect(s.prompt.lines).toHaveLength(20);
+    expect(s.prompt.lines.at(-1)).toBe("bbbb"); // 光标后的第二行原内容保留
+    expect(s.prompt.lines[0]).toBe("aaaap0"); // head 接光标前
   });
 
   it("connect-key 输入态粘贴：并入 key 缓冲", () => {
     let s = withKeyModal(initState([]));
     s = reduceAction(s, { type: "paste", text: "sk-12345" });
     expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-12345" });
+  });
+});
+
+describe("输入编辑（D-2 Ctrl+U 连续删 / D-3 一键清空）", () => {
+  it("Ctrl+U（delete-line）删当前行，行已空时继续删上一行（连续按住一行行往上清）", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "第一行" });
+    s = reduceAction(s, { type: "newline" });
+    s = reduceAction(s, { type: "input", text: "第二行" });
+    // 光标在第二行末尾
+    expect(s.prompt.lines).toEqual(["第一行", "第二行"]);
+    // 第一次 Ctrl+U：清空当前行、光标行首
+    s = reduceAction(s, { type: "delete-line" });
+    expect(s.prompt.lines).toEqual(["第一行", ""]);
+    expect(s.prompt.curLine).toBe(1);
+    // 第二次 Ctrl+U：行已空 → 删掉空行，光标回上一行末尾
+    s = reduceAction(s, { type: "delete-line" });
+    expect(s.prompt.lines).toEqual(["第一行"]);
+    expect(s.prompt.curLine).toBe(0);
+    expect(s.prompt.curCol).toBe(3);
+  });
+
+  it("Ctrl+Shift+U（clear-input）一键清空输入框全部内容（含多行），清选区与候选", () => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "第一行" });
+    s = reduceAction(s, { type: "newline" });
+    s = reduceAction(s, { type: "input", text: "第二行" });
+    // 制造选区（Shift 选择过）后一键清空
+    s = reduceAction(s, { type: "select", dir: "left" });
+    expect(s.prompt.sel).not.toBeNull();
+    s = reduceAction(s, { type: "clear-input" });
+    expect(s.prompt.lines).toEqual([""]);
+    expect(s.prompt.curLine).toBe(0);
+    expect(s.prompt.curCol).toBe(0);
+    expect(s.prompt.sel).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ export interface StatusBarProps {
 
 export function StatusBar(props: StatusBarProps): JSX.Element {
   return (
-    <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} paddingTop={1} flexShrink={0}>
+    <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} flexShrink={0}>
       <box flexDirection="row" gap={1} flexShrink={0}>
         <text fg={theme.modelColor}>{props.model}</text>
         {/* 会话标题：最长 20 列截断（CJK 列宽），避免长标题把模式 chip/右侧提示顶出 */}

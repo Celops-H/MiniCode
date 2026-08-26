@@ -235,7 +235,8 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
       <text fg={theme.textMuted}>
         <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
-        {hasOutput(b) && b.collapsedOutput ? " · 点击展开" : ""}
+        {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」，与 compact/bash 摘要一致 */}
+        {hasOutput(b) && b.collapsedOutput ? ` · 输出 ${(b.output ?? "").replace(/\n$/, "").split("\n").length} 行 · 点击展开` : ""}
       </text>
       <Show when={!b.collapsedOutput && b.output}>
         <text fg={theme.textMuted}>{b.output}</text>
@@ -270,7 +271,7 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
         {b.event === "spawned"
           ? " 已派生"
           : b.event === "completed"
-            ? ` 完成${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
+            ? ` 完成${b.conclusion ? ` · 输出 ${b.conclusion.replace(/\n$/, "").split("\n").length} 行` : ""}${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
             : " 中断"}
       </text>
       <Show when={foldable && !b.collapsed}>

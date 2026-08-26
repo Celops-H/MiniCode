@@ -121,6 +121,9 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       return { type: "cursor", dir: "end" };
     case "ctrl-u":
       return { type: "delete-line" };
+    case "ctrl-shift-u":
+      // 一键清空输入框全部内容（D-3=49）
+      return { type: "clear-input" };
     case "ctrl-k":
       return { type: "delete-to-end" };
     case "ctrl-w":

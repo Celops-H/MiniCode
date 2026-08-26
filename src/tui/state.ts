@@ -880,7 +880,9 @@ function insertText(prompt: PromptState, text: string): PromptState {
   return { ...prompt, lines, curCol: prompt.curCol + Array.from(text).length, sel: null };
 }
 
-/** 粘贴整段文本：光标处插入，\r\n/\n 拆多行（bracketed paste 整段插入），总行数超上限截断 */
+/** 粘贴整段文本：光标处插入，\r\n/\n 拆多行（bracketed paste 整段插入），总行数超上限截断。
+ *  D-6=45 截断策略：优先保光标前/后的内容（head 接光标前、tail 接光标后），超限截中间粘贴段，
+ *  不再从头 slice 丢光标后已有文本；原行已满时退化为单行贴入光标处。 */
 function pasteText(prompt: PromptState, text: string): PromptState {
   const line = prompt.lines[prompt.curLine] ?? "";
   const before = Array.from(line).slice(0, prompt.curCol).join("");
@@ -893,20 +895,26 @@ function pasteText(prompt: PromptState, text: string): PromptState {
   }
   const head = before + parts[0]!;
   const tail = parts.at(-1)! + after;
-  let lines = [
+  // 可用中间行数 = 上限 - 光标行外原有行 - head/tail 两行；不足则截中间段（保头尾）
+  const otherRows = prompt.lines.length - 1;
+  const availMids = MAX_PROMPT_LINES - otherRows - 2;
+  if (availMids < 0) {
+    // 原行已满（otherRows ≥ MAX-1）：粘贴退化为贴入光标处单行，保光标前后文本
+    const joined = parts.join("");
+    const lines = [...prompt.lines];
+    lines[prompt.curLine] = before + joined + after;
+    return { ...prompt, lines, curCol: prompt.curCol + Array.from(joined).length, sel: null };
+  }
+  const mids = parts.length - 2 <= availMids ? parts.slice(1, -1) : parts.slice(1, 1 + Math.max(0, availMids));
+  const lines = [
     ...prompt.lines.slice(0, prompt.curLine),
     head,
-    ...parts.slice(1, -1),
+    ...mids,
     tail,
     ...prompt.lines.slice(prompt.curLine + 1),
   ];
-  let curLine = prompt.curLine + parts.length - 1;
-  let curCol = Array.from(tail).length - Array.from(after).length;
-  if (lines.length > MAX_PROMPT_LINES) {
-    lines = lines.slice(0, MAX_PROMPT_LINES);
-    curLine = Math.min(curLine, MAX_PROMPT_LINES - 1);
-    curCol = Math.min(curCol, Array.from(lines[curLine] ?? "").length);
-  }
+  const curLine = prompt.curLine + mids.length + 1;
+  const curCol = Array.from(tail).length - Array.from(after).length;
   return { ...prompt, lines, curLine, curCol, sel: null };
 }
 
@@ -995,9 +1003,16 @@ function deleteToEnd(prompt: PromptState): PromptState {
   return { ...prompt, lines, sel: null };
 }
 
-/** 删整行：清空当前行、光标回行首（Ctrl+U） */
+/** 删整行（Ctrl+U）：清空当前行、光标回行首；当前行已空且上方有行时删掉该行、光标到上一行尾——
+ *  连续按 Ctrl+U 一行行往上清（D-2=48，不再停在行首不动） */
 function deleteLine(prompt: PromptState): PromptState {
   const lines = [...prompt.lines];
+  if ((prompt.lines[prompt.curLine] ?? "") === "" && prompt.curLine > 0) {
+    // 行已空：移除整行，光标到上一行末尾（下一次 Ctrl+U 继续清上一行）
+    lines.splice(prompt.curLine, 1);
+    const prev = lines[prompt.curLine - 1] ?? "";
+    return { ...prompt, lines, curLine: prompt.curLine - 1, curCol: Array.from(prev).length, sel: null };
+  }
   lines[prompt.curLine] = "";
   return { ...prompt, lines, curCol: 0, sel: null };
 }

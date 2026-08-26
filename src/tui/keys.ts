@@ -30,6 +30,8 @@ export type Key =
   | { kind: "ctrl-a" }
   | { kind: "ctrl-e" }
   | { kind: "ctrl-u" }
+  /** Ctrl+Shift+U：一键清空输入框全部内容（D-3=49） */
+  | { kind: "ctrl-shift-u" }
   | { kind: "ctrl-k" }
   | { kind: "ctrl-w" }
   /** 不支持的转义序列（鼠标、组合键等），消费掉但不产生键 */

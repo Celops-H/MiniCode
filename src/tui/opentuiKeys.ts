@@ -43,6 +43,7 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
       if (ctrl) return { kind: "ctrl-e" };
       return shift ? { kind: "char", char: "E" } : { kind: "char", char: "e" };
     case "u":
+      if (ctrl && shift) return { kind: "ctrl-shift-u" };
       if (ctrl) return { kind: "ctrl-u" };
       return shift ? { kind: "char", char: "U" } : { kind: "char", char: "u" };
     case "k":
