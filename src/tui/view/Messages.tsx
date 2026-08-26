@@ -12,11 +12,11 @@ import type { JSX } from "@opentui/solid";
 import type { BlockView, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { theme } from "./theme.js";
 
-/** 状态图标/颜色：进行中 spinner（浅蓝=进行中）、成功绿、失败红、待执行暗 */
+/** 状态图标/颜色：进行中 spinner（黄=进行中，E-2/3 语义统一）、成功绿、失败红、待执行暗 */
 function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   switch (b.status) {
     case "running":
-      return { icon: "⠋", fg: theme.modelColor };
+      return { icon: "⠋", fg: theme.running };
     case "success":
       return { icon: "✓", fg: theme.success };
     case "failure":
@@ -26,7 +26,7 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型=蓝、工具/思考/子agent=灰、通知=警示橙） */
+/** 块来源 → 首行圆点标记的颜色（你/模型=浅蓝、工具/思考/子agent=灰、通知=红警示） */
 function markerFor(b: BlockView): string {
   if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.modelColor;
   if (b.kind === "tool") return theme.textMuted;
@@ -66,8 +66,8 @@ function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX
   );
 }
 
-/** 可折叠区悬停临时态（E-1=35）：onMouseOver/onMouseOut 切换块内灰色文字变白（theme.text），
- *  移开恢复灰（不再整块背景抬高）；仅可折叠块生效，正文/状态行不受影响 */
+/** 可折叠区悬停临时态（E-1=35）：onMouseOver/onMouseOut 切换折叠摘要行灰文字变白（theme.text），
+ *  移开恢复灰（不再整块背景抬高）；仅折叠摘要行生效，展开内容保持灰、正文/状态行不受影响 */
 function useHoverFg(): {
   fg: () => string;
   onMouseOver: () => void;
@@ -105,9 +105,7 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
           {props.collapsed ? (
             <span>思考（▸ {width}，点击展开）</span>
           ) : (
-            <span style={{ fg: theme.text }}>
-              <span style={{ fg: h.fg() }}>▼ 思考（点击收起）</span>
-            </span>
+            <span>▼ 思考（点击收起）</span>
           )}
         </text>
       </box>
@@ -183,7 +181,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
 
   if (mode === "compact") {
     const expanded = !b.collapsedOutput;
-    const outputLines = b.output ? b.output.replace(/\n$/, "").split("\n").length : 0;
+    const outputLines = b.output ? b.output.trimEnd().split("\n").length : 0;
     return (
       <box flexDirection="column" {...foldBox}>
         <text fg={h.fg()}>
@@ -215,8 +213,8 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         </text>
         <Show when={hasOutput(b)}>
           {b.collapsedOutput ? (
-            <text fg={theme.textMuted}>
-              ▾ {b.error ? "错误详情" : `输出 ${(b.output ?? "").replace(/\n$/, "").split("\n").length} 行`} · 点击展开
+            <text fg={h.fg()}>
+              ▾ {b.error ? "错误详情" : `输出 ${(b.output ?? "").trimEnd().split("\n").length} 行`} · 点击展开
             </text>
           ) : (
             <Show when={b.output}>
@@ -234,8 +232,12 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
       <text fg={h.fg()}>
         <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
-        {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」，与 compact/bash 摘要一致 */}
-        {hasOutput(b) && b.collapsedOutput ? ` · 输出 ${(b.output ?? "").replace(/\n$/, "").split("\n").length} 行 · 点击展开` : ""}
+        {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」；只有错误无输出时显「错误详情」（审查 D-3） */}
+        {hasOutput(b) && b.collapsedOutput
+          ? b.output
+            ? ` · 输出 ${b.output.trimEnd().split("\n").length} 行 · 点击展开`
+            : " · 错误详情 · 点击展开"
+          : ""}
       </text>
       <Show when={!b.collapsedOutput && b.output}>
         <text fg={theme.textMuted}>{b.output}</text>
@@ -270,7 +272,7 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
         {b.event === "spawned"
           ? " 已派生"
           : b.event === "completed"
-            ? ` 完成${b.conclusion ? ` · 输出 ${b.conclusion.replace(/\n$/, "").split("\n").length} 行` : ""}${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
+            ? ` 完成${b.conclusion ? ` · 输出 ${b.conclusion.trimEnd().split("\n").length} 行` : ""}${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
             : " 中断"}
       </text>
       <Show when={foldable && !b.collapsed}>

@@ -71,7 +71,7 @@ describe("promptCursorPosition（D-1 光标终端定位不占格）", () => {
 it("光标位置随 curCol 移动（D-1：不再渲染插入字符「│」，位置由计算函数给出）", async () => {
   const channel = createChannel([]);
   const setup = await testRender(
-    () => <PromptView prompt={channel.state.prompt} blink={false} />,
+    () => <PromptView prompt={channel.state.prompt} />,
     { width: 40, height: 4 },
   );
   await setup.waitForVisualIdle();

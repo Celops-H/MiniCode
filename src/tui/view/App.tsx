@@ -87,7 +87,7 @@ export function App(props: AppProps): JSX.Element {
           candidate={props.state.candidate}
           // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
           showCursor={props.state.modal?.kind !== "connect-key"}
-          // 光标定位（D-1）：输入框下方占用行数 = 底边框 1 + 状态行 1 + agent 条（可折叠树行数）
+          // 光标定位（D-1）：输入框下方占用行数 = 底边框 1 + 状态行 1 + agent 条（含 paddingTop）
           bottomRows={2 + agentRowCount(props.state.agents)}
         />
         <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />

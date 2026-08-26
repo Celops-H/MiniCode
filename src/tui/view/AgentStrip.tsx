@@ -149,11 +149,12 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
 }
 
 /** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致——App 计算光标绝对位置用（D-1）。
+ *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行，审查 D-1 偏行修正）。
  *  now 取调用时刻，与组件每秒刷新近似（1s 内完成条目消失的定位偏差可忽略）。 */
 export function agentRowCount(agents: AgentNode[], now = Date.now()): number {
   const visible = agents.filter(
     (a) => a.status === "running" || (a.completedAt != null && now - a.completedAt < DONE_VISIBLE_MS),
   );
   if (!visible.some((a) => a.path !== "/root")) return 0;
-  return renderTree(visible).length;
+  return renderTree(visible).length + 1; // +1 = AgentStrip 自身 paddingTop
 }

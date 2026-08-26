@@ -3,7 +3,7 @@
  */
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
-import { AgentStrip } from "../../src/tui/view/AgentStrip.js";
+import { AgentStrip, agentRowCount } from "../../src/tui/view/AgentStrip.js";
 import type { AgentNode } from "../../src/tui/state.js";
 
 const running = (path: string, spawnedAt: number | null = null): AgentNode => ({
@@ -155,4 +155,13 @@ it("不同父下无同名冲突时仍显示纯末段", async () => {
   const frame = setup.captureCharFrame();
   expect(frame).toContain("( ) alpha");
   expect(frame).toContain("( ) beta");
+});
+
+it("agentRowCount：仅 main=0；1 个子 agent 含 paddingTop=2 行（App 光标定位用，审查 D-1）", () => {
+  expect(agentRowCount([running("/root")])).toBe(0);
+  expect(agentRowCount([running("/root"), running("/root/task_1")])).toBe(3); // 树(main+子)2 行 + paddingTop 1
+  // 完成但 10s 内：仍计（可见期）
+  expect(agentRowCount([running("/root"), done("/root/task_1", 0, Date.now() - 1000)])).toBe(3); // 1s 前完成：10s 可见期内
+  // 完成超 10s：消失 → 0
+  expect(agentRowCount([running("/root"), done("/root/task_1", 0, 5000)], 20000)).toBe(0);
 });

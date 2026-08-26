@@ -9,7 +9,7 @@
  * 把光标应处的终端行列写入 tuiCursor，loop 的 postProcessFn 每帧 setCursorPosition 定位原生终端
  * 光标（绝对定位不占格，闪烁由 loop 定时器控制）。
  */
-import { createMemo } from "solid-js";
+import { createMemo, onCleanup } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { PromptState, SelectionAnchor, SlashCandidate } from "../state.js";
@@ -83,7 +83,6 @@ function CandidateList(props: { candidate: SlashCandidate }): JSX.Element {
 export function PromptView(props: {
   prompt: PromptState;
   candidate?: SlashCandidate;
-  blink?: boolean;
   /** 是否显示光标（/connect key 弹窗输入时隐藏主输入框光标，光标移到弹窗内 key 输入区） */
   showCursor?: boolean;
   /** 输入框下方占用行数（底边框+状态行+agent 条），光标定位用（D-1） */
@@ -97,10 +96,16 @@ export function PromptView(props: {
     tuiCursor.row = pos.row;
     tuiCursor.col = pos.col;
     tuiCursor.enabled = true;
+    tuiCursor.visible = true; // 输入/移动后立即亮，不等下一闪烁相位（审查 D-1）
   } else {
     tuiCursor.enabled = false;
     tuiCursor.visible = false;
   }
+  // 卸载（全屏 /session 页隐藏输入框）复位：停闪烁定时器并隐藏，防残留光标+持续重渲（审查 D-1）
+  onCleanup(() => {
+    tuiCursor.enabled = false;
+    tuiCursor.visible = false;
+  });
 
   // 行列表：读整个 prompt（lines/curLine/curCol/sel），任何变化整体重算——选区高亮必跟上
   const rows = createMemo(() => {
