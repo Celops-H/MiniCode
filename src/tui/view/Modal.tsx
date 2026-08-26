@@ -9,7 +9,7 @@
 import { createMemo } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
-import type { ModalState } from "../state.js";
+import type { ModalState, ConnectPickModalState, ConnectKeyModalState } from "../state.js";
 import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
 
@@ -108,27 +108,53 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   );
 }
 
-/** /connect 供应商选择：边框内标题 + 厂商列表（选中高亮随导航移动）+ 键位提示 */
-function ConnectModal(props: { modal: Extract<ModalState, { kind: "connect" }> }): JSX.Element {
+/** /connect 两阶段弹窗（选供应商 → 输 API Key）：两阶段共用同一组件，内容由 createMemo 按 modal 数据驱动。
+ *  不能拆成两个组件靠 ModalView 分支切换——@opentui reconciler 下组件级分支随 kind 标量变化不刷新
+ *  （真机根因：Enter 选供应商后界面停留列表、行为已切到 key 输入态）。createMemo 返回数据节点（text）会刷新。 */
+function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModalState }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
   const rows = createMemo(() => {
+    // key 输入阶段
+    if (b.kind === "connect-key") {
+      return [
+        <text paddingX={1} paddingY={1} fg={theme.success}>
+          输入 API Key · {b.providerName}
+        </text>,
+        <text paddingX={1}>
+          默认模型 {b.defaultModel} · {b.apiKeyEnv}：
+        </text>,
+        /* key 展示：≤24 字符全文显示，超长截断保留末 12 位（通常是对照项），防整屏换行溢出 */
+        <text paddingX={2} fg={theme.foregroundAccent}>
+          {b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）"}
+        </text>,
+        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+          Enter 确认连接 · Backspace 删除 · Esc 取消
+        </text>,
+      ];
+    }
+    // 选供应商阶段：窗口渲染防超页，选中高亮随导航移动
     const total = b.providers.length;
     const avail = dims().height ?? 20;
     const visible = Math.max(1, Math.min(total, avail - 6));
     const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
-    const items = b.providers.slice(start, start + visible).map((p, i) =>
-      start + i === b.selected ? (
-        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
-          ▸ {p.name}（{p.defaultModel}）
-        </text>
-      ) : (
-        <text paddingX={1} paddingTop={1} fg={theme.text}>
-          {"  "}
-          {p.name}（{p.defaultModel}）
-        </text>
+    const items = [
+      <text paddingX={1} paddingY={1} fg={theme.success}>
+        连接供应商
+      </text>,
+      ...b.providers.slice(start, start + visible).map((p, i) =>
+        start + i === b.selected ? (
+          <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+            ▸ {p.name}（{p.defaultModel}）
+          </text>
+        ) : (
+          <text paddingX={1} paddingTop={1} fg={theme.text}>
+            {"  "}
+            {p.name}（{p.defaultModel}）
+          </text>
+        ),
       ),
-    );
+    ];
     const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
     items.push(
       <text fg={theme.textMuted} paddingX={1} paddingY={1}>
@@ -139,31 +165,8 @@ function ConnectModal(props: { modal: Extract<ModalState, { kind: "connect" }> }
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        title="连接供应商" titleColor={theme.success}>
+      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}>
         {rows()}
-      </box>
-    </box>
-  );
-}
-
-/** /connect key 输入弹窗：供应商名 + API Key 输入区（弹窗内输 key，明文显示便于核对）+ 键位提示 */
-function ConnectKeyModal(props: { modal: Extract<ModalState, { kind: "connect-key" }> }): JSX.Element {
-  const b = props.modal;
-  return (
-    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.success} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        title={`输入 API Key · ${b.providerName}`} titleColor={theme.success}>
-        <text paddingX={1} paddingY={1}>
-          连接供应商 {b.providerName}，默认模型 {b.defaultModel}。输入 {b.apiKeyEnv}：
-        </text>
-        {/* key 展示：≤24 字符全文显示，超长截断保留末 12 位（通常是对照项），防整屏换行溢出 */}
-        <text paddingX={2} fg={theme.foregroundAccent}>
-          {b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）"}
-        </text>
-        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
-          Enter 确认连接 · Backspace 删除 · Esc 取消
-        </text>
       </box>
     </box>
   );
@@ -214,9 +217,13 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
 }
 
 export function ModalView(props: { modal: ModalState }): JSX.Element {
+  // 直接 if 分支返回，不包 createMemo：createMemo 返回「组件元素」在 @opentui 下不刷新
+  //（真机 connect 选供应商后界面卡在列表的根因）。connect 两阶段统一 ConnectFlowModal——
+  // 组件类型稳定，阶段切换由 ConnectFlowModal 内部 rows createMemo 数据驱动（读 b.kind）；
+  // 其余模态每次从「无 modal」挂载、kind 不切换，直接分支即可。
   if (props.modal.kind === "permission") return <PermissionModal modal={props.modal} />;
-  if (props.modal.kind === "connect") return <ConnectModal modal={props.modal} />;
-  if (props.modal.kind === "connect-key") return <ConnectKeyModal modal={props.modal} />;
+  if (props.modal.kind === "connect" || props.modal.kind === "connect-key")
+    return <ConnectFlowModal modal={props.modal} />;
   if (props.modal.kind === "model") return <ModelModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

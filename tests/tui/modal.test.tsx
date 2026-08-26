@@ -93,7 +93,8 @@ it("/connect 供应商选择：列出厂商与键位提示，选中高亮", asyn
     ],
     selected: 0,
   };
-  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  // 高度放足：标题行 + 厂商列表 + 键位提示都要在可视区内
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("连接供应商");
@@ -145,4 +146,29 @@ it("/connect key 输入弹窗：供应商/环境变量/键位提示；key 输入
   frame = setup.captureCharFrame();
   expect(frame).toContain("sk-123456");
   expect(frame).not.toContain("未输入");
+});
+
+it("connect 选供应商 → key 输入态：modal 对象切换后界面切到输入弹窗（修复分支卡旧 kind 不刷新）", async () => {
+  const [modal, setModal] = createStore<ModalState>({
+    kind: "connect",
+    providers: [{ id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" }],
+    selected: 0,
+  });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("连接供应商");
+  // 模拟 Enter 选中供应商：modal 整体换成 connect-key（真机曾因组件级 if 依赖 kind 标量卡在旧分支）
+  setModal({
+    kind: "connect-key",
+    providerId: "deepseek",
+    providerName: "DeepSeek",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    defaultModel: "deepseek-chat",
+    key: "",
+  });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("输入 API Key");
+  expect(frame).toContain("DEEPSEEK_API_KEY");
+  expect(frame).not.toContain("连接供应商");
 });

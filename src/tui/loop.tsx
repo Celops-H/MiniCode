@@ -120,6 +120,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     ) {
       return;
     }
+    // 模型路由切换提示：主模型不可用自动切到备选（如切到无 key/不可达模型被 router 兜底），
+    // 提醒用户发生了什么——否则只见「运行中」长时间无产出又不知缘由
+    if (event.type === "model_fallback") {
+      showToast(`模型 ${event.from} 不可用，已切换 ${event.to}`);
+      return;
+    }
     commit(reduceEvent(state, event));
   };
   const onEvent = feedEvent;
