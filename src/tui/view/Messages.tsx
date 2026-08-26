@@ -168,7 +168,8 @@ function argsDigest(args: string, max = 40): string {
   } catch {
     // 非 JSON 参数用原文
   }
-  return s.length > max ? `${s.slice(0, max)}…` : s;
+  // 按码点截断（emoji 代理对不切成乱码，轻微 5 审查）
+  return Array.from(s).length > max ? `${Array.from(s).slice(0, max).join("")}…` : s;
 }
 
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
@@ -322,21 +323,29 @@ export function Messages(props: {
   streaming?: Streaming;
   onFoldAt?: (index: number) => void;
 }): JSX.Element {
-  // F-2=57 滚轮加速：opentui 原生每次滚 1 行太慢；onMouseEvent 先于原生 handleScroll 执行，
-  // 这里把 delta 放大到 3 行（拖拽滚动条不受影响）。onMouseEvent 不在 ScrollBoxProps 类型内，
-  // 运行时支持（opentui 组件 mouse 事件），用 spread 断言接入
-  const wheelBoost = {
-    onMouseEvent: (e: { type: string; scroll?: { delta: number } }) => {
-      if (e.type === "scroll" && e.scroll) e.scroll.delta *= 3;
-    },
-  } as unknown as Record<string, unknown>;
+  // F-2=57 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
+  // 直接 spread 覆盖会遮蔽原生滚动（S2 审查确认）。改用 ref 包装：先放大 delta 再调原生实现，
+  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。滚轮与滚动条拖拽同走 scroll 事件，拖拽也被 ×3
+  // （更快，方向无害，M3 注释澄清）。
+  const boostedScrollboxes = new WeakSet<object>();
+  const boostWheel = (el: unknown): void => {
+    if (!el || boostedScrollboxes.has(el)) return;
+    boostedScrollboxes.add(el);
+    const box = el as { onMouseEvent?: (e: unknown) => void };
+    const orig = box.onMouseEvent?.bind(box);
+    box.onMouseEvent = (e: unknown) => {
+      const ev = e as { type: string; scroll?: { delta: number } };
+      if (ev.type === "scroll" && ev.scroll) ev.scroll.delta *= 3;
+      orig?.(e);
+    };
+  };
   return (
     <scrollbox
       flexGrow={1}
       paddingX={1}
       stickyScroll={true}
       stickyStart="bottom"
-      {...wheelBoost}
+      ref={boostWheel}
       verticalScrollbarOptions={{
         trackOptions: { backgroundColor: theme.backgroundPanel, foregroundColor: theme.border },
       }}

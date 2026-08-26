@@ -404,3 +404,25 @@ it("compact 工具点击展开：点卡后输出全文可见（G-6 真实 click 
   expect(frame).toContain("line1");
   expect(frame).toContain("line2");
 });
+
+it("滚轮滚动消息区：滚轮后内容滚动（F-2 滚轮加速接线，S2 回归锁定）", async () => {
+  const blocks: BlockView[] = Array.from({ length: 15 }, (_, i) => ({
+    kind: "message", id: `m${i}`, role: "user", text: `消息 ${i}`, thinkingCollapsed: true,
+  }));
+  const setup = await testRender(
+    () => <Messages blocks={blocks} modelLabel="m" />,
+    { width: 60, height: 10 },
+  );
+  await setup.waitForVisualIdle();
+  const before = setup.captureCharFrame();
+  // stickyScroll 贴底：首屏显示底部消息，顶部「消息 0」不在视野
+  expect(before).not.toContain("消息 0");
+  // 向上滚 3 次（每次 ×3 行）：离开底部、内容滚动（F-2 接线生效，S2 回归锁定——帧必须变化）
+  for (let i = 0; i < 3; i++) {
+    await setup.mockMouse.scroll(30, 5, "up");
+    await setup.waitForVisualIdle();
+  }
+  const after = setup.captureCharFrame();
+  // 帧必须变化 = 滚动接线生效（S2 回归锁定；具体滚动量取决于块高，不作精确断言）
+  expect(after, `SCROLL-AFTER=${JSON.stringify(after)}`).not.toEqual(before);
+});

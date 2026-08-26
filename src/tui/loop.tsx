@@ -406,11 +406,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
           if (promptText) {
             copyToClipboard(promptText);
             showToast(`已复制 ${Array.from(promptText).length} 个字符到剪贴板`);
+            commit({ ...state, prompt: { ...state.prompt, sel: null } });
+            r?.clearSelection?.();
+            return;
           }
+          // 输入框选区为空（Shift 选过但无文本）：清选区后回落消息区拖选复制（审查 M2 行为与注释一致）
           commit({ ...state, prompt: { ...state.prompt, sel: null } });
-          // 输入框复制同样清消息区残留选区（审查 L-4）
-          r?.clearSelection?.();
-          return;
         }
         const sel = r?.getSelection?.();
         const text = sel?.getSelectedText?.();

@@ -9,7 +9,7 @@
  * 把光标应处的终端行列写入 tuiCursor，loop 的 postProcessFn 每帧 setCursorPosition 定位原生终端
  * 光标（绝对定位不占格，闪烁由 loop 定时器控制）。
  */
-import { createMemo, onCleanup } from "solid-js";
+import { createMemo, createRenderEffect, onCleanup } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { PromptState, SelectionAnchor, SlashCandidate } from "../state.js";
@@ -89,19 +89,22 @@ export function PromptView(props: {
   bottomRows?: number;
 }): JSX.Element {
   const dims = useTerminalDimensions();
-  // 每次渲染更新终端光标状态：showCursor 时定位并启用（loop postProcessFn 每帧 setCursorPosition），
-  // 隐藏态（connect key 弹窗输入）停用并隐藏——弹窗内 key 光标用插入字符保持
-  if (props.showCursor !== false) {
-    const pos = promptCursorPosition(props.prompt, dims().height ?? 20, props.bottomRows ?? 2);
-    tuiCursor.row = pos.row;
-    tuiCursor.col = pos.col;
-    tuiCursor.enabled = true;
-    tuiCursor.visible = true; // 输入/移动后立即亮，不等下一闪烁相位（审查 D-1）
-  } else {
-    tuiCursor.enabled = false;
-    tuiCursor.visible = false;
-  }
-  // 卸载（全屏 /session 页隐藏输入框）复位：停闪烁定时器并隐藏，防残留光标+持续重渲（审查 D-1）
+  // 每次渲染更新终端光标状态（S1 修正：组件体顶层不随 props 重跑，必须 createRenderEffect 建立响应式订阅）：
+  // showCursor 时定位并启用（loop postProcessFn 每帧 setCursorPosition），隐藏态（connect key 弹窗输入）
+  // 停用并隐藏——弹窗内 key 光标用插入字符保持
+  createRenderEffect(() => {
+    if (props.showCursor !== false) {
+      const pos = promptCursorPosition(props.prompt, dims().height ?? 20, props.bottomRows ?? 2);
+      tuiCursor.row = pos.row;
+      tuiCursor.col = pos.col;
+      tuiCursor.enabled = true;
+      tuiCursor.visible = true; // 输入/移动后立即亮，不等下一闪烁相位
+    } else {
+      tuiCursor.enabled = false;
+      tuiCursor.visible = false;
+    }
+  });
+  // 卸载（全屏 /session 页隐藏输入框）复位：停闪烁定时器并隐藏，防残留光标+持续重渲
   onCleanup(() => {
     tuiCursor.enabled = false;
     tuiCursor.visible = false;

@@ -5,6 +5,7 @@ import { testRender } from "@opentui/solid";
 import { it, expect, describe } from "vitest";
 import { PromptView, promptCursorPosition } from "../../src/tui/view/Prompt.js";
 import { createChannel } from "../../src/tui/loop.js";
+import { tuiCursor } from "../../src/tui/cursor.js";
 import type { PromptState, SlashCandidate } from "../../src/tui/state.js";
 
 const prompt = (over: Partial<PromptState> = {}): PromptState => ({
@@ -85,4 +86,22 @@ it("光标位置随 curCol 移动（D-1：不再渲染插入字符「│」，�
   const colAfterLeft = promptCursorPosition(channel.state.prompt, 4, 2).col;
   // 左移一格：光标列前进 1（a 是 1 列宽）
   expect(colAfterLeft).toBe(colAtEnd - 1);
+});
+
+it("输入/移动后 tuiCursor 实际更新（S1 回归：组件体 createRenderEffect 响应式，非仅挂载一次）", async () => {
+  const channel = createChannel([]);
+  const setup = await testRender(
+    () => <PromptView prompt={channel.state.prompt} />,
+    { width: 40, height: 4 },
+  );
+  await setup.waitForVisualIdle();
+  const mountCol = tuiCursor.col;
+  // 输入 "ab"：光标列应 +2（组件体若只在挂载跑一次会停旧值，此断言锁响应式接线）
+  channel.onAction({ type: "input", text: "ab" });
+  await setup.waitForVisualIdle();
+  expect(tuiCursor.col).toBe(mountCol + 2);
+  // 左移一格：光标列 -1
+  channel.onAction({ type: "cursor", dir: "left" });
+  await setup.waitForVisualIdle();
+  expect(tuiCursor.col).toBe(mountCol + 1);
 });
