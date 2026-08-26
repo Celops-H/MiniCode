@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "tsx src/cli/app.ts",
     "dev:tui": "cross-env NODE_OPTIONS=--experimental-ffi vite-node src/tui/dev.tsx",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cross-env VITE_TUI_BUILD=1 vite build",
     "typecheck": "tsc --noEmit",
     "test": "cross-env NODE_OPTIONS=--experimental-ffi vitest run"
   },

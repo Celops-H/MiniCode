@@ -36,6 +36,23 @@ export default defineConfig({
       { find: /^solid-js(\/.*)?$/, replacement: solidJsEntry },
     ],
   },
+  // TUI 生产构建（⑤minicode tui build）：SSR bundle src/tui/index.tsx → dist/tui/index.js，
+  // 由 tsc 编译出的 CLI（dist/cli/app.js）dynamic import 接管 `minicode tui`。
+  // solid-js/@opentui/solid 打进 bundle（alias 单实例），其余依赖（@opentui/core 含原生 FFI
+  // 子包、openai/commander/zod 与 node 内建）保持 external 走常规 node_modules 解析。
+  ...(process.env.VITE_TUI_BUILD
+    ? {
+        build: {
+          ssr: "src/tui/index.tsx",
+          outDir: "dist/tui",
+          emptyOutDir: true,
+          rollupOptions: {
+            output: { format: "esm", entryFileNames: "index.js" },
+            external: [/^node:/, /^@opentui\/core/, "openai", "commander", "zod"],
+          },
+        },
+      }
+    : {}),
   // node:ffi 是 Node 26 新增实验内建，vite 8 解析器未把它当 node 内建 external，
   // 需显式标注，否则 dev:tui（vite-node）加载 win32.ts 报 Cannot find package 'node:ffi'
   ssr: {
