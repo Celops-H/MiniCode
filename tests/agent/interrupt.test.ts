@@ -270,7 +270,11 @@ describe("Agent 主循环：turn 内真打断", () => {
     const body = secondBody as { messages: Array<Record<string, unknown>> };
     for (const msg of body.messages) {
       if (msg.role === "assistant") {
-        expect(msg.content ?? msg.tool_calls).toBeTruthy();
+        // 语义明确：content 或 tool_calls 至少一个非空（空数组也是 falsy 误判，用 length 判定）
+        expect(
+          (Array.isArray(msg.content) ? (msg.content as unknown[]).length : 0) > 0 ||
+            (Array.isArray(msg.tool_calls) ? (msg.tool_calls as unknown[]).length : 0) > 0,
+        ).toBe(true);
       }
     }
   });

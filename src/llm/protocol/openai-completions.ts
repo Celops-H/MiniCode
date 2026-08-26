@@ -38,7 +38,11 @@ export class OpenAICompletionsProtocol implements Protocol {
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
   buildRequest(context: Context): unknown {
-    const converted = context.messages.map((message) => toOpenAIMessage(message, this.reasoningContent));
+    // 跳过既无 content 也无 tool_calls 的 assistant：完整轮无任何产出时 runTurn 会落 content:[] 的
+    // 空 assistant，续跑把它带给厂商会 400（与 A400 同类残留面）——无信息的消息直接不发更安全
+    const converted = context.messages
+      .map((message) => toOpenAIMessage(message, this.reasoningContent))
+      .filter((m) => !(m.role === "assistant" && m.content == null && m.tool_calls == null));
     return {
       // 系统提示词作为首条 system 消息进请求体（空则不占位，厂商拒空 system）
       messages: context.systemPrompt

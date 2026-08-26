@@ -113,6 +113,32 @@ describe("buildRequest：消息与工具转换", () => {
     expect((req.messages[1] as Record<string, unknown>).reasoning_content).toBeUndefined();
   });
 
+  it("reasoningContent 模式：thinking + tool_call（无正文）→ reasoning_content 与 tool_calls 并存", () => {
+    const reasoningProtocol = new OpenAICompletionsProtocol({ reasoningContent: true });
+    const context = createContext("s", [
+      assistantMessage([
+        { type: "thinking", thinking: "决定先读文件" },
+        { type: "tool_call", id: "call_1", name: "read", input: { path: "a.ts" } },
+      ]),
+    ]);
+    const req = reasoningProtocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    // 思考后直接调工具：thinking 回传 reasoning_content、调用序列化 tool_calls，产品不退化
+    expect(req.messages[1]).toEqual({
+      role: "assistant",
+      tool_calls: [
+        { id: "call_1", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } },
+      ],
+      reasoning_content: "决定先读文件",
+    });
+  });
+
+  it("空 assistant（无文本/无工具/无思考）续跑时从请求体丢弃（防 400 残留面）", () => {
+    const context = createContext("s", [assistantMessage([])]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    // 完整轮无任何产出落下的空 assistant 没有信息，直接不发
+    expect(req.messages).toEqual([{ role: "system", content: "s" }]);
+  });
+
   it("工具 schema 转换为 function 格式", () => {
     const context = createContext("s", [], [
       { name: "read", description: "读文件", inputSchema: { type: "object", properties: { path: { type: "string" } } } },
