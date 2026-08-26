@@ -127,7 +127,7 @@ async function runTuiSession(
           return permissionModeBox.value;
         },
       };
-      const { agent } = createSessionAgent({
+      const { agent, team } = createSessionAgent({
         modelClient: models,
         modelId,
         systemPrompt: SYSTEM_PROMPT,
@@ -151,7 +151,7 @@ async function runTuiSession(
           await store.flush();
         },
       });
-      return { agent };
+      return { agent, team };
     },
   });
 }

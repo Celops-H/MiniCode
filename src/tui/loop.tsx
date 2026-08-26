@@ -18,7 +18,7 @@ import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
-import type { Agent } from "../agent/index.js";
+import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import type { HookBus as HookBusType } from "../hooks/index.js";
@@ -54,12 +54,12 @@ export function createChannel(initialMessages: Message[]): TuiChannel {
 const TOAST_MS = 5000;
 
 export interface TuiLoopOptions {
-  /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent */
+  /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent（多 agent 时带 team，供级联中断/收尾清理） */
   assemble: (channel: {
     approver: PermissionApprover;
     feedRoot: (event: StreamEvent) => void;
     hooks: HookBusType;
-  }) => { agent: Agent };
+  }) => { agent: Agent; team?: Team };
   store: SessionStore;
   session: Session;
   hooks?: HookBusType;
@@ -80,6 +80,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   const [state, setState] = createStore<TuiState>(initState(session.getMessages(), session.meta.title));
 
   let agent: Agent;
+  /** 多 agent 团队（assemble 装配；Esc 级联中断子 agent、退出清理用；单 agent 时 undefined） */
+  let team: Team | undefined;
   let runningLoop = true;
   let wake: (() => void) | undefined;
   const pendingInputs: string[] = [];
@@ -347,9 +349,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     wake = undefined;
   };
 
-  /** 打断当前轮：中断 agent + 拒绝待批权限 + 忽略迟到增量 + 界面收尾（运行态 Esc 走这里） */
+  /** 打断当前轮：级联中断全部子 agent（多 agent）或主 agent（单 agent）+ 拒绝待批权限 + 忽略迟到增量 + 界面收尾 */
   const doInterrupt = (): void => {
-    agent.interrupt();
+    if (team) team.interruptAll();
+    else agent.interrupt();
     resolvePermission("deny", "用户打断");
     ignoreStream = true;
     commit(interruptTurn(state));
@@ -612,7 +615,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   );
 
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
-  ({ agent } = options.assemble({ approver, feedRoot, hooks }));
+  ({ agent, team } = options.assemble({ approver, feedRoot, hooks }));
 
   // 订阅 Hook 事件渲染（会话/工具/子 agent）都进同一 reducer
   const unsubscribeHooks = [
@@ -678,6 +681,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     } catch {
       // 会话结束事件处理失败不阻断退出
     }
+    // 会话收尾清理团队：中断活跃子 agent、清空注册表（防后台 resume 循环吊住进程、成员残留到下次装配）
+    team?.clear();
   }
   // /session 切换到其它会话 / /connect 重建链：只有改会话或请求重建任一发生才返回信号；
   // 仅 reconfigure（connect 保持同会话）时 switchTo 留空，由装配层加载同一会话
