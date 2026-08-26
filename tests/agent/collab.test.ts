@@ -213,6 +213,56 @@ describe("协作工具集（多 agent 环境）", () => {
     }
     const result = root.getMessages().find((m) => m.role === "tool_result");
     expect(String(result?.content)).toContain("/root/worker");
+    // 状态跟真实运行同步：worker 空闲（从未驱动）→ 标「空闲」而非默认「活跃」（问题 65 Bug2）
+    expect(String(result?.content)).toContain("空闲");
+    expect(String(result?.content)).not.toContain("活跃");
+  });
+
+  it("list_agents：运行中成员标「运行中」（状态跟真实运行同步，问题 65 Bug2）", async () => {
+    const team = new Team();
+    const root = new Agent({ modelClient: toolThenTextClient("x", {}), modelId: "mock", systemPrompt: "助手", team });
+    team.registerRoot(root);
+    // worker 第一轮调慢工具（挂起 200ms），期间在 resume 循环里 isActive=true
+    const worker = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "r1", name: "read" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "总结" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      tools: [
+        {
+          name: "read",
+          description: "慢读",
+          inputSchema: z.object({}),
+          isReadOnly: true,
+          requiresUserInteraction: false,
+          maxResultSizeChars: 100,
+          execute: async () => {
+            await sleep(200);
+            return "内容";
+          },
+        },
+      ],
+    });
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    team.commitSpawn(path, worker);
+    // 后台驱动 worker 跑起来：慢工具执行期间 isActive
+    await team.sendMessage(path, { type: "NEW_TASK", from: AgentPath.root(), content: "读", triggerTurn: true });
+    await sleep(30);
+    const tool = collabTool(team, "list_agents");
+    expect(await tool.execute({})).toContain("/root/worker（运行中）");
+    await sleep(250); // 等 worker 收尾，避免后台循环残留
   });
 
   it("send_message：目标不存在 / 绝对路径 / 空消息错误回灌", async () => {
@@ -568,6 +618,18 @@ describe("协作工具集（多 agent 环境）", () => {
     // 守卫：root 不可被中断（root 也被前置的 isRoot 检查拦住，自己守卫是子 agent 场景）
     const intTool = collabTool(team, "interrupt_agent");
     expect(await intTool.execute({ target: "/root" })).toContain("不能被中断");
+  });
+
+  it("interrupt_agent：目标不存在返回错误（有效性校验，防静默成功假象）", async () => {
+    const team = new Team();
+    const tool = collabTool(team, "interrupt_agent");
+    expect(await tool.execute({ target: "nobody" })).toContain("不存在");
+  });
+
+  it("followup_task：目标不存在返回错误（有效性校验，防静默投递假象）", async () => {
+    const team = new Team();
+    const tool = collabTool(team, "followup_task");
+    expect(await tool.execute({ target: "nobody", message: "继续" })).toContain("不存在");
   });
 
   it("interrupt 核心语义：正在跑的 agent 被中断后当前 turn 结束即停止", async () => {

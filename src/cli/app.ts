@@ -123,7 +123,7 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
   const write = (text: string): void => {
     process.stdout.write(text);
   };
-  const { agent } = createSessionAgent({
+  const { agent, team } = createSessionAgent({
     modelClient: models,
     modelId: session.meta.model,
     systemPrompt: SYSTEM_PROMPT,
@@ -163,6 +163,8 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     // 会话结束（DESIGN 13.3：会话级事件由宿主触发）；
     // try/finally 兜底：interact 内抛错（如模型流错误）也要触发 SessionEnd，观测事件不缺失
     await hooks?.emit({ type: "SessionEnd" });
+    // 会话收尾清理团队：中断活跃子 agent、清空注册表（防后台 resume 循环吊住进程、成员残留）
+    team?.clear();
   }
   rl.close();
 }

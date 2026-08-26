@@ -163,7 +163,14 @@ function listAgentsTool(deps: CollabDeps): Tool {
     execute: () => {
       const members = deps.team.listAgents();
       if (members.length === 0) return "团队暂无其他成员";
-      return members.map((member) => `${member.path}（${member.agent ? "活跃" : "未激活"}）`).join("\n");
+      // 状态跟真实运行（resume 循环在跑）同步，不是「有 agent 实例就标活跃」（问题 65 Bug2）
+      return members
+        .map((member) => {
+          const agent = member.agent;
+          const state = agent ? (agent.isActive() ? "运行中" : "空闲") : "未激活";
+          return `${member.path}（${state}）`;
+        })
+        .join("\n");
     },
   };
 }

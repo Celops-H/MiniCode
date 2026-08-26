@@ -181,6 +181,33 @@ export class Team {
   }
 
   /**
+   * 级联中断全部子 agent（Esc 打断 / 退出前兜底）：对每个持有 agent 的成员调 interrupt，
+   * 让活跃的 resume 循环尽快收尾（模型流/工具执行中止、不再产出新事件），root 同样被中断。
+   */
+  interruptAll(): void {
+    for (const member of this.members.values()) {
+      member.agent?.interrupt();
+    }
+  }
+
+  /**
+   * 会话收尾清理（SessionEnd 后调用）：中断全部活跃 agent、清空注册表/派生计数/待驱动队列。
+   * 防后台 resume 循环吊住进程不退（问题 37 退出残留），成员记录也不泄漏到下一生命周期。
+   */
+  clear(): void {
+    this.interruptAll();
+    // 先按 releaseSpawn 同款清理各成员挂的 worktree（避免 clear 绕过清理变孤儿目录），再清注册表
+    for (const member of [...this.members.values()]) {
+      if (member.worktree) this.abortChildWorktree(member.path);
+    }
+    this.members.clear();
+    this.pendingDrives.clear();
+    this.spawnCount = 0;
+    // activeExecutions 不显式归零：driveAgent 是即发即忘的后台驱动，clear 时通常有在途 consumeDriving
+    // 循环持槽位，其 finally 的 release() 会自然排干计数；显式归零会让迟到 release 把计数减成负数（并发槽位失真）
+  }
+
+  /**
    * 投递消息到目标 agent 邮箱（DESIGN 11.3）。
    * 唤醒型消息（triggerTurn）投递后立即后台驱动目标续跑，不阻塞投递方
    * （对齐投递 → 通知 → 目标续跑语义；并发满时留待下次投递驱动）。

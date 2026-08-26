@@ -107,4 +107,30 @@ describe("Team（注册表与并发限制）", () => {
     expect(typeof team.acquireExecution()).not.toBe("string");
     (release1 as () => void)();
   });
+
+  it("interruptAll：级联中断全部子 agent（Esc 打断/退出兜底语义）", () => {
+    const team = new Team();
+    team.registerRoot(makeAgent());
+    const child = makeAgent();
+    const path = team.reserveSpawn(AgentPath.root(), "task_1") as AgentPath;
+    team.commitSpawn(path, child);
+    const grand = makeAgent();
+    const grandPath = team.reserveSpawn(path, "task_2") as AgentPath;
+    team.commitSpawn(grandPath, grand);
+    team.interruptAll();
+    // 所有已登记成员（子 + 孙）都被中断置位
+    expect(team.resolveAgent(path)?.agent?.isInterrupted()).toBe(true);
+    expect(team.resolveAgent(grandPath)?.agent?.isInterrupted()).toBe(true);
+  });
+
+  it("clear：会话收尾清空注册表（root 与全部子 agent），成员不残留", () => {
+    const team = new Team();
+    team.registerRoot(makeAgent());
+    const path = team.reserveSpawn(AgentPath.root(), "task_1") as AgentPath;
+    team.commitSpawn(path, makeAgent());
+    team.clear();
+    expect(team.listAgents()).toHaveLength(0);
+    expect(team.resolveAgent(path)).toBeUndefined();
+    expect(team.resolveAgent(AgentPath.root())).toBeUndefined();
+  });
 });
