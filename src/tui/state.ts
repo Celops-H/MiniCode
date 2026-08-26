@@ -200,6 +200,8 @@ export interface TuiState {
   prompt: PromptState;
   streaming: Streaming | undefined;
   status: "idle" | "running";
+  /** 会话标题（状态行显示；/rename 时同步，/session 重建时由装配层传入；空显示「新会话」） */
+  title: string;
   /** 当前权限模式（default/plan/bypassPermissions）：Shift+Tab 切换，回灌后端 PermissionPipeline；显示名见 permissionModeLabel */
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
@@ -266,8 +268,8 @@ export function promptEmpty(prompt: PromptState): boolean {
   return prompt.lines.every((l) => l.length === 0) && prompt.lines.length === 1;
 }
 
-/** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending） */
-export function initState(messages: Message[]): TuiState {
+/** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步） */
+export function initState(messages: Message[], title = ""): TuiState {
   const blocks: BlockView[] = [];
   for (const message of messages) {
     if (message.role === "user") {
@@ -327,6 +329,7 @@ export function initState(messages: Message[]): TuiState {
     prompt: emptyPrompt([]),
     streaming: undefined,
     status: "idle",
+    title,
     permissionMode: "default",
     thinkingLevel: undefined,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],

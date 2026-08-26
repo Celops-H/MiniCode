@@ -62,7 +62,7 @@ const asciiOf = (chunks: Uint8Array[]): string =>
 it("完整 App（testRender）：store 更新后输入框出现输入字符", async () => {
   const channel = createChannel([]);
   const setup = await testRender(
-    () => <App state={channel.state} model="m" sessionId="s" onAction={channel.onAction} />,
+    () => <App state={channel.state} model="m" onAction={channel.onAction} />,
     { width: 40, height: 8 },
   );
   await setup.waitForVisualIdle();
@@ -87,7 +87,7 @@ it("真实 CliRenderer（headless mock 流）：store 更新后输出字节含�
     const onAction = (action: Parameters<typeof reduceAction>[1]): void => {
       commit(reduceAction(state, action));
     };
-    await render(() => <App state={state} model="m" sessionId="s" onAction={onAction} />, renderer as never);
+    await render(() => <App state={state} model="m" onAction={onAction} />, renderer as never);
     // 等首帧绘出
     await new Promise((r) => setTimeout(r, 200));
     const before = mockOut.written.length;

@@ -19,10 +19,9 @@ import { AgentStrip } from "./AgentStrip.js";
 import { theme } from "./theme.js";
 
 export interface AppProps {
-  /** 界面状态（Solid store proxy，属性访问即响应式） */
+  /** 界面状态（Solid store proxy，属性访问即响应式；title 在 state 内，/rename 同步） */
   state: TuiState;
   model: string;
-  sessionId: string;
   /** 键盘/动作 → reducer + 副作用（loop 提供） */
   onAction: (action: TuiAction) => void;
 }
@@ -63,7 +62,7 @@ export function App(props: AppProps): JSX.Element {
         // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
         showCursor={props.state.modal?.kind !== "connect-key"}
       />
-      <StatusBar model={props.model} sessionId={props.sessionId} status={props.state.status} permissionMode={props.state.permissionMode} />
+      <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
       {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
     </box>
   );

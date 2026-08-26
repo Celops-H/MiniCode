@@ -67,7 +67,7 @@ export interface TuiLoopOptions {
 export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
   const { store, session, modelLabel } = options;
   const hooks: HookBusType = options.hooks ?? new HookBus();
-  const [state, setState] = createStore<TuiState>(initState(session.getMessages()));
+  const [state, setState] = createStore<TuiState>(initState(session.getMessages(), session.meta.title));
 
   let agent: Agent;
   let runningLoop = true;
@@ -231,18 +231,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/rename" || command.startsWith("/rename ")) {
-      // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化）
-      const title = command.slice("/rename".length).trim();
-      if (!title) {
+      // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化），
+      // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）
+      const renameTitle = command.slice("/rename".length).trim();
+      if (!renameTitle) {
         showToast("用法：/rename 会话名");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       } else {
-        session.meta.title = title;
+        session.meta.title = renameTitle;
+        commit({ ...state, title: renameTitle, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
         void store
           .rewriteMessages(session, session.getMessages())
-          .then(() => showToast(`会话已重命名：${title}`))
+          .then(() => showToast(`会话已重命名：${renameTitle}`))
           .catch(() => showToast("重命名失败：写入会话文件出错"));
       }
-      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
       return;
     }
     if (command === "/clear") {
@@ -538,7 +540,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   win32DisableProcessedInput();
 
   await render(
-    () => <App state={state} model={modelLabel} sessionId={session.meta.id} onAction={handleAction} />,
+    () => <App state={state} model={modelLabel} onAction={handleAction} />,
     renderer,
   );
 

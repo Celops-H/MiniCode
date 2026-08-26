@@ -29,7 +29,7 @@ describe("view/App 渲染链", () => {
     const channel = createChannel([]);
     const setup = await testRender(
       () => (
-        <App state={channel.state} model="test-model" sessionId="abc123" onAction={channel.onAction} />
+        <App state={channel.state} model="test-model" onAction={channel.onAction} />
       ),
       { width: 64, height: 8 },
     );
@@ -43,7 +43,7 @@ describe("view/App 渲染链", () => {
     const channel = createChannel([]);
     const setup = await testRender(
       () => (
-        <App state={channel.state} model="test-model" sessionId="abc123" onAction={channel.onAction} />
+        <App state={channel.state} model="test-model" onAction={channel.onAction} />
       ),
       { width: 44, height: 8 },
     );
@@ -58,12 +58,29 @@ describe("view/App 渲染链", () => {
     const channel = createChannel([]);
     const setup = await testRender(
       () => (
-        <App state={channel.state} model="model-blue" sessionId="abc123" onAction={channel.onAction} />
+        <App state={channel.state} model="model-blue" onAction={channel.onAction} />
       ),
       { width: 64, height: 8 },
     );
     await setup.waitForVisualIdle();
     expect(textFg(setup.captureSpans(), "model-blue")).toBe("#61afef");
+  });
+
+  it("状态行显示会话标题，/rename 同步更新（用户复核：会话名应随 /rename 变）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([], "重构 partition"));
+    const setup = await testRender(
+      () => (
+        <App state={state} model="m" onAction={() => {}} />
+      ),
+      { width: 64, height: 8 },
+    );
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("会话 重构 partition");
+    // /rename 更新 store title → 状态行会话名跟着变（非响应式会停旧值，此断言锁响应式）
+    setState({ title: "新标题" });
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("会话 新标题");
+    expect(setup.captureCharFrame()).not.toContain("会话 重构 partition");
   });
 
   it("底栏显示 agent 树：main + 子 agent 一行", async () => {
@@ -76,7 +93,7 @@ describe("view/App 渲染链", () => {
       ],
     };
     const setup = await testRender(
-      () => <App state={st} model="m" sessionId="s" onAction={channel.onAction} />,
+      () => <App state={st} model="m" onAction={channel.onAction} />,
       { width: 64, height: 12 },
     );
     await setup.waitForVisualIdle();
@@ -88,7 +105,7 @@ describe("view/App 渲染链", () => {
 
   it("live AgentSpawned 后底栏 agent 树刷新（曾因组件体常量 + App 布尔 memo 短路不刷新）", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
-    const setup = await testRender(() => <App state={state} model="m" sessionId="s" onAction={() => {}} />, { width: 64, height: 12 });
+    const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 12 });
     await setup.waitForVisualIdle();
     setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 0 }));
     await setup.waitForVisualIdle();

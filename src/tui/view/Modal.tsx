@@ -12,6 +12,7 @@ import type { JSX } from "@opentui/solid";
 import type { ModalState, ConnectPickModalState, ConnectKeyModalState } from "../state.js";
 import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
+import { colWidth, fitWidth } from "./fit.js";
 
 /** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项高亮 chip，随 ←→ 移动） */
 function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission" }> }): JSX.Element {
@@ -67,27 +68,6 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   // 行内容 = id6 · 标题 · 模型：按终端列宽截断加省略号（CJK 全宽字符占 2 列，按码点算会溢出折行
   //   ——折行破 1 行/条假设、顶出下边框，见 P1-3 修过的同型缺陷）。
   //   /rename 改会话标题经 rewriteMessages 落盘，listSessions 每次重读 meta，面板标题即时同步。
-  /** 终端展示列宽：东亚全宽/全角字符计 2 列，其余 1 列 */
-  const colWidth = (s: string): number => {
-    let w = 0;
-    for (const ch of Array.from(s)) w += /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1;
-    return w;
-  };
-  /** 按列宽截断：末尾省略号占 1 列；预算 ≤1 列时只剩省略号 */
-  const fitWidth = (t: string, maxCols: number): string => {
-    if (colWidth(t) <= maxCols) return t;
-    if (maxCols <= 1) return "…";
-    const chars = Array.from(t);
-    let out = "";
-    let w = 0;
-    for (const ch of chars) {
-      const cw = colWidth(ch);
-      if (w + cw + 1 > maxCols) break; // 留 1 列给省略号
-      out += ch;
-      w += cw;
-    }
-    return `${out}…`;
-  };
   const usable = cardWidth - 4; // 边框 2 + 行 paddingX 2
   const rows = createMemo(() => {
     const total = b.sessions.length;
