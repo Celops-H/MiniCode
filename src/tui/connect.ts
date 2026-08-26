@@ -1,8 +1,8 @@
 /**
- * /connect 供应商预设与连接写配置（TUI 新任务 3）。
- * 交互：/connect → 供应商弹窗选择 → 输入区输 API Key（Enter 确认）→ 写全局 config + 项目 .env → 重建会话。
+ * /connect 供应商预设与连接写配置。
+ * 交互：/connect → 供应商弹窗选择 → 弹窗内输 API Key（Enter 确认）→ 写全局 config + 项目 .env → 重建会话。
  * 写配置逻辑：
- * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider、modelChain 以默认模型打头、过 strict schema
+ * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider（不写 modelChain，模型切换归 /model 命令），过 strict schema
  * - 项目 .env：追加/替换 `${apiKeyEnv}=<key>`（幂等，重复连接更新值不重复追加）
  * 失败不抛进程：返回 { ok, error } 由 loop 展示 toast，进程保留。
  */

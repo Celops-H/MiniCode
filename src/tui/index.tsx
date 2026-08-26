@@ -58,7 +58,8 @@ export async function runTuiEntry(options: { sessionId?: string; agents?: boolea
   for (;;) {
     const result = await runTuiSession(store, models, config, session, options.agents ?? true, thinkingLevelBox);
     if (!result) break;
-    // /connect 成功后重建配置链：重读 config + .env，重建模型客户端与主模型（新会话落新模型）
+    // reconfigure（/connect 或 /model）重建配置链：重读 config + .env、重建模型客户端；
+    // switchTo 无值时保持当前会话续跑（connect 不切会话、/model 同会话切模型）
     if (result.reconfigure) {
       config = await loadConfig();
       await loadDotEnv();

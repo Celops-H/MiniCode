@@ -115,3 +115,34 @@ it("/model 弹窗：模型列表 + 思考等级行 + 键位提示", async () => 
   expect(frame).toContain("medium");
   expect(frame).toContain("←→");
 });
+
+it("/connect key 输入弹窗：供应商/环境变量/键位提示；key 输入进度随弹窗内 state 变更重渲", async () => {
+  const [modal, setModal] = createStore<ModalState>({
+    kind: "connect-key",
+    providerId: "deepseek",
+    providerName: "DeepSeek",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    defaultModel: "deepseek-chat",
+    key: "",
+  });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 8 });
+  await setup.waitForVisualIdle();
+  let frame = setup.captureCharFrame();
+  expect(frame).toContain("输入 API Key");
+  expect(frame).toContain("DeepSeek");
+  expect(frame).toContain("DEEPSEEK_API_KEY");
+  expect(frame).toContain("未输入");
+  // 弹窗内嵌状态变更（key 追加）能重渲——同类「For+标量不刷新」风险位（本组件读 b.key 文本）
+  setModal({
+    kind: "connect-key",
+    providerId: "deepseek",
+    providerName: "DeepSeek",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    defaultModel: "deepseek-chat",
+    key: "sk-123456",
+  });
+  await setup.waitForVisualIdle();
+  frame = setup.captureCharFrame();
+  expect(frame).toContain("sk-123456");
+  expect(frame).not.toContain("未输入");
+});

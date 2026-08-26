@@ -157,6 +157,7 @@ function ConnectKeyModal(props: { modal: Extract<ModalState, { kind: "connect-ke
         <text paddingX={1} paddingY={1}>
           连接供应商 {b.providerName}，默认模型 {b.defaultModel}。输入 {b.apiKeyEnv}：
         </text>
+        {/* key 展示：≤24 字符全文显示，超长截断保留末 12 位（通常是对照项），防整屏换行溢出 */}
         <text paddingX={2} fg={theme.foregroundAccent}>
           {b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）"}
         </text>

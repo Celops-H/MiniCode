@@ -280,26 +280,37 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 }, candidate: undefined });
   };
 
-  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config + 项目 .env。
-   *  成功只请求装配层重读配置并重建（reconfigure=true，不 switchTo——保持当前会话与模型）；
-   *  失败 toast 提示并清空 key 保留弹窗，可直接重输。 */
+  /** 连接写盘是否进行中（防重入：连按 Enter 并发写全局 config 会 read-modify-write 互相覆盖，丢其它配置） */
+  let connecting = false;
+
+  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config + 项目 .env。 */
   const submitConnectKey = async (): Promise<void> => {
     const conn = state.modal;
     if (!conn || conn.kind !== "connect-key") return;
     const preset = PROVIDER_PRESETS.find((p) => p.id === conn.providerId);
     if (!preset) return;
-    const key = conn.key.trim();
-    const result = await connectProvider(preset, key);
-    // await 期间用户可能已按 Esc 取消（弹窗关闭）：取消后不再重建、不再动弹窗
-    if (state.modal?.kind !== "connect-key") return;
-    if (result.ok) {
-      showToast(`${conn.providerName} 已连接，正在重建会话…`);
-      pendingReconfigure = true;
-      exitLoop();
-      return;
+    if (connecting) return;
+    connecting = true;
+    try {
+      const key = conn.key.trim();
+      const result = await connectProvider(preset, key);
+      // await 期间用户 Esc 取消（弹窗关闭）：写配置副作用已发生、不可中止——配置实际已写入，
+      // 提示用户；当前会话未重建（模型保持），要使用新厂商可再 /model 选
+      if (state.modal?.kind !== "connect-key") {
+        if (result.ok) showToast("配置已写入（连接成功），当前会话未切换：可 /model 使用新厂商");
+        return;
+      }
+      if (result.ok) {
+        showToast(`${conn.providerName} 已连接，正在重建会话…`);
+        pendingReconfigure = true;
+        exitLoop();
+        return;
+      }
+      showToast(result.error ?? "连接失败");
+      commit({ ...state, modal: { ...conn, key: "" } });
+    } finally {
+      connecting = false;
     }
-    showToast(result.error ?? "连接失败");
-    commit({ ...state, modal: { ...conn, key: "" } });
   };
 
   /** /compact：强制压缩 + 历史重写落盘 */

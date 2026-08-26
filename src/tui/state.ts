@@ -90,7 +90,7 @@ export interface SessionModalState {
   selected: number;
 }
 
-/** /connect 供应商选择弹窗：横向可选供应商列表（选中即默认模型打头 modelChain） */
+/** /connect 供应商选择弹窗：可选供应商列表（选中后留在弹窗进入 key 输入态，见 connect-key） */
 export interface ConnectPickModalState {
   kind: "connect";
   providers: Array<{ id: string; name: string; defaultModel: string }>;
