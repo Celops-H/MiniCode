@@ -1,5 +1,8 @@
 import type { Message } from "./message.js";
 
+/** 思考等级（reasoning effort）：低/中/高；缺省由厂商默认，仅支持 reasoning_effort 的厂商生效 */
+export type ThinkingLevel = "low" | "medium" | "high";
+
 /** 工具定义：Context 携带给模型，工具系统在此基础上扩展 */
 export interface ToolDefinition {
   name: string;
@@ -13,6 +16,8 @@ export interface Context {
   systemPrompt: string;
   messages: Message[];
   tools: ToolDefinition[];
+  /** 思考等级（可选）：模型调用时透传 reasoning_effort（仅声明支持的厂商） */
+  thinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -20,14 +25,16 @@ export interface Context {
  * @param systemPrompt 系统提示词，告诉模型「你是谁、干什么」
  * @param messages 对话历史，从早到晚排列
  * @param tools 可用工具清单，序列化为模型可见定义
+ * @param thinkingLevel 思考等级（可选，透传请求参数）
  * @returns Context 对象
  */
 export function createContext(
   systemPrompt: string,
   messages: Message[] = [],
   tools: ToolDefinition[] = [],
+  thinkingLevel?: ThinkingLevel,
 ): Context {
-  return { systemPrompt, messages, tools };
+  return { systemPrompt, messages, tools, ...(thinkingLevel ? { thinkingLevel } : {}) };
 }
 
 /**

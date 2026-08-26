@@ -10,7 +10,7 @@ import { Logger } from "../logger/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import type { Tool } from "../tools/index.js";
-import type { Message } from "../core/index.js";
+import type { Message, ThinkingLevel } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { ModelClient } from "../agent/index.js";
 import type { Config } from "../config/index.js";
@@ -189,6 +189,8 @@ export function createSessionAgent(options: {
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;
+  /** 思考等级活引用（/@/model 左右调整实时生效）：每轮读一次透传 reasoning_effort（仅支持的厂商） */
+  thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
   onRootEvent?: (event: StreamEvent) => void;
 }): { agent: Agent; team?: Team } {

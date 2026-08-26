@@ -1,6 +1,7 @@
 import {
   assembleAssistantMessage,
   createContext,
+  type ThinkingLevel,
   toolCallsOf,
   toolResultMessage,
   userMessage,
@@ -84,6 +85,8 @@ export interface AgentOptions {
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
+  /** 思考等级活引用（\`/@/model 左右调整实时生效\`）：每轮组装 Context 时读一次，透传 reasoning_effort（仅支持的厂商） */
+  thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2）；缺省进程 cwd */
   cwd?: string;
   /**
@@ -147,11 +150,14 @@ export class Agent {
   private interrupted = false;
   /** 当前轮的中断信号（turn 内真打断）：interrupt 中止进行中的模型流/工具执行；start 新建复位 */
   private interruptController = new AbortController();
+  /** 思考等级活引用（每轮组装 Context 时读一次；undefined=用厂商默认） */
+  private readonly thinkingLevelRef?: () => ThinkingLevel | undefined;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
     this.modelId = options.modelId;
     this.systemPrompt = options.systemPrompt;
+    this.thinkingLevelRef = options.thinkingLevelRef;
     this.maxTurns = options.maxTurns ?? 10;
     this.toolTimeoutMs = options.toolTimeoutMs ?? TOOL_READONLY_TIMEOUT_MS;
     this.compactConfig = options.compactConfig;
@@ -346,7 +352,7 @@ export class Agent {
         this.messages.push(userMessage(formatMailMessage(mail), "system"));
       }
     }
-    let context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
+    let context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
     const collected: StreamEvent[] = [];
     // 超窗应急剥组重发（DESIGN 9.6）：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
     // 不做摘要；剥组与重试有上限，超限直接报错并恢复剥前消息（剥组是重试手段，失败不留副作用）
@@ -379,7 +385,7 @@ export class Agent {
         }
         this.messages = peeled;
         this.historyRewritten = true; // 已落盘的工具回合被剥除
-        context = createContext(this.systemPrompt, this.messages, this.registry.definitions());
+        context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
         collected.length = 0;
         retryAttempts++;
       }

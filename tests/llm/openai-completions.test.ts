@@ -16,6 +16,17 @@ async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
 const protocol = new OpenAICompletionsProtocol();
 
 describe("buildRequest：消息与工具转换", () => {
+  it("emitReasoningEffort 开关 + context.thinkingLevel → 请求体带 reasoning_effort；否则不带", () => {
+    const effProtocol = new OpenAICompletionsProtocol({ emitReasoningEffort: true });
+    const withEff = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium")) as { reasoning_effort?: string };
+    expect(withEff.reasoning_effort).toBe("medium");
+    // 无 thinkingLevel：不带该字段
+    const noLevel = effProtocol.buildRequest(createContext("s", [userMessage("hi")])) as { reasoning_effort?: string };
+    expect(noLevel.reasoning_effort).toBeUndefined();
+    // 未开 emit 的厂商（deepseek/qwen 等）：即使带 thinkingLevel 也不发（防 400）
+    const notEmit = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high")) as { reasoning_effort?: string };
+    expect(notEmit.reasoning_effort).toBeUndefined();
+  });
   it("user / assistant / tool_result 消息转换", () => {
     const context = createContext(
       "助手",

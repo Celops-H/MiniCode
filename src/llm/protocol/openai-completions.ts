@@ -24,9 +24,12 @@ export class OpenAICompletionsProtocol implements Protocol {
 
   /** DeepSeek 等推理厂商：assistant 的 thinking 块回传为 reasoning_content 字段 */
   private readonly reasoningContent: boolean;
+  /** 支持 reasoning_effort 请求参数的厂商（仅 OpenAI 系；其余厂商发该字段可能 400，不 emit） */
+  private readonly emitReasoningEffort: boolean;
 
-  constructor(options: { reasoningContent?: boolean } = {}) {
+  constructor(options: { reasoningContent?: boolean; emitReasoningEffort?: boolean } = {}) {
     this.reasoningContent = options.reasoningContent ?? false;
+    this.emitReasoningEffort = options.emitReasoningEffort ?? false;
   }
 
   /**
@@ -42,6 +45,8 @@ export class OpenAICompletionsProtocol implements Protocol {
         ? [{ role: "system", content: context.systemPrompt }, ...converted]
         : converted,
       ...(context.tools.length > 0 ? { tools: context.tools.map(toOpenAITool) } : {}),
+      // 思考等级：仅支持的厂商按用户设定透传 reasoning_effort（@/model 左右调整）
+      ...(this.emitReasoningEffort && context.thinkingLevel ? { reasoning_effort: context.thinkingLevel } : {}),
     };
   }
 

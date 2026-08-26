@@ -5,7 +5,7 @@ export {
   toolCallsOf,
 } from "./message.js";
 export { createContext, appendMessage } from "./context.js";
-export type { Context, ToolDefinition } from "./context.js";
+export type { Context, ToolDefinition, ThinkingLevel } from "./context.js";
 export type { StreamEvent } from "./events.js";
 export { assembleAssistantMessage } from "./assemble.js";
 export type {

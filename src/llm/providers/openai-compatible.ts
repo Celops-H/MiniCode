@@ -23,6 +23,8 @@ export interface OpenAICompatibleOptions {
   env?: NodeJS.ProcessEnv;
   /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
   reasoningContent?: boolean;
+  /** 支持 reasoning_effort 请求参数的厂商（仅 OpenAI 系；其余厂商发该字段可能 400，不 emit） */
+  reasoningEffort?: boolean;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
   /** 创建 client 的工厂（测试注入 mock） */
@@ -48,7 +50,10 @@ export class OpenAICompatibleProvider implements Provider {
     this.name = options.name;
     this.baseUrl = options.baseUrl;
     this.modelList = options.models;
-    this.protocol = new OpenAICompletionsProtocol({ reasoningContent: options.reasoningContent });
+    this.protocol = new OpenAICompletionsProtocol({
+      reasoningContent: options.reasoningContent,
+      emitReasoningEffort: options.reasoningEffort,
+    });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, env: options.env });
     this.auth = resolved.auth;

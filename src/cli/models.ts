@@ -31,6 +31,8 @@ export function buildModelClient(config?: Config, modelId?: string): Models {
           apiKeyEnv: provider.apiKeyEnv,
           // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
           reasoningContent: provider.id === "deepseek",
+          // 仅 OpenAI 官方支持 reasoning_effort 请求参数；其余厂商发该字段可能 400，不开
+          reasoningEffort: provider.id === "openai",
           models: provider.models.map((m) => ({
             id: m.id,
             name: m.name ?? m.id,
