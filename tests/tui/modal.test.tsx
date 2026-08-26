@@ -279,7 +279,8 @@ it("/model 按厂商分组：● 厂商名 组头 + 缩进模型行（组头不�
     selected: 1,
     thinkingLevel: "medium",
   };
-  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 12 });
+  // 高度放足让全部分组显示（窗口渲染可见行随高度）
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 22 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   // 组头 ● 厂商名 + 模型都渲染
@@ -294,4 +295,42 @@ it("/model 按厂商分组：● 厂商名 组头 + 缩进模型行（组头不�
   // 选中高亮（▸）在缩进模型行上（组头不选中）
   const selRow = frame.split("\n").find((l) => l.includes("▸")) ?? "";
   expect(selRow).toContain("deepseek-v4-flash");
+});
+
+it("/model 无厂商信息的模型兜底到「其他」组", async () => {
+  const modal: ModalState = {
+    kind: "model",
+    models: [{ id: "legacy-1" }, { id: "legacy-2" }],
+    selected: 0,
+    thinkingLevel: "low",
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 22 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("● 其他");
+  expect(frame).toContain("legacy-1");
+  expect(frame).toContain("legacy-2");
+});
+
+it("/model 分组窗口：多组超页时选中模型恒在视野（选中末组末模型）", async () => {
+  const modal: ModalState = {
+    kind: "model",
+    models: [
+      { id: "deepseek-chat", providerId: "deepseek", providerName: "DeepSeek" },
+      { id: "deepseek-v4-flash", providerId: "deepseek", providerName: "DeepSeek" },
+      { id: "deepseek-coder", providerId: "deepseek", providerName: "DeepSeek" },
+      { id: "gpt-4o", providerId: "openai", providerName: "OpenAI" },
+      { id: "gpt-4o-mini", providerId: "openai", providerName: "OpenAI" },
+      { id: "gpt-4-turbo", providerId: "openai", providerName: "OpenAI" },
+    ],
+    selected: 5, // 末组末模型：窗口应贴底、选中可见
+    thinkingLevel: "medium",
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 22 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 选中末模型可见且高亮
+  expect(frame).toContain("▸ gpt-4-turbo");
+  // 溢出指示按模型数显示（组头不计入）
+  expect(frame).toMatch(/（\d\/6）/);
 });

@@ -236,24 +236,29 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     }
     const total = display.length;
     const selPos = Math.max(0, display.findIndex((d) => d.kind === "model" && d.index === b.selected));
-    const avail = dims().height ?? 20;
-    const visible = Math.max(1, Math.min(total, avail - 7));
+    // 高度预算对齐 SessionModal：终端高减 9（输入 5+状态 2+agent/通知 2）给卡下固定内容，行高 1 行/条
+    const avail = Math.max(10, (dims().height ?? 20) - 9);
+    const visible = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), total - visible));
-    const items = display.slice(start, start + visible).map((d) =>
+    const windowed = display.slice(start, start + visible);
+    const items = windowed.map((d) =>
       d.kind === "group" ? (
-        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+        <text paddingX={1} fg={theme.textMuted}>
           ● {d.name}
         </text>
       ) : (
-        <text paddingX={1} paddingTop={1} fg={d.index === b.selected ? theme.foregroundAccent : theme.text}>
+        <text paddingX={1} fg={d.index === b.selected ? theme.foregroundAccent : theme.text}>
           {"    "}
           {d.index === b.selected ? `▸ ${b.models[d.index]!.id}` : `  ${b.models[d.index]!.id}`}
         </text>
       ),
     );
-    const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
+    // 溢出指示只计模型数（total 含组头，不计入以免数字与模型数不符）
+    const modelCount = b.models.length;
+    const visibleModels = windowed.filter((d) => d.kind === "model").length;
+    const overflow = modelCount > visibleModels ? `（${visibleModels}/${modelCount}）` : "";
     items.push(
-      <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+      <text paddingX={1} fg={theme.textMuted}>
         思考等级：{thinkingLevelLabel(b.thinkingLevel)}（←→ 调整）
       </text>,
     );
