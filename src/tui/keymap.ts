@@ -31,6 +31,8 @@ export type TuiAction =
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
   | { type: "toggle-focus" }
+  /** Ctrl+C 复制：应用内选区文本复制到系统剪贴板（无选区不动作；打断已由 Esc 承担） */
+  | { type: "copy" }
   /** 鼠标左键点指定块（下标）任意部位：直接翻该块折叠态（Web 交互：展开/收起改鼠标点击，整块可点） */
   | { type: "fold-at"; index: number }
   | { type: "interrupt" }
@@ -101,8 +103,8 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
     case "home":
       return { type: "noop" };
     case "ctrl-c":
-      // Ctrl+C 弃用作打断/退出：与终端复制快捷键冲突（用户决定），改由 Esc 承担（见 esc 分支）
-      return { type: "noop" };
+      // Ctrl+C = 应用内复制（Shift/拖选选区 → Set-Clipboard）；无选区 noop（打断已由 Esc 承担）
+      return { type: "copy" };
     case "ctrl-d":
       return { type: "exit" };
     case "ctrl-a":

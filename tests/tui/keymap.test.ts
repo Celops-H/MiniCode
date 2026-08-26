@@ -5,12 +5,12 @@
 import { it, expect } from "vitest";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
-it("normal 态：字符→input、回车→send、Esc→esc、Ctrl+C→noop（弃用）、Ctrl+D→exit", () => {
+it("normal 态：字符→input、回车→send、Esc→esc、Ctrl+C→copy（复制选区）、Ctrl+D→exit", () => {
   expect(mapKey({ kind: "char", char: "a" })).toEqual({ type: "input", text: "a" });
   expect(mapKey({ kind: "enter" })).toEqual({ type: "send" });
-  // Esc 承担打断/双击退出；ctrl+c 弃用（与终端复制冲突）
+  // Esc 承担打断/双击退出；Ctrl+C 专用于应用内复制（Shift/拖选选区 → 系统剪贴板）
   expect(mapKey({ kind: "esc" })).toEqual({ type: "esc" });
-  expect(mapKey({ kind: "ctrl-c" })).toEqual({ type: "noop" });
+  expect(mapKey({ kind: "ctrl-c" })).toEqual({ type: "copy" });
   expect(mapKey({ kind: "ctrl-d" })).toEqual({ type: "exit" });
   expect(mapKey({ kind: "pageup" })).toEqual({ type: "scroll", dir: 1 });
 });

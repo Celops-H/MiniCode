@@ -5,6 +5,7 @@
  * 渲染：runTui 挂载 <App/>（opentui renderer），键盘经 App useKeyboard → mapKey → handleAction。
  */
 import { createStore, reconcile } from "solid-js/store";
+import { spawn } from "node:child_process";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import type { Message } from "../core/index.js";
@@ -27,6 +28,15 @@ import type { PermissionApprover, PermissionDecision, PermissionRequest, Permiss
 export interface TuiChannel {
   state: TuiState;
   onAction: (action: TuiAction) => void;
+}
+
+/** 复制文本到系统剪贴板（Windows PowerShell Set-Clipboard，文本经 stdin UTF-8 传入） */
+function copyToClipboard(text: string): void {
+  const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"], {
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.on("error", () => undefined); // powershell 缺失等环境异常静默忽略（复制失败不打断交互）
+  child.stdin.end(text);
 }
 
 /** 建立纯 reducer 通道（R1a；R1b 的 runTui 内部使用带副作用的完整处理） */
@@ -363,6 +373,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       case "paste": {
         // 粘贴：bracketed paste 整段插入（reducer 处理多行/超行数/connect-key key 缓冲）
         commit(reduceAction(state, action));
+        return;
+      }
+      case "copy": {
+        // Ctrl+C 复制：应用内选区（opentui 拖选/Shift 选择）→ 系统剪贴板；无选区不动作
+        // （打断语义已由 Esc 承担，Ctrl+C 专用于复制）
+        const sel = (renderer as { getSelection?: () => { getSelectedText?: () => string } | null } | undefined)
+          ?.getSelection?.();
+        const text = sel?.getSelectedText?.();
+        if (text) copyToClipboard(text);
         return;
       }
       case "modal-confirm": {

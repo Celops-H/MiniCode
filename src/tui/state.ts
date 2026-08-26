@@ -825,6 +825,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "mode-cycle":
     case "thinking-adjust":
     case "session-action-toggle":
+    case "copy":
     case "noop":
       return state;
   }
