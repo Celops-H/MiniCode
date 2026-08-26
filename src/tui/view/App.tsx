@@ -4,7 +4,7 @@
  * 即响应式订阅；键盘事件经 opentuiKeyToKey → mapKey → onAction 送回 reducer 落地。
  * （传函数 getter 给组件在 opentui reconciler 下不触发重渲染，改用 store proxy 属性访问。）
  */
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import { useKeyboard, usePaste } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { TuiState } from "../state.js";
@@ -53,12 +53,14 @@ export function App(props: AppProps): JSX.Element {
   });
 
   // /session 全屏页（P4-3）：像进入新页面——消息区/输入框/状态行全部隐藏，只渲染会话列表；
-  // Esc（cancel 动作）关面板即返回主界面
-  const fullscreen = props.state.modal?.kind === "session";
+  // Esc（cancel 动作）关面板即返回主界面。
+  // 判定必须包 createMemo：组件体常量只在挂载时求值一次、不建立订阅（store 更新后不重算），
+  // 曾致全屏化完全不生效（审查 S-1，同 AgentStrip「组件体 if return null 不刷新」同型坑）
+  const fullscreen = createMemo(() => props.state.modal?.kind === "session");
 
   return (
     <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
-      <Show when={!fullscreen}>
+      <Show when={!fullscreen()}>
         <Messages
           blocks={props.state.blocks}
           modelLabel={props.model}
@@ -66,13 +68,14 @@ export function App(props: AppProps): JSX.Element {
           onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
         />
       </Show>
-      {!fullscreen && props.state.toast ? (
+      {/* toast 全屏页同样显示（P4-2 删除会话等操作反馈发生在面板打开期间，吞掉用户就看不到） */}
+      {props.state.toast ? (
         <box flexShrink={0} paddingX={1}>
           <text fg={theme.textMuted}>{props.state.toast.text}</text>
         </box>
       ) : null}
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
-      <Show when={!fullscreen}>
+      <Show when={!fullscreen()}>
         <PromptView
           prompt={props.state.prompt}
           candidate={props.state.candidate}

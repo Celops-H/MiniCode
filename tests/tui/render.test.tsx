@@ -129,4 +129,32 @@ describe("view/App 渲染链", () => {
     expect(frame).not.toContain("main()");
     expect(frame).toContain("( ) task_1");
   });
+
+  it("/session 打开后全屏化生效：消息区/输入框/状态行隐藏，关闭后恢复（审查 S-1 回归：全屏判定须响应式）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([], "标题"));
+    const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 14 });
+    await setup.waitForVisualIdle();
+    // 挂载后打开 /session 弹窗：消息区/输入框/状态行全部隐藏、只渲染会话列表
+    setState({
+      ...state,
+      modal: {
+        kind: "session",
+        sessions: [{ id: "ab3f90", title: "其它会话", model: "deepseek-chat", updatedAt: "now", sizeBytes: 1024 }],
+        selected: 0,
+        action: "enter",
+      },
+    });
+    await setup.waitForVisualIdle();
+    const fullscreenFrame = setup.captureCharFrame();
+    expect(fullscreenFrame).toContain("会话列表"); // 全屏页出现
+    expect(fullscreenFrame).not.toContain("● 空闲"); // 状态行隐藏
+    expect(fullscreenFrame).not.toContain("❯"); // 输入框隐藏
+    expect(fullscreenFrame).not.toContain("开始对话吧"); // 消息区空态提示隐藏
+    // 关闭弹窗回主界面
+    setState({ ...state, modal: undefined });
+    await setup.waitForVisualIdle();
+    const restored = setup.captureCharFrame();
+    expect(restored).toContain("● 空闲"); // 状态行恢复
+    expect(restored).not.toContain("会话列表");
+  });
 });
