@@ -120,8 +120,10 @@ export class OpenAICompatibleProvider implements Provider {
   }
 }
 
-/** 模型请求超时（ms）：厂商慢/挂起时不再无限等待——超时抛错走路由切换或错误渲染 */
-export const REQUEST_TIMEOUT_MS = 60_000;
+/** 模型请求超时（ms）：厂商慢/挂起时不再无限等待——超时抛错走路由切换或错误渲染；
+ *  25s 覆盖正常模型首 token 延迟，不可达厂商（如 openai.com 在部分网络）快速判死路由，
+ *  不再干等一分钟（用户对齐 2026-08-26） */
+export const REQUEST_TIMEOUT_MS = 25_000;
 
 /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错（SDK timeout 不覆盖流式响应体读取） */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000;

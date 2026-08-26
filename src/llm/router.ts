@@ -18,9 +18,9 @@ export function isSwitchableError(error: unknown): boolean {
 
 /** 路由配置项（均可选，用默认值） */
 export interface RouterOptions {
-  /** 普通失败短冷却 ms，默认 5000 */
+  /** 单次失败的短冷却 ms，默认 2min（该时间内直接跳过，不再半开试探反复干等） */
   cooldownMs?: number;
-  /** 连续失败达阈值后熔断冷却 ms，默认 60000 */
+  /** 连续失败达阈值后的熔断冷却 ms，默认 10min（熔断期内直接跳过，试探频率低） */
   circuitBreakerMs?: number;
   /** 连续失败熔断阈值，默认 3 */
   maxFailures?: number;
@@ -52,8 +52,8 @@ export class ModelRouter {
   private readonly health = new Map<string, ModelHealth>();
 
   constructor(options: RouterOptions = {}) {
-    this.cooldownMs = options.cooldownMs ?? 5_000;
-    this.circuitBreakerMs = options.circuitBreakerMs ?? 60_000;
+    this.cooldownMs = options.cooldownMs ?? 120_000;
+    this.circuitBreakerMs = options.circuitBreakerMs ?? 600_000;
     this.maxFailures = options.maxFailures ?? 3;
     this.confirmCount = options.confirmCount ?? 2;
   }
