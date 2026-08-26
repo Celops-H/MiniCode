@@ -105,6 +105,12 @@ it("Ctrl+J 换行（主流编辑习惯），映射到软换行 newline", () => {
   expect(opentuiKeyToKey({ name: "j" })).toEqual({ kind: "char", char: "j" });
   // Ctrl+Enter 也走软换行
   expect(opentuiKeyToKey({ name: "return", ctrl: true })).toEqual({ kind: "shift-enter" });
+  // 终端忽略 disambiguate、Ctrl+J 按控制字符码点上报（name:"\n"+ctrl）：仍走换行，不落 prompt
+  expect(opentuiKeyToKey({ name: "\n", ctrl: true })).toEqual({ kind: "shift-enter" });
+  expect(opentuiKeyToKey({ name: "\r", ctrl: true })).toEqual({ kind: "shift-enter" });
+  // 裸 "\n"/"\r"（码点无修饰）不再当普通字符插进输入行，按回车语义发送
+  expect(opentuiKeyToKey({ name: "\n" })).toEqual({ kind: "enter" });
+  expect(opentuiKeyToKey({ name: "\r" })).toEqual({ kind: "enter" });
 });
 
 it("channel.onAction 走 store 整树替换（不依赖渲染）", () => {
