@@ -36,7 +36,11 @@ function durText(ms: number | null): string {
 function agentContent(a: AgentNode): string {
   if (a.path === "/root") return "● main()";
   const name = agentName(a.path);
-  if (a.status === "completed") return `(√) ${name} ${durText(a.completedAt != null && a.spawnedAt != null ? a.completedAt - a.spawnedAt : null)}`;
+  if (a.status === "completed") {
+    // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
+    const dur = durText(a.completedAt != null && a.spawnedAt != null ? a.completedAt - a.spawnedAt : null);
+    return `(√) ${name}${dur ? ` ${dur}` : ""}`;
+  }
   if (a.status === "interrupted") return `(×) ${name}`;
   return `( ) ${name}`;
 }
@@ -68,7 +72,9 @@ function renderTree(nodes: AgentNode[]): string[] {
 
   const rows: string[] = [];
   const render = (path: string, ancCols: number[], ancMore: boolean[], isLast: boolean): void => {
-    const content = agentContent(byPath.get(path)!);
+    const node = byPath.get(path);
+    if (!node) return; // /root 缺失等防御（生产恒有）
+    const content = agentContent(node);
     // ancCols 由调用方逐层推入、无空洞，索引必存在
     const connectorCol = ancCols.length > 0 ? ancCols[ancCols.length - 1]! : -1;
     const startCol = connectorCol >= 0 ? connectorCol + 3 : 0;

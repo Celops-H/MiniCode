@@ -51,6 +51,39 @@ it("完成超 10s 的条目从树消失（回到仅 main → 底栏不显示）"
   expect(setup.captureCharFrame()).not.toContain("main");
 });
 
+it("完成父被剪（超 10s）时运行中的子 agent 重挂最近存活祖先不失联", async () => {
+  const t = Date.now();
+  // task_1 完成超 10s 被剪，但其下 sub 仍运行 → sub 重挂到 /root 继续显示
+  const setup = await render([
+    running("/root"),
+    done("/root/task_1", t - 30_000, t - 20_000),
+    running("/root/task_1/sub"),
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("● main()");
+  expect(frame).toContain("( ) sub"); // 运行中子仍显示
+  expect(frame).not.toContain("task_1"); // 完成父消失
+  // sub 重挂为 main 直接子级（唯一子级 → └ 连接线对齐 main 括号列）
+  const mainLine = frame.split("\n").find((l) => l.includes("● main()")) ?? "";
+  const sub = frame.split("\n").find((l) => l.includes("( ) sub")) ?? "";
+  expect(sub.indexOf("└")).toBe(mainLine.indexOf("("));
+});
+
+it("中断 (×) 名称 显示且 10s 后消失", async () => {
+  const t = Date.now();
+  // 中断条目 loop 侧注入 completedAt（与完成同路径），10s 内显示 (×)
+  const recent: AgentNode = { path: "/root/task_1", status: "interrupted", spawnedAt: t - 5000, completedAt: t - 1000 };
+  const setup = await render([running("/root"), recent]);
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("(×) task_1");
+  // 中断超 10s 消失
+  const past: AgentNode = { path: "/root/task_2", status: "interrupted", spawnedAt: t - 20_000, completedAt: t - 10_000 };
+  const setup2 = await render([running("/root"), past]);
+  await setup2.waitForVisualIdle();
+  expect(setup2.captureCharFrame()).not.toContain("task_2");
+});
+
 it("树线对齐父括号中心列：├─/└─ 放 main 括号列、子层 │ 对齐父 ( ) 括号中心", async () => {
   const t = Date.now();
   const setup = await render([

@@ -82,6 +82,9 @@ it("AgentSpawned 追加到 agents 树（main() 恒在首位，去重；完成带
   // 完成事件：状态改 completed + 记录完成时刻（loop 注入），派生时刻保留算耗时
   const done = reduceHook(dup, { type: "AgentCompleted", path: "/root/task_1", parentPath: "/root", conclusion: "ok", completedAt: 1000 });
   expect(done.agents[1]).toEqual({ path: "/root/task_1", status: "completed", spawnedAt: null, completedAt: 1000 });
+  // 中断事件：状态改 interrupted + 记录完成时刻（同样 10s 后从树消失）
+  const aborted = reduceHook(done, { type: "AgentInterrupted", path: "/root/task_1", parentPath: "/root", completedAt: 2000 });
+  expect(aborted.agents[1]).toEqual({ path: "/root/task_1", status: "interrupted", spawnedAt: null, completedAt: 2000 });
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {
