@@ -111,3 +111,48 @@ it("树线对齐父圆点/括号中心列：├─/└─ 放 main 圆点列、�
   expect(sub[mainDotCol]).toBe("│");
   expect(sub.indexOf("└")).toBe(t1Center);
 });
+
+it("树形深度 2（P4-4）：孙 agent 渲染、树线对齐父括号中心、全程四行", async () => {
+  const t = Date.now();
+  const setup = await render([
+    running("/root"),
+    running("/root/task_a"),
+    running("/root/task_a/grand"),
+    running("/root/task_b"),
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("( ) task_a");
+  expect(frame).toContain("( ) grand");
+  expect(frame).toContain("( ) task_b");
+  // grand 行：│ 对齐 main 圆点列（task_b 是 main 的后续兄弟）、└ 对齐 task_a 括号中心
+  const lines = frame.split("\n");
+  const mainLine = lines.find((l) => l.includes("● main")) ?? "";
+  const taLine = lines.find((l) => l.includes("task_a")) ?? "";
+  const grandLine = lines.find((l) => l.includes("grand")) ?? "";
+  const mainDotCol = mainLine.indexOf("●");
+  expect(grandLine[mainDotCol]).toBe("│");
+  expect(grandLine.indexOf("└")).toBe(taLine.indexOf("(") + 1);
+});
+
+it("嵌套派生同名末段带父名前缀区分（/root/a/sub 与 /root/b/sub）", async () => {
+  const setup = await render([
+    running("/root"),
+    running("/root/a"),
+    running("/root/b"),
+    running("/root/a/sub"),
+    running("/root/b/sub"),
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("( ) a/sub");
+  expect(frame).toContain("( ) b/sub");
+});
+
+it("不同父下无同名冲突时仍显示纯末段", async () => {
+  const setup = await render([running("/root"), running("/root/alpha"), running("/root/beta")]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("( ) alpha");
+  expect(frame).toContain("( ) beta");
+});

@@ -35,16 +35,16 @@ function durText(ms: number | null): string {
 
 /** 单条内容：main=`● main`（无状态括号——括号是子 agent 状态占位，main 恒运行）；
  *  子 agent=`( ) 名` / `(√) 名 耗时` / `(×) 名` */
-function agentContent(a: AgentNode): string {
+function agentContent(a: AgentNode, name?: string): string {
+  const shown = name ?? agentName(a.path);
   if (a.path === "/root") return "● main";
-  const name = agentName(a.path);
   if (a.status === "completed") {
     // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
     const dur = durText(a.completedAt != null && a.spawnedAt != null ? a.completedAt - a.spawnedAt : null);
-    return `(√) ${name}${dur ? ` ${dur}` : ""}`;
+    return `(√) ${shown}${dur ? ` ${dur}` : ""}`;
   }
-  if (a.status === "interrupted") return `(×) ${name}`;
-  return `( ) ${name}`;
+  if (a.status === "interrupted") return `(×) ${shown}`;
+  return `( ) ${shown}`;
 }
 
 /** 内容里括号中心列偏移：子 agent 带状态括号 `( ) 名`/`(√) 名`/`(×) 名` → 括号中心列（起点+1）；
@@ -72,11 +72,30 @@ function renderTree(nodes: AgentNode[]): string[] {
   }
   for (const list of childrenOf.values()) list.sort();
 
+  /** 展示名：默认末段；全树可见条目中末段撞名时（P4-4 树形深度放开后的嵌套派生，
+   *  如 /root/a/sub 与 /root/b/sub 在不同父下同名）带父叶名前缀区分。
+   *  按全树计而非同父兄弟——歧义是视觉上的（树上两行都叫 sub），与是否同父无关。
+   *  局限：父链完全同名时仍可能同显，纯展示歧义不影响操作（切换功能未做）。 */
+  const displayName = new Map<string, string>();
+  {
+    const leafOf = (p: string): string => (p === "/root" ? "main" : p.split("/").filter(Boolean).at(-1) ?? p);
+    const leafCount = new Map<string, number>();
+    for (const n of nodes) {
+      const l = leafOf(n.path);
+      leafCount.set(l, (leafCount.get(l) ?? 0) + 1);
+    }
+    for (const n of nodes) {
+      if (n.path === "/root") continue;
+      const l = leafOf(n.path);
+      if ((leafCount.get(l) ?? 0) > 1) displayName.set(n.path, `${leafOf(parentPath(n.path))}/${l}`);
+    }
+  }
+
   const rows: string[] = [];
   const render = (path: string, ancCols: number[], ancMore: boolean[], isLast: boolean): void => {
     const node = byPath.get(path);
     if (!node) return; // /root 缺失等防御（生产恒有）
-    const content = agentContent(node);
+    const content = agentContent(node, displayName.get(path));
     // ancCols 由调用方逐层推入、无空洞，索引必存在
     const connectorCol = ancCols.length > 0 ? ancCols[ancCols.length - 1]! : -1;
     const startCol = connectorCol >= 0 ? connectorCol + 3 : 0;
