@@ -30,11 +30,18 @@ export interface TuiChannel {
   onAction: (action: TuiAction) => void;
 }
 
-/** 复制文本到系统剪贴板（Windows PowerShell Set-Clipboard，文本经 stdin UTF-8 传入） */
-function copyToClipboard(text: string): void {
-  const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"], {
-    stdio: ["pipe", "ignore", "ignore"],
-  });
+/** 复制文本到系统剪贴板（Windows PowerShell，显式 UTF8 解码 stdin——默认 OEM 代码页会把中文/emoji 变乱码，问题 38；方案对齐 opencode） */
+export function copyToClipboard(text: string): void {
+  const child = spawn(
+    "powershell",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+    ],
+    { stdio: ["pipe", "ignore", "ignore"] },
+  );
   child.on("error", () => undefined); // powershell 缺失等环境异常静默忽略（复制失败不打断交互）
   child.stdin.end(text);
 }
@@ -382,11 +389,17 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       }
       case "copy": {
         // Ctrl+C 复制：应用内选区（opentui 拖选/Shift 选择）→ 系统剪贴板；无选区不动作
-        // （打断语义已由 Esc 承担，Ctrl+C 专用于复制）
-        const sel = (renderer as { getSelection?: () => { getSelectedText?: () => string } | null } | undefined)
-          ?.getSelection?.();
+        // （打断语义已由 Esc 承担，Ctrl+C 专用于复制）；复制后清除选区 + toast 反馈
+        const r = renderer as
+          | { getSelection?: () => { getSelectedText?: () => string } | null; clearSelection?: () => void }
+          | undefined;
+        const sel = r?.getSelection?.();
         const text = sel?.getSelectedText?.();
-        if (text) copyToClipboard(text);
+        if (text) {
+          copyToClipboard(text);
+          r?.clearSelection?.();
+          showToast(`已复制 ${text.length} 个字符到剪贴板`);
+        }
         return;
       }
       case "modal-confirm": {
@@ -583,6 +596,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         if (state.modal?.kind !== "model") return;
         const next = cycleThinkingLevel(state.modal.thinkingLevel);
         commit({ ...state, modal: { ...state.modal, thinkingLevel: next } });
+        return;
+      }
+      case "fold-at": {
+        // 折叠点击（鼠标 onMouseUp 触发）：同时清除应用内选区——点击在可选中文本上会留单点/拖选高亮
+        //（问题 34），折叠交互不需要选区，清掉避免误以为选中文字
+        (renderer as { clearSelection?: () => void } | undefined)?.clearSelection?.();
+        commit(reduceAction(state, action));
         return;
       }
       default:
