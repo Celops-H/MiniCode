@@ -106,11 +106,28 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     models.register(makeFaultyProvider("backup", "backup-1"));
     const events: StreamEvent[] = [];
     for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    // 主模型失败先发 model_fallback 观察事件，再接备选正常产出
     expect(events).toEqual([
+      { type: "model_fallback", from: "main-1", to: "backup-1" },
       { type: "text_delta", text: "backup:backup-1" },
       { type: "done", stopReason: "stop" },
     ]);
     expect(router.isHealthy("main-1")).toBe(false);
+  });
+
+  it("主模型失败切换备选：发 model_fallback 观察事件（from/to），避免静默路由", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    // 切换前先发 model_fallback，再接备选模型的正常产出
+    expect(events).toEqual([
+      { type: "model_fallback", from: "main-1", to: "backup-1" },
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
   });
 
   it("传入 modelId 不在配置链时以其打头（/@/model 切到链外模型生效）", async () => {

@@ -112,7 +112,11 @@ export class Models {
         // 确定性错误或流已开始响应：直接上抛，切换无意义或会混流
         if (!isSwitchableError(err) || started) throw err;
         router.recordFailure(selected);
-        selected = router.select(chain);
+        const next = router.select(chain);
+        // 主模型失败、切换备选：发观察事件（TUI toast「已切换」），避免静默路由——
+        // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等
+        if (next) yield { type: "model_fallback", from: selected, to: next };
+        selected = next;
       }
     }
     throw lastError ?? new Error("模型调用全部失败");

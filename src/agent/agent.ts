@@ -369,7 +369,9 @@ export class Agent {
         )) {
           // 中断引发的流错误统一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
           if (this.interruptController.signal.aborted && event.type === "error") continue;
-          collected.push(event);
+          // 观察事件（模型路由切换提示）只透传宿主观测，不进 collected——否则 assemble 会把
+          // 它的长度误算为「已产出」（中断收尾以 collected.length 判断要不要落半截回复）
+          if (event.type !== "model_fallback") collected.push(event);
           yield event;
         }
         break;
