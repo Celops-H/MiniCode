@@ -6,7 +6,7 @@ import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER } from "../../src/context/index.js";
-import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage } from "../../src/core/index.js";
+import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage, type Context, type ThinkingLevel } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
@@ -1176,5 +1176,42 @@ describe("Agent 主循环：模型对话闭环", () => {
       isError: false,
       content: "命令输出",
     });
+  });
+
+  it("thinkingLevelRef → stream 的 context.thinkingLevel（思考等级透传；无 ref 时缺省）", async () => {
+    let captured: ThinkingLevel | undefined = undefined;
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        captured = (context as Context).thinkingLevel;
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "s",
+      thinkingLevelRef: () => "medium" as ThinkingLevel,
+    });
+    agent.start("hi");
+    for await (const _e of agent.run()) {
+      /* 消费事件 */
+    }
+    expect(captured).toBe("medium");
+
+    // 未传 ref：context.thinkingLevel 为 undefined（厂商默认）
+    let captured2: ThinkingLevel | undefined = undefined;
+    const client2: ModelClient = {
+      async *stream(_m, c) {
+        captured2 = (c as Context).thinkingLevel;
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const a2 = new Agent({ modelClient: client2, modelId: "mock", systemPrompt: "s" });
+    a2.start("hi");
+    for await (const _e of a2.run()) {
+      /* 消费事件 */
+    }
+    expect(captured2).toBeUndefined();
   });
 });

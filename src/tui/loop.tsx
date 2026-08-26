@@ -219,9 +219,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       const models = options.modelList ?? [];
       const current = session.meta.model;
       const selected = Math.max(0, models.findIndex((m) => m.id === current));
+      // 初始思考等级读 thinkingBox.value（真实生效值；state.thinkingLevel 可能因 reconfigure 重置，
+      // 读它会在切模型后弹窗显示错值、且 Enter 会静默重置 box）
       commit({
         ...state,
-        modal: { kind: "model", models, selected, thinkingLevel: state.thinkingLevel },
+        modal: { kind: "model", models, selected, thinkingLevel: thinkingBox.value },
         prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0 },
         candidate: undefined,
       });
@@ -491,10 +493,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "thinking-adjust": {
-        // /model 弹窗 ←→：循环思考等级（默认→low→medium→high），同步盒子即时生效
+        // /model 弹窗 ←→：只改弹窗内候选等级（Enter 应用才写 thinkingBox，Esc 取消不改——「应用/取消」语义自洽）
         if (state.modal?.kind !== "model") return;
         const next = cycleThinkingLevel(state.modal.thinkingLevel);
-        thinkingBox.value = next;
         commit({ ...state, modal: { ...state.modal, thinkingLevel: next } });
         return;
       }
