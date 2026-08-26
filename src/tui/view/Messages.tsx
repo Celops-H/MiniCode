@@ -47,12 +47,12 @@ function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX
   );
 }
 
-/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；点击折叠头切换（onFold=鼠标展开/收起） */
+/** 思考折叠：收起一行「思考（▸ n）」，展开显示内容；整块点击切换（内容长时点任意部位收起） */
 function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => void }): JSX.Element {
   const width = Array.from(props.text).length;
   return (
-    <box flexDirection="column">
-      <box onMouseUp={props.onFold}>
+    <box flexDirection="column" onMouseUp={props.onFold}>
+      <box>
         <text fg={theme.textMuted}>
           {props.collapsed ? (
             <span>思考（▸ {width}，点击展开）</span>
@@ -92,7 +92,8 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
   );
 }
 
-/** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误（点击参数行折叠） */
+/** 工具调用卡片：rounded 框线 + 边框内标题（状态图标 + 工具名）+ 参数/输出/错误；
+ *  整卡点击折叠（onMouseUp 在卡片本体，参数长/输出多时点任意部位收起） */
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const status = toolStatus(props.b);
   const hasOutput = Boolean(props.b.output || props.b.error);
@@ -110,9 +111,10 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
       flexDirection="column"
       title={`${status.icon} ${props.b.name ?? "tool"}`}
       titleColor={status.fg}
+      onMouseUp={props.onFold}
     >
       {props.b.args ? (
-        <box onMouseUp={props.onFold} flexDirection="column">
+        <box flexDirection="column">
           <text fg={theme.textMuted} paddingX={1}>
             {props.b.collapsedArgs
               ? props.b.args.length > 60

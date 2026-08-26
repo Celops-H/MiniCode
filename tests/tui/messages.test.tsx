@@ -96,3 +96,61 @@ it("每块首行圆点标记 + 内容缩进到第 3 列（后续行只空不标�
   // 多行文本后续行也缩进（在 ● 所在行之后能找到「  第二行也缩进」—— 缩进到第 3 列）
   expect(frame).toMatch(/\n\s{3,}第二行也缩进/);
 });
+
+it("点工具卡非头部位置（标题行）也触发折叠——折叠命中扩到整卡", async () => {
+  const calls: number[] = [];
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          {
+            kind: "tool",
+            index: 0,
+            turn: 0,
+            name: "read",
+            args: '{"path":"a.ts"}',
+            status: "success",
+            collapsedArgs: true,
+            collapsedOutput: false,
+            output: "export function a() {}",
+          },
+        ]}
+        modelLabel="test-model"
+        onFoldAt={(i) => calls.push(i)}
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  // 点卡片标题行（折叠头在参数行，标题行非头部）：应命中整卡 onMouseUp → fold-at(0)
+  await setup.mockMouse.click(30, 2);
+  expect(calls).toEqual([0]);
+});
+
+it("点思考展开内容中部收起——折叠命中扩到整个思考块", async () => {
+  const calls: number[] = [];
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          {
+            kind: "message",
+            id: "a1",
+            role: "assistant",
+            text: "先看现状实现",
+            thinking: "这一步要核对现有分区逻辑……",
+            thinkingCollapsed: false,
+            time: "14:00:02",
+          },
+        ]}
+        modelLabel="test-model"
+        onFoldAt={(i) => calls.push(i)}
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  // 点思考展开内容（折叠头在「▼ 思考」行，内容行非头部）：也应触发 fold-at(0)
+  await setup.mockMouse.click(30, 4);
+  expect(calls).toEqual([0]);
+});
