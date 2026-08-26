@@ -54,6 +54,21 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("模式[default]");
   });
 
+  it("窄屏 + 真实长标题：状态行不折行、模型名保留（右侧溢出被截，UI-SPEC 既有行为）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([], "重构 partition 并发分区方案"));
+    const setup = await testRender(
+      () => (
+        <App state={state} model="deepseek-v4-flash" onAction={() => {}} />
+      ),
+      { width: 44, height: 8 },
+    );
+    await setup.waitForVisualIdle();
+    const frame = setup.captureCharFrame();
+    // 长标题 + 窄屏：状态行不折行、模型名（左盒最前）保留、标题列宽截断后仍可见；模式 chip 随右侧溢出被截
+    expect(frame).toContain("deepseek-v4-flash");
+    expect(frame).toContain("会话 重构 partition");
+  });
+
   it("状态栏当前模型名蓝色（与圆点同色 modelColor，用户复核：模型名应为蓝）", async () => {
     const channel = createChannel([]);
     const setup = await testRender(

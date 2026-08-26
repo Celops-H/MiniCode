@@ -27,6 +27,24 @@ it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   expect(unchanged.blocks[1]).toBe(withBlocks.blocks[1]);
 });
 
+it("fold-at 翻子 agent 结论折叠态（有结论才可折叠；派生无内容不可翻）", () => {
+  const base = initState([]);
+  const withAgent = {
+    ...base,
+    blocks: [{ kind: "agent", event: "completed", path: "/root/t", conclusion: "ok", collapsed: true }] as typeof base.blocks,
+  };
+  // completed 有结论 → 折叠翻转 true→false
+  const unfolded = reduceAction(withAgent, { type: "fold-at", index: 0 });
+  expect(unfolded.blocks[0]?.kind === "agent" && unfolded.blocks[0].collapsed).toBe(false);
+  // spawned 无结论 → 不可折叠，原样保留
+  const spawned = {
+    ...base,
+    blocks: [{ kind: "agent", event: "spawned", path: "/root/t", collapsed: true }] as typeof base.blocks,
+  };
+  const unchanged = reduceAction(spawned, { type: "fold-at", index: 0 });
+  expect(unchanged.blocks[0]).toBe(spawned.blocks[0]);
+});
+
 it("connect key 弹窗输入态：字符进 key 缓冲、不弹 slash 候选（弹窗内是输 API Key）", () => {
   const base: TuiState = {
     ...initState([]),
