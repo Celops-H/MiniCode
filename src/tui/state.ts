@@ -48,7 +48,15 @@ export interface AgentActivityBlock {
   mergeResult?: string;
 }
 
-export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock;
+/** 系统通知行（模型路由切换等观察事件）：常驻消息区让用户看到发生了什么（非一闪而过的 toast） */
+export interface NoticeBlock {
+  kind: "notice";
+  id: string;
+  text: string;
+  time?: string;
+}
+
+export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock;
 
 /** 输入行上限（UI-SPEC §1：多行输入最多 20 行，超出不再增高，靠光标移动查看） */
 export const MAX_PROMPT_LINES = 20;
@@ -459,6 +467,20 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
       }
       return { ...state, streaming: { ...state.streaming, isError: true } };
     }
+    case "model_fallback":
+      // 模型路由切换观察事件：追加常驻通知行（主模型不可用自动切备选），消息列表展示而非一闪而过
+      return {
+        ...state,
+        blocks: [
+          ...state.blocks,
+          {
+            kind: "notice",
+            id: `notice_${state.blocks.length}`,
+            text: `模型 ${event.from} 不可用，已切换 ${event.to}`,
+            time: formatTime(),
+          },
+        ],
+      };
     default:
       return state;
   }

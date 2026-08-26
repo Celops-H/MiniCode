@@ -9,7 +9,7 @@
  */
 import { For, Show } from "solid-js";
 import type { JSX } from "@opentui/solid";
-import type { BlockView, MessageBlock, ToolBlock, Streaming } from "../state.js";
+import type { BlockView, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { theme } from "./theme.js";
 
 /** 状态图标/颜色：进行中 spinner、成功绿、失败红、待执行暗 */
@@ -26,10 +26,10 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型/子agent=灰、工具=警示橙） */
+/** 块来源 → 首行圆点标记的颜色（你=强调紫、模型/子agent=灰、工具=警示橙、通知=警示橙） */
 function markerFor(b: BlockView): string {
   if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.textMuted;
-  if (b.kind === "tool") return theme.warning;
+  if (b.kind === "tool" || b.kind === "notice") return theme.warning;
   return theme.textMuted;
 }
 
@@ -154,6 +154,11 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }> }): JSX.Ele
   );
 }
 
+/** 系统通知行（模型路由切换等）：常驻消息区展示（非 toast），警示色 */
+function NoticeView(props: { b: NoticeBlock }): JSX.Element {
+  return <text fg={theme.warning}>{props.b.text}</text>;
+}
+
 /** 流式尾：思考与文本增量累积（state.streaming） */
 function StreamingView(props: { s: Streaming }): JSX.Element {
   return (
@@ -171,6 +176,7 @@ function StreamingView(props: { s: Streaming }): JSX.Element {
 function blockView(b: BlockView, modelLabel: string, onFold: () => void): JSX.Element {
   if (b.kind === "message") return <MessageView b={b} modelLabel={modelLabel} onFold={onFold} />;
   if (b.kind === "tool") return <ToolView b={b} onFold={onFold} />;
+  if (b.kind === "notice") return <NoticeView b={b} />;
   return <AgentView b={b} />;
 }
 

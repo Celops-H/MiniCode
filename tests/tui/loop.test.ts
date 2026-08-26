@@ -87,4 +87,11 @@ describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回�
     const block = s.blocks.at(-1) as { text: string } | undefined;
     expect(block?.text).toBe("存储写入失败");
   });
+  it("model_fallback 事件：追加常驻通知行到消息区（路由切换可见，非一闪而过 toast）", () => {
+    const s = reduceEvent(initState([]), { type: "model_fallback", from: "gpt-4o", to: "deepseek-v4-flash" });
+    expect(s.blocks.at(-1)).toMatchObject({
+      kind: "notice",
+      text: "模型 gpt-4o 不可用，已切换 deepseek-v4-flash",
+    });
+  });
 });
