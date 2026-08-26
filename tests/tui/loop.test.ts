@@ -6,7 +6,8 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { initState, reduceAction, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, type TuiState } from "../../src/tui/state.js";
+import { modelErrorText } from "../../src/tui/loop.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -56,5 +57,24 @@ describe("connect key 输入态（弹窗内）", () => {
     const s = withKeyModal(initState([]));
     expect(reduceAction(s, { type: "modal-confirm" }).modal).toMatchObject({ kind: "connect-key", key: "" });
     expect(reduceAction(s, { type: "cancel" }).modal).toMatchObject({ kind: "connect-key", key: "" });
+  });
+});
+
+describe("modelErrorText：模型调用失败的可读引导（C2 /model 边界）", () => {
+  it("认证/未配置/未知模型类错误追加换模型与配 key 引导", () => {
+    expect(modelErrorText("Provider openai 未配置认证：请设置环境变量")).toContain("/model 换模型");
+    expect(modelErrorText("Incorrect API key provided. 401")).toContain("/connect");
+    expect(modelErrorText("未知模型：gpt-9")).toContain("/model 换模型");
+  });
+  it("其它错误保持原样，不误导", () => {
+    expect(modelErrorText("会话存储写入失败")).toBe("会话存储写入失败");
+  });
+});
+
+describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回到空闲（不退出、可换回）", () => {
+  it("无前缀内容时错误作为独立错误块 + 状态回空闲", () => {
+    const s = reduceEvent(initState([]), { type: "error", message: "Incorrect API key" });
+    expect(s.status).toBe("idle");
+    expect(s.blocks.at(-1)).toMatchObject({ kind: "message", role: "assistant", isError: true, text: "Incorrect API key" });
   });
 });

@@ -43,6 +43,26 @@ export function createChannel(initialMessages: Message[]): TuiChannel {
 /** 瞬时提示显示时长 */
 const TOAST_MS = 5000;
 
+/** 模型调用失败的可读提示：识别认证/配置类错误，追加换模型/配 key 引导；其它错误保持原样。
+ *  覆盖场景：切到无 API Key 的模型、key 无效/过期（401）、模型 id 无效——都要告诉用户怎么继续，
+ *  而不是裸抛 SDK 原文（真机「切到无效模型/无效 key」边界，C2）。 */
+export function modelErrorText(error: string): string {
+  const markers = [
+    "未配置认证",
+    "请设置环境变量",
+    "未知模型",
+    "401",
+    "403",
+    "Incorrect API key",
+    "api key",
+    "authentication",
+  ] as const;
+  if (markers.some((m) => error.toLowerCase().includes(m.toLowerCase()))) {
+    return `${error}\n可用 /model 换模型，或 /connect 连接厂商配置 API Key`;
+  }
+  return error;
+}
+
 export interface TuiLoopOptions {
   /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent */
   assemble: (channel: {
@@ -563,7 +583,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
               kind: "message",
               id: `err_${state.blocks.length}`,
               role: "assistant",
-              text: `⚠ ${error}`,
+              text: `⚠ ${modelErrorText(error)}`,
               isError: true,
               time: formatTime(),
               thinkingCollapsed: true,
