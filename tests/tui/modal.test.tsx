@@ -63,6 +63,25 @@ it("会话面板：列表/新建入口/键位提示", async () => {
   expect(frame).toContain("新建会话");
 });
 
+it("会话面板等宽卡片居中：不铺满全宽、左右留白居中，下边界框线可见", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [
+      { id: "ab3f90", model: "claude-sonnet-4-5", updatedAt: "now" },
+      { id: "88bf1e", model: "deepseek-chat", updatedAt: "now" },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 卡片居中：首行标题边框前有左右留白（非 0 列起始），且最左列不是边框角
+  expect(frame).toMatch(/\s{2,}╭/);
+  // 下边界框线可见（整卡在视口内，未溢出截断）
+  expect(frame).toContain("╰");
+  expect(frame).toContain("↑↓ 选择");
+});
+
 it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不溢出", async () => {
   const sessions = Array.from({ length: 12 }, (_, i) => ({
     id: `sxx-${String(i).padStart(2, "0")}`,
@@ -82,6 +101,13 @@ it("会话面板超页：窗口渲染且选中项随导航滚动入视野，不�
   // 导航到第 8 项后窗口滚动：8 号入视野、0 号脱离
   expect(frame).toContain("sxx-08");
   expect(frame).not.toContain("sxx-00");
+  setModal({ kind: "session", sessions, selected: 11 });
+  await setup.waitForVisualIdle();
+  frame = setup.captureCharFrame();
+  // 滚动到底 clamp：最末会话入视野且不再滑出（窗口贴底），下边框仍可见
+  expect(frame).toContain("sxx-11");
+  expect(frame).not.toContain("sxx-00");
+  expect(frame).toContain("╰");
 });
 
 it("/connect 供应商选择：列出厂商与键位提示，选中高亮", async () => {

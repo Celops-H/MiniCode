@@ -53,26 +53,28 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板：边框内标题 + 最近会话列表 + 新建入口（选中高亮随 ↑↓ 移动），键位提示。
- *  会话多于可视高度时按窗口渲染（选中项尽量居中，越界贴边），防列表溢出屏幕。 */
+/** 会话切换面板：等宽卡片居中弹层（非全屏铺满）+ 边框内标题 + 最近会话列表 + 新建入口，键位提示。
+ *  列表行高与窗口计算一致（每行 1 行、无额外竖向 padding），卡内总高 ≤ 可用高度，
+ *  选中项随 ↑↓ 窗口滚动入视野、越界贴边 clamp——列表再长也不滑出视口、下边框始终可见。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
-  // 列表行：窗口渲染（memo 读 selected/dims 重算）。标题框+提示约 6 行，会话条按剩余高度截断
+  // 列表行：窗口渲染（memo 读 selected/dims 重算）。卡内固定开销（外边距 2 + 边框标题 1 + 新建 1 + 提示 3 + 底框 1）=8 行；
+  // 终端高减 3 行给输入框/状态行/agent 行占位，剩余高度按 1 行/条分配会话可见条数，选中项居中滚动、越界贴边。
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    const avail = dims().height ?? 20;
-    const sessRows = Math.max(1, Math.min(total, avail - 7));
+    const avail = Math.max(10, (dims().height ?? 20) - 3);
+    const sessRows = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(b.selected - Math.floor((sessRows - 1) / 2), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
     const items = visible.map((s, i) => {
       const sel = start + i === b.selected;
       return sel ? (
-        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+        <text paddingX={1} fg={theme.foregroundAccent}>
           ▸ {s.id.slice(-6)} · {s.model}
         </text>
       ) : (
-        <text paddingX={1} paddingTop={1} fg={theme.text}>
+        <text paddingX={1} fg={theme.text}>
           {"  "}
           {s.id.slice(-6)} · {s.model}
         </text>
@@ -81,11 +83,11 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     const newSel = b.selected === total;
     items.push(
       newSel ? (
-        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
+        <text paddingX={1} fg={theme.foregroundAccent}>
           ▸ ── 新建会话 ──
         </text>
       ) : (
-        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+        <text paddingX={1} fg={theme.textMuted}>
           {"  "}── 新建会话 ──
         </text>
       ),
@@ -98,9 +100,10 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     );
     return items;
   });
+  const cardWidth = Math.min(64, (dims().width ?? 80) - 4);
   return (
-    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
+    <box flexDirection="row" justifyContent="center" paddingY={1} flexShrink={0}>
+      <box width={cardWidth} border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
         title="切换会话" titleColor={theme.foregroundAccent}>
         {rows()}
       </box>
