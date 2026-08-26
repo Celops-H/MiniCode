@@ -109,8 +109,8 @@ export interface PermissionModalState {
  *  当前活跃会话不展示（列表=切换其它会话，P4-2 防误删本会话）；选中行动作态 ←→ 切换 */
 export interface SessionModalState {
   kind: "session";
-  /** 会话列表（title 随 /rename 更新：listSessions 每次重读磁盘 meta，面板显示改名即时生效） */
-  sessions: Array<{ id: string; title: string; model: string; updatedAt: string }>;
+  /** 会话列表（title 随 /rename 更新；sizeBytes=消息文件大小 P4-3 副行展示） */
+  sessions: Array<{ id: string; title: string; model: string; updatedAt: string; sizeBytes: number }>;
   selected: number;
   /** 当前选中行的操作态：进入（缺省/默认）或删除（一步删除，P4-2；←→ 切换） */
   action?: "enter" | "delete";

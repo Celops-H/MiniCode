@@ -4,6 +4,7 @@
  * 即响应式订阅；键盘事件经 opentuiKeyToKey → mapKey → onAction 送回 reducer 落地。
  * （传函数 getter 给组件在 opentui reconciler 下不触发重渲染，改用 store proxy 属性访问。）
  */
+import { For, Show } from "solid-js";
 import { useKeyboard, usePaste } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { TuiState } from "../state.js";
@@ -51,28 +52,36 @@ export function App(props: AppProps): JSX.Element {
     if (text) props.onAction({ type: "paste", text });
   });
 
+  // /session 全屏页（P4-3）：像进入新页面——消息区/输入框/状态行全部隐藏，只渲染会话列表；
+  // Esc（cancel 动作）关面板即返回主界面
+  const fullscreen = props.state.modal?.kind === "session";
+
   return (
     <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
-      <Messages
-        blocks={props.state.blocks}
-        modelLabel={props.model}
-        streaming={props.state.streaming}
-        onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
-      />
-      {props.state.toast ? (
+      <Show when={!fullscreen}>
+        <Messages
+          blocks={props.state.blocks}
+          modelLabel={props.model}
+          streaming={props.state.streaming}
+          onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
+        />
+      </Show>
+      {!fullscreen && props.state.toast ? (
         <box flexShrink={0} paddingX={1}>
           <text fg={theme.textMuted}>{props.state.toast.text}</text>
         </box>
       ) : null}
       {props.state.modal ? <ModalView modal={props.state.modal} /> : null}
-      <PromptView
-        prompt={props.state.prompt}
-        candidate={props.state.candidate}
-        // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
-        showCursor={props.state.modal?.kind !== "connect-key"}
-      />
-      <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
-      {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
+      <Show when={!fullscreen}>
+        <PromptView
+          prompt={props.state.prompt}
+          candidate={props.state.candidate}
+          // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
+          showCursor={props.state.modal?.kind !== "connect-key"}
+        />
+        <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
+        {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
+      </Show>
     </box>
   );
 }

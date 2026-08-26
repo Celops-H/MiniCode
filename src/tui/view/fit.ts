@@ -20,3 +20,28 @@ export function fitWidth(t: string, maxCols: number): string {
   }
   return `${out}…`;
 }
+
+/** 右侧空格补齐到目标列宽（CJK 计 2 列）：会话列表三列各自对齐（P4-3） */
+export function padCols(s: string, cols: number): string {
+  const w = colWidth(s);
+  return w >= cols ? s : s + " ".repeat(cols - w);
+}
+
+/** 相对时间（P4-3 副行）：xx s/min/hours/days ago（用户指定格式） */
+export function relativeTime(iso: string, now = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "—";
+  const sec = Math.max(0, Math.floor((now - then) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}hours ago`;
+  return `${Math.floor(hr / 24)}days ago`;
+}
+
+/** 文件大小展示：KB 一位小数，不足 1KB 显示 B */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
+}

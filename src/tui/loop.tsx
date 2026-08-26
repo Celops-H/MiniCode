@@ -334,7 +334,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         // 当前活跃会话不展示（列表=切换其它会话用，P4-2：删除只作用于其它会话，避免误删本会话）
         sessions: sessions
           .filter((s) => s.id !== session.meta.id)
-          .map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
+          .map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
         selected: 0,
         action: "enter",
       },
@@ -444,7 +444,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                     ...state,
                     modal: {
                       kind: "session",
-                      sessions: remaining.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt })),
+                      sessions: remaining.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
                       selected: Math.min(targetIndex, remaining.length),
                       action: "enter",
                     },

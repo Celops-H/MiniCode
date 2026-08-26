@@ -12,7 +12,7 @@ import type { JSX } from "@opentui/solid";
 import type { ModalState, ConnectPickModalState, ConnectKeyModalState } from "../state.js";
 import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
-import { colWidth, fitWidth } from "./fit.js";
+import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "./fit.js";
 
 /** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项高亮 chip，随 ←→ 移动） */
 function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission" }> }): JSX.Element {
@@ -54,57 +54,55 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板：等宽卡片居中弹层（非全屏铺满）+ 边框内标题 + 最近会话列表 + 新建入口，键位提示。
- *  列表行高与窗口计算一致（每行 1 行、模型名按卡宽截断防折行），卡内总高 ≤ 可用高度，
- *  选中项随 ↑↓ 窗口滚动入视野、越界贴边 clamp——列表再长也不滑出视口、下边框始终可见。 */
+/** 会话切换面板（P4-3 全屏化）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
+ *  左对齐布局、每会话两行——主行「哈希 标题 模型」三列各自对齐（列宽截断不顶开模型），
+ *  副行「最近活跃 xx ago · 消息文件大小 N KB」；条目间空一行加大间距；
+ *  当前活跃会话不在列表（loop 已过滤）；选中行操作态进入/删除 ←→ 切换（P4-2）。
+ *  列表超视口窗口渲染：选中项滚动入视野、越界贴边 clamp。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
-  // 等宽卡宽：64 内定宽、左右留白居中；极窄终端保底 20（负宽会破坏布局）
-  const cardWidth = Math.max(20, Math.min(64, (dims().width ?? 80) - 4));
-  // 列表行：窗口渲染（memo 读 selected/dims 重算）。卡内固定开销（外边距 2 + 边框标题 1 + 新建 1 + 提示 3 + 底框 1）=8 行；
-  // 终端高减 9 行给卡下固定内容（输入框 5 + 状态行 2 + agent/通知 2）占位，剩余高度按 1 行/条分配会话可见条数，
-  // 选中项居中滚动、越界贴边——卡与底部状态行都不被顶出视口。
-  // 行内容 = id6 · 标题 · 模型：按终端列宽截断加省略号（CJK 全宽字符占 2 列，按码点算会溢出折行
-  //   ——折行破 1 行/条假设、顶出下边框，见 P1-3 修过的同型缺陷）。
-  //   /rename 改会话标题经 rewriteMessages 落盘，listSessions 每次重读 meta，面板标题即时同步。
-  const usable = cardWidth - 4; // 边框 2 + 行 paddingX 2
+  // 列表区可用高度：标题 2 + 提示 3 + 底部余量 1；选中项居中滚动、越界贴边
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    const avail = Math.max(10, (dims().height ?? 20) - 9);
-    const sessRows = Math.max(1, Math.min(total, avail - 8));
+    const avail = Math.max(6, (dims().height ?? 20) - 7);
+    // 每条占 2 行（主+副）+ 条目间 1 行空：可见条数按实际总行数预算
+    const perRow = 3; // 主行 + 副行 + 间距
+    const sessRows = Math.max(1, Math.min(total, Math.floor(avail / perRow)));
     const start = Math.max(0, Math.min(b.selected - Math.floor((sessRows - 1) / 2), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
-    const items = visible.map((s, i) => {
+    // 三列宽度：终端宽内分配——模型列随内容自适应（最长不超 26），标题吃中间剩余预算
+    const termW = Math.max(30, (dims().width ?? 80) - 4);
+    const idCols = 6; // 哈希显示固定 6 位
+    const PREFIX_COLS = 2 + idCols + 3; // ▸/空格(2) + id + 「 · 」(3)
+    const modelCol = Math.min(26, Math.max(8, ...visible.map((s) => colWidth(s.model) + 2)));
+    const titleBudget = Math.max(2, termW - modelCol - PREFIX_COLS - 10); // 预留操作态 10 列
+    const items: JSX.Element[] = [];
+    visible.forEach((s, i) => {
       const sel = start + i === b.selected;
-      // 固定列：▸(2) + id6(6) + 分隔 · (3) × 2 = 14；模型预算随卡宽自适应（窄卡多截模型、保整行 1 行）
-      const modelMaxCols = Math.min(18, Math.max(3, usable - 17)); // 14 固定 + 标题下限 3
-      const model = fitWidth(s.model, modelMaxCols);
-      // title 预算预留选中行尾的操作态指示（「  ◀ 进入」/「  ✕ 删除」约 5 列），选中行不溢出
-      const title = fitWidth(s.title || "新会话", Math.max(2, usable - 14 - colWidth(model) - 5));
-      const line = `${s.id.slice(-6)} · ${title} · ${model}`;
-      // 选中行尾追加当前操作态：进入（默认）/ 删除（←→ 切换，红色提示危险）
+      const idCell = s.id.slice(-idCols);
+      const title = fitWidth(s.title || "新会话", titleBudget);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
-      return sel ? (
-        <text paddingX={1} fg={b.action === "delete" ? theme.error : theme.foregroundAccent}>
-          ▸ {line}
-          {actionTag}
-        </text>
-      ) : (
-        <text paddingX={1} fg={theme.text}>
-          {"  "}
-          {line}
-        </text>
+      // 主行：哈希 / 标题 / 模型三列各自对齐（padCols 补齐定宽列，长内容截断不顶开后续列）
+      items.push(
+        <text paddingLeft={1} paddingTop={i === 0 ? 0 : 1} fg={sel ? (b.action === "delete" ? theme.error : theme.foregroundAccent) : theme.text}>
+          {`${sel ? "▸ " : "  "}${padCols(idCell, idCols)} · ${padCols(title, titleBudget)}${fitWidth(s.model, modelCol)}${actionTag}`}
+        </text>,
+      );
+      items.push(
+        <text paddingLeft={3} fg={theme.textMuted}>
+          {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
+        </text>,
       );
     });
     const newSel = b.selected === total;
     items.push(
       newSel ? (
-        <text paddingX={1} fg={theme.foregroundAccent}>
+        <text paddingX={1} paddingTop={1} fg={theme.foregroundAccent}>
           ▸ ── 新建会话 ──
         </text>
       ) : (
-        <text paddingX={1} fg={theme.textMuted}>
+        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
           {"  "}── 新建会话 ──
         </text>
       ),
@@ -112,17 +110,20 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     const overflow = total > sessRows ? `（${start + 1}-${Math.min(start + sessRows, total)}/${total}）` : "";
     items.push(
       <text fg={theme.textMuted} paddingX={1} paddingY={1}>
-        ↑↓ 选择 · ←→ 进入/删除 · Enter 确定 · Esc 取消{overflow}
+        ↑↓ 选择 · ←→ 进入/删除 · Enter 确定 · Esc 返回{overflow}
       </text>,
     );
     return items;
   });
   return (
-    <box flexDirection="row" justifyContent="center" paddingY={1} flexShrink={0}>
-      <box width={cardWidth} border={true} borderStyle="rounded" borderColor={theme.foregroundAccent} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        title="切换会话" titleColor={theme.foregroundAccent}>
-        {rows()}
+    <box flexDirection="column" flexGrow={1} flexShrink={0} backgroundColor={theme.background}>
+      <box flexDirection="row">
+        <text fg={theme.foregroundAccent} paddingLeft={1}>
+          会话列表
+        </text>
+        <text fg={theme.textMuted}>（{b.sessions.length} 个其它会话，Esc 返回当前会话）</text>
       </box>
+      {rows()}
     </box>
   );
 }
