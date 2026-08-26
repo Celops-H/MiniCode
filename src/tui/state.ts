@@ -698,10 +698,12 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       };
     }
     case "paste": {
-      // 粘贴：bracketed paste 整段插入（多行拆行，超行数截断）；/connect key 输入态并入 key 缓冲
+      // 粘贴：bracketed paste 整段插入（多行拆行，超行数截断）；/connect key 输入态并入 key 缓冲；
+      // 其它弹窗（session/permission 等）打开时输入框不可见或不可编辑，粘贴忽略不误改状态
       if (state.modal?.kind === "connect-key") {
         return { ...state, modal: { ...state.modal, key: state.modal.key + action.text } };
       }
+      if (state.modal) return state;
       const prompt = pasteText(state.prompt, action.text);
       return { ...state, prompt, candidate: recomputeCandidate(prompt, state.candidate) };
     }
