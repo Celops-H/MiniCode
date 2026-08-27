@@ -190,14 +190,17 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
       <text paddingX={1} paddingY={1} fg={theme.textMuted}>
         连接供应商
       </text>,
-      // 供应商名只显名称、不附默认模型（C-7=62）
+      // 供应商名只显名称、不附默认模型（C-7=62）；选中项浅蓝背景块黑字（P6 审查修正：
+      // 此前只有 ▸ 无背景块，与权限/新建会话的选中观感不一致——用户要求统一）
       ...b.providers.slice(start, start + visible).map((p, i) =>
         start + i === b.selected ? (
-          <text paddingX={1} paddingTop={1} fg={theme.text}>
-            ▸ {fitWidth(p.name, modalWidth(dims()) - 6)}
+          <text paddingTop={1}>
+            <span style={{ bg: theme.foregroundAccent, fg: theme.background }}>
+              ▸ {fitWidth(p.name, modalWidth(dims()) - 6)}
+            </span>
           </text>
         ) : (
-          <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
+          <text paddingTop={1} fg={theme.textMuted}>
             {"  "}
             {fitWidth(p.name, modalWidth(dims()) - 6)}
           </text>
@@ -250,10 +253,18 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
         <text paddingX={1} fg={theme.textMuted}>
           ● {d.name}
         </text>
+      ) : d.index === b.selected ? (
+        // 选中模型浅蓝背景块黑字（P6 审查修正，与权限/新建会话/connect 统一）；缩进保持 4+标记 与未选中同列
+        <text>
+          <span style={{ bg: theme.foregroundAccent, fg: theme.background }}>
+            {"    ▸ "}
+            {b.models[d.index]!.id}
+          </span>
+        </text>
       ) : (
         <text paddingX={1} fg={theme.text}>
           {"    "}
-          {d.index === b.selected ? `▸ ${b.models[d.index]!.id}` : `  ${b.models[d.index]!.id}`}
+          {`  ${b.models[d.index]!.id}`}
         </text>
       ),
     );
