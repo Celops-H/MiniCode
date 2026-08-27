@@ -57,13 +57,26 @@ export interface RunTuiEntryOptions {
 
 /** 初始会话解析（P6-1/2）：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
  *  启动不发消息不创建会话：草稿不带 meta 文件，第一条用户消息经 interact 轮末 flush 才写盘，
- *  启动不开会走人不在 sessions 目录留空会话。纯函数便于层 1 测试。 */
+ *  启动不开会走人不在 sessions 目录留空会话。显式 id 支持短前缀——/session 面板展示的是
+ *  哈希后 6 位，用户照面板输入即可续会话（P2）；多个会话撞前缀时取最近活跃的一个。
+ *  纯函数便于层 1 测试。 */
 export async function resolveInitialSession(
   options: { sessionId?: string; continueRecent?: boolean },
   store: SessionStore,
   modelId: string,
 ): Promise<Session> {
-  if (options.sessionId) return await store.loadSession(options.sessionId);
+  const wanted = options.sessionId;
+  if (wanted) {
+    try {
+      return await store.loadSession(wanted);
+    } catch (err) {
+      // 仅「文件不存在」走前缀匹配；meta 损坏等读盘错误原样上抛，不静默吞数据
+      if ((err as { code?: string }).code !== "ENOENT") throw err;
+      const hit = (await store.listSessions()).find((s) => s.id.startsWith(wanted));
+      if (!hit) throw err;
+      return await store.loadSession(hit.id);
+    }
+  }
   if (options.continueRecent) {
     const recent = (await store.listSessions())[0];
     if (recent) return await store.loadSession(recent.id);

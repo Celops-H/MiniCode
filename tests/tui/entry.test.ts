@@ -61,6 +61,38 @@ it("sessionId 指向不存在的会话：报错（minicode -c <坏 id> 由入口
   await expect(resolveInitialSession({ sessionId: "nope" }, store, "m2")).rejects.toThrow();
 });
 
+it("sessionId 短前缀：命中唯一会话加载（面板显示哈希后 6 位，照抄即可续会话，P2）", async () => {
+  const store = makeStore();
+  const created = await store.createSession({ model: "m1", title: "目标会话" });
+  const session = await resolveInitialSession({ sessionId: created.meta.id.slice(0, 6) }, store, "m2");
+  expect(session.meta.id).toBe(created.meta.id);
+  expect(session.meta.title).toBe("目标会话");
+});
+
+it("sessionId 短前缀撞多个会话：取最近活跃的一个", async () => {
+  const store = makeStore();
+  // 手工落两个同前缀的 meta 文件（前缀由 id 随机生成，无法经 createSession 指定）
+  const writeMeta = (id: string, title: string, updatedAt: string): void => {
+    writeFileSync(
+      path.join(dir, `${id}.meta.json`),
+      JSON.stringify({ id, title, model: "m1", createdAt: updatedAt, updatedAt, formatVersion: 1 }),
+    );
+  };
+  const prefix = "ffff01";
+  writeMeta(`${prefix}aaaa-old`, "旧会话", "2026-08-26T00:00:00.000Z");
+  writeMeta(`${prefix}bbbb-new`, "新会话", "2026-08-27T00:00:00.000Z");
+  const session = await resolveInitialSession({ sessionId: prefix }, store, "m2");
+  expect(session.meta.title).toBe("新会话"); // listSessions 按更新时间倒序，撞前缀取首个
+});
+
+it("sessionId 短前缀无匹配：保持报错（不静默改草稿态）", async () => {
+  const store = makeStore();
+  const created = await store.createSession({ model: "m1", title: "存在" });
+  await expect(
+    resolveInitialSession({ sessionId: `${created.meta.id.slice(0, 4)}ffff` }, store, "m2"),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
 it("reloadOrDraftSession：已落盘会话读盘续跑（含 /model 改过的模型）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "已落盘" });
