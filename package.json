@@ -5,14 +5,14 @@
   "private": true,
   "type": "module",
   "bin": {
-    "minicode": "dist/cli/app.js"
+    "minicode": "dist/bin/minicode.js"
   },
   "engines": {
     "node": ">=26.4"
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
-    "dev": "tsx src/cli/app.ts",
+    "dev": "cross-env NODE_OPTIONS=--experimental-ffi tsx src/cli/app.ts",
     "dev:tui": "cross-env NODE_OPTIONS=--experimental-ffi vite-node src/tui/dev.tsx",
     "build": "tsc -p tsconfig.build.json && cross-env VITE_TUI_BUILD=1 vite build",
     "typecheck": "tsc --noEmit",
