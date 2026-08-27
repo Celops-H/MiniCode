@@ -167,7 +167,8 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
 it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换 P4-2；新建行无操作态）", async () => {
   const sessions = [{ id: "ab3f90", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: "now", sizeBytes: 2048 }];
   const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 1, action: "enter" });
-  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 12 });
+  // 视口需容纳「标记 + 三列（P5 加大列间距）+ 操作态」整行不折行
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 76, height: 12 });
   await setup.waitForVisualIdle();
   // 进入态：选中会话行尾显示 ◀ 进入（新建行 selected 0 无操作态）
   expect(setup.captureCharFrame()).toContain("◀ 进入");
@@ -177,6 +178,44 @@ it("会话面板删除态：选中行显示操作态（进入/删除，←→ �
   const frame = setup.captureCharFrame();
   expect(frame).toContain("✕ 删除");
   expect(frame).toContain("←→ 进入/删除");
+});
+
+it("新建会话选中时无会话带 ▸，↓ 到会话才出现（P3：选中索引不做下限截断）", async () => {
+  const sessions = [{ id: "ab3f90", title: "重构 partition", model: "m", updatedAt: "now", sizeBytes: 0 }];
+  const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 0 });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
+  await setup.waitForVisualIdle();
+  // selected 0 = 新建会话选中：下方会话行不带 ▸（截断到 0 时第一个会话误带箭头）
+  expect(setup.captureCharFrame()).not.toContain("▸ 重构");
+  setModal({ kind: "session", sessions, selected: 1 });
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("▸ 重构");
+});
+
+it("会话面板副行与主行标题起始列一致（P4：text 水平 padding 在 opentui 无效，改字面空格缩进）", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [
+      {
+        id: "ab3f90d1e2",
+        title: "重构 partition",
+        model: "deepseek-v4-flash",
+        updatedAt: new Date(Date.now() - 180_000).toISOString(),
+        sizeBytes: 4096,
+      },
+    ],
+    selected: 1,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 70, height: 16 });
+  await setup.waitForVisualIdle();
+  const lines = setup.captureCharFrame().split("\n");
+  const mainRow = lines.find((l) => l.includes("重构 partition")) ?? "";
+  const subRow = lines.find((l) => l.includes("min ago")) ?? "";
+  const titleCol = colWidth(mainRow.slice(0, mainRow.indexOf("重构")));
+  const sublineCol = colWidth(subRow.slice(0, subRow.search(/\S/)));
+  // 标题起始列 = 外层 paddingX 2 + 行首 ▸/空格标记 2；副行须落在同一列
+  expect(titleCol).toBe(4);
+  expect(sublineCol).toBe(titleCol);
 });
 
 it("会话面板超页：窗口渲染且选中项随导航滚动入视野（新建置顶不随滚动滚出）", async () => {

@@ -80,28 +80,28 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     // 每条占 3 行：主行 + 副行 + 条目间空行
     const perRow = 3;
     const sessRows = Math.max(1, Math.min(total, Math.floor(avail / perRow)));
-    // 会话区选中索引：selected 0=新建会话、1..n=会话（P6-4 新建置顶）；滚动只滚会话区
-    const selIndex = Math.max(0, b.selected - 1);
-    // 滚动（C-6）：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）
+    // 会话区选中索引：selected 0=新建会话、1..n=会话（P6-4 新建置顶）；-1 表示无会话行被选中。
+    // 不做下限截断：截到 0 会让第一个普通会话在「新建会话选中」时也带 ▸（P3）
+    const selIndex = b.selected - 1;
+    // 滚动（C-6）：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）；
+    // selIndex 为 -1 时两个 min/max 结果都落回 0，滚动停在列表头
     const start = Math.max(0, Math.min(selIndex - (sessRows - 1), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
     // 三列（P6-5）：标题第一列、模型第二列、哈希第三列；列宽按可见内容取最大（截断上限防顶开），列间距 GAP
     const titleCols = Math.min(26, Math.max(4, ...visible.map((s) => colWidth(s.title || "新会话"))));
     const modelCols = Math.min(18, Math.max(4, ...visible.map((s) => colWidth(s.model))));
     const idCols = 6;
-    const GAP = 4;
+    const GAP = 6;
     const items: JSX.Element[] = [];
-    // 新建会话固定顶部（P6-4）：不随会话滚动区滚出、无删除操作态；选中=浅蓝底黑字（与普通会话白字+操作态区分）
+    // 新建会话固定顶部（P6-4）：不随会话滚动区滚出、无删除操作态；选中=浅蓝底黑字（与普通会话白字+操作态区分）。
+    // 缩进一律用字面空格——opentui 的 text 元素水平 padding 无效（实测 captureCharFrame 无位移），
+    // 只有 box 生效；行首两格与下面会话行的「▸ / 空格」标记位对齐
     const newSel = b.selected === 0;
     items.push(
       newSel ? (
-        <text paddingLeft={2} style={{ bg: theme.foregroundAccent, fg: theme.background }}>
-          ▸ ＋ 新建会话
-        </text>
+        <text style={{ bg: theme.foregroundAccent, fg: theme.background }}>▸ ＋ 新建会话</text>
       ) : (
-        <text paddingLeft={2} fg={theme.text}>
-          {"  "}＋ 新建会话
-        </text>
+        <text fg={theme.text}>{"  "}＋ 新建会话</text>
       ),
     );
     // 新建会话与列表间隔空行
@@ -115,13 +115,13 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(
         <box flexDirection="column">
-          <text paddingLeft={2} fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
+          <text fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
             {`${sel ? "▸ " : "  "}${title}${" ".repeat(GAP)}${model}${" ".repeat(GAP)}${idCell}${actionTag}`}
           </text>
-          {/* 副行缩进对齐第一列标题文字（第 4 列 = paddingLeft 2 + 行首 ▸/空格标记 2 列），
-              P6-5/S-2：不是对齐标记列，否则副行比标题偏左 2 列 */}
-          <text paddingLeft={4} fg={theme.textMuted}>
-            {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
+          {/* 副行缩进对齐第一列标题文字：外层 paddingX 2 + 字面空格 2 = 第 4 列，
+              与主行「▸/空格标记 + 标题」的标题起始列一致（P4，text 的 paddingLeft 在 opentui 无效） */}
+          <text fg={theme.textMuted}>
+            {`  ${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
           </text>
         </box>,
       );
