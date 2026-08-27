@@ -101,6 +101,23 @@ describe("会话持久化与续跑", () => {
     const list = await store.listSessions();
     expect(list.map((m) => m.id)).toEqual([good.meta.id]);
   });
+  it("listSessions：meta 缺 updatedAt（JSON 合法但形状不全）同样跳过，排序不崩（审查补）", async () => {
+    const store = setup();
+    const good = await store.createSession({ model: "m", title: "完好" });
+    const bad = await store.createSession({ model: "m", title: "缺字段" });
+    writeFileSync(path.join(dir, `${bad.meta.id}.meta.json`), JSON.stringify({ id: bad.meta.id, title: "缺 updatedAt" }));
+
+    const list = await store.listSessions();
+    expect(list.map((m) => m.id)).toEqual([good.meta.id]);
+  });
+
+  it("deleteSession：meta 损坏的会话仍可直接删（按 id 删文件，与 meta 内容无关，审查补）", async () => {
+    const store = setup();
+    const bad = await store.createSession({ model: "m" });
+    writeFileSync(path.join(dir, `${bad.meta.id}.meta.json`), "{ 坏 json");
+    await store.deleteSession(bad.meta.id);
+    await expect(store.loadSession(bad.meta.id)).rejects.toThrow(); // 文件已移除
+  });
 
   it("deleteSession：删除消息与元数据文件，列表不再包含该会话", async () => {
     const store = setup();

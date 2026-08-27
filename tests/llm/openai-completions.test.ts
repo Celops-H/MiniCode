@@ -199,6 +199,19 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
+  it("content 块数组全无文本：不产 text_delta（不空发，审查补）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: [{ type: "refusal" }, { type: "tool_call" }] }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([{ type: "done", stopReason: "stop" }]);
+  });
+
   it("工具调用流：start → delta → end → done", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(

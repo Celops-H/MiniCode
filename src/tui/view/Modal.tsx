@@ -43,19 +43,19 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
       <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
         width={modalWidth(dims())} title="权限确认" titleColor={theme.textMuted}>
-        <text paddingX={1} paddingY={1}>
+        <text paddingY={1}>
           工具 <span style={{ fg: theme.text }}>{b.toolName}</span>
           {b.content ? ` · ${b.content}` : ""}
         </text>
         {b.argsText ? (
-          <text fg={theme.textMuted} paddingX={1}>
+          <text fg={theme.textMuted}>
             参数 {b.argsText}
           </text>
         ) : null}
         <box flexDirection="row" paddingX={1} paddingTop={1}>
           <text>{optionLine()}</text>
         </box>
-        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+        <text fg={theme.textMuted} paddingY={1}>
           1/2/3 或 ←→ 选择 · Enter 确认 · Esc 拒绝
         </text>
       </box>
@@ -130,7 +130,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     });
     const overflow = total > sessRows ? `（${start + 1}-${Math.min(start + sessRows, total)}/${total}）` : "";
     items.push(
-      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+      <text fg={theme.textMuted} paddingY={1}>
         ↑↓ 选择 · ←→ 进入/删除 · Enter 确定 · Esc 返回{overflow}
       </text>,
     );
@@ -165,18 +165,18 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
     if (b.kind === "connect-key") {
       const display = b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）";
       return [
-        <text paddingX={1} paddingY={1} fg={theme.textMuted}>
+        <text paddingY={1} fg={theme.textMuted}>
           输入 API Key · {b.providerName}
         </text>,
-        <text paddingX={1}>
+        <text>
           默认模型 {b.defaultModel} · {b.apiKeyEnv}：
         </text>,
-        <text paddingX={2} fg={theme.text}>
+        <text fg={theme.text}>
           {display}
           {/* 竖线光标（P4-5）：key 输入位置细竖线指示，明灭闪烁 */}
           <span style={{ fg: cursorOn() ? theme.text : theme.background }}>│</span>
         </text>,
-        <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+        <text fg={theme.textMuted} paddingY={1}>
           Enter 确认连接 · Backspace 删除 · Esc 取消
         </text>,
       ];
@@ -187,7 +187,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
     const visible = Math.max(1, Math.min(total, avail - 6));
     const start = Math.max(0, Math.min(b.selected - Math.floor((visible - 1) / 2), total - visible));
     const items = [
-      <text paddingX={1} paddingY={1} fg={theme.textMuted}>
+      <text paddingY={1} fg={theme.textMuted}>
         连接供应商
       </text>,
       // 供应商名只显名称、不附默认模型（C-7=62）；选中项浅蓝背景块黑字（P6 审查修正：
@@ -209,7 +209,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
     ];
     const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
     items.push(
-      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+      <text fg={theme.textMuted} paddingY={1}>
         ↑↓/←→ 选择 · Enter 输入 API Key · Esc 取消{overflow}
       </text>,
     );
@@ -250,7 +250,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const windowed = display.slice(start, start + visible);
     const items = windowed.map((d) =>
       d.kind === "group" ? (
-        <text paddingX={1} fg={theme.textMuted}>
+        <text fg={theme.textMuted}>
           ● {d.name}
         </text>
       ) : d.index === b.selected ? (
@@ -262,7 +262,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
           </span>
         </text>
       ) : (
-        <text paddingX={1} fg={theme.text}>
+        <text fg={theme.text}>
           {"    "}
           {`  ${b.models[d.index]!.id}`}
         </text>
@@ -273,12 +273,12 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const visibleModels = windowed.filter((d) => d.kind === "model").length;
     const overflow = modelCount > visibleModels ? `（${visibleModels}/${modelCount}）` : "";
     items.push(
-      <text paddingX={1} fg={theme.textMuted}>
+      <text fg={theme.textMuted}>
         思考等级：{thinkingLevelLabel(b.thinkingLevel)}（←→ 调整）
       </text>,
     );
     items.push(
-      <text fg={theme.textMuted} paddingX={1} paddingY={1}>
+      <text fg={theme.textMuted} paddingY={1}>
         ↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Esc 取消{overflow}
       </text>,
     );

@@ -171,6 +171,17 @@ it("initState 恢复历史消息：user/assistant 带创建时间戳（P11，rec
   expect(msgs[2]?.time).toBeUndefined();
 });
 
+it("initState：非法时间戳不显示（防 NaN:NaN:NaN，审查补）", () => {
+  const messages: Message[] = [
+    { role: "user", id: "u1", content: "坏时间", timestamp: "garbage" },
+    { role: "assistant", id: "a1", content: [{ type: "text", text: "回复" }], timestamp: "not-a-date" },
+  ];
+  const state = initState(messages);
+  const msgs = state.blocks.filter((b) => b.kind === "message") as MessageBlock[];
+  expect(msgs[0]?.time).toBeUndefined(); // 非法字符串 → Invalid Date → 不显示
+  expect(msgs[1]?.time).toBeUndefined();
+});
+
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {
   const key = opentuiKeyToKey({ name: "h", ctrl: false, shift: false });
   expect(key).toEqual({ kind: "char", char: "h" });

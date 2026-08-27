@@ -849,6 +849,8 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(events.filter((e) => e === "spawn:/root/worker")).toHaveLength(2);
     // 唤醒后完成结论再回灌父（同一 worker 二次生命周期完整走通）
     expect(events.filter((e) => e === "complete:/root/worker").length).toBeGreaterThanOrEqual(2);
+    // root 被唤醒（子完成回灌）不发 AgentSpawned（P9 负向：root 常驻、无派生语义）
+    expect(events.some((e) => e === "spawn:/root")).toBe(false);
 
     // 被中断的 agent：发 AgentInterrupted（而非 Completed）
     const slowWorker = new Agent({

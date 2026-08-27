@@ -150,6 +150,9 @@ export class SessionStore {
           // 与消息坏行跳过的处理一致（宁丢一条不拖垮整体）；坏 meta 的会话仍可直接删文件清理
           continue;
         }
+        // 形状不完整（JSON 合法但缺关键字段，如手改少删了字段）：列表排序依赖 updatedAt，
+        // 缺了会在排序时 TypeError 拖垮整个列表，同样跳过
+        if (!meta.id || !meta.updatedAt) continue;
         let sizeBytes = 0;
         try {
           sizeBytes = (await stat(this.messageFile(id))).size;

@@ -290,6 +290,65 @@ it("/model 选中模型：浅蓝背景块黑字（P6 统一选中观感）", asy
   expect(other[0] && !isAccentBg(other[0].bg)).toBe(true);
 });
 
+it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致（P6 审查补）", async () => {
+  // 先测 /model：selected 1 时 gpt-4o 未选中、gpt-5-mini 选中，两行 id 起始列相同
+  const modelModal: ModalState = {
+    kind: "model",
+    models: [
+      { id: "gpt-4o", providerName: "OpenAI" },
+      { id: "gpt-5-mini", providerName: "OpenAI" },
+    ],
+    selected: 1,
+    thinkingLevel: undefined,
+  };
+  const mSetup = await testRender(() => <ModalView modal={modelModal} />, { width: 60, height: 14 });
+  await mSetup.waitForVisualIdle();
+  const mLines = mSetup.captureCharFrame().split("\n");
+  const mLineA = mLines.find((l) => l.includes("gpt-4o")) ?? "";
+  const mLineB = mLines.find((l) => l.includes("gpt-5-mini")) ?? "";
+  expect(colWidth(mLineA.slice(0, mLineA.indexOf("gpt-4o")))).toBe(
+    colWidth(mLineB.slice(0, mLineB.indexOf("gpt-5-mini"))),
+  );
+  // 再测 /connect：DeepSeek 未选中、OpenAI 选中（selected 1），起始列一致
+  const connectModal: ModalState = {
+    kind: "connect",
+    providers: [
+      { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-chat" },
+      { id: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
+    ],
+    selected: 1,
+  };
+  const cSetup = await testRender(() => <ModalView modal={connectModal} />, { width: 60, height: 12 });
+  await cSetup.waitForVisualIdle();
+  const cLines = cSetup.captureCharFrame().split("\n");
+  const cLineA = cLines.find((l) => l.includes("DeepSeek")) ?? "";
+  const cLineB = cLines.find((l) => l.includes("OpenAI")) ?? "";
+  expect(colWidth(cLineA.slice(0, cLineA.indexOf("DeepSeek")))).toBe(
+    colWidth(cLineB.slice(0, cLineB.indexOf("OpenAI"))),
+  );
+});
+
+it("/model 选中高亮随导航移动（P6 审查补：createMemo 响应式，非 For 卡死）", async () => {
+  const models = [
+    { id: "gpt-4o", providerName: "OpenAI" },
+    { id: "gpt-5-mini", providerName: "OpenAI" },
+  ];
+  const [modal, setModal] = createStore<ModalState>({ kind: "model", models, selected: 0, thinkingLevel: undefined });
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
+  await setup.waitForVisualIdle();
+  const spans0 = setup.captureSpans().lines.flatMap((l) => l.spans);
+  const sel0 = spans0.find((s) => isAccentBg(s.bg));
+  expect(sel0).toBeDefined();
+  expect(sel0!.text).toContain("gpt-4o");
+  // 下移到第二个模型：反色块跟着挪
+  setModal({ kind: "model", models, selected: 1, thinkingLevel: undefined });
+  await setup.waitForVisualIdle();
+  const spans1 = setup.captureSpans().lines.flatMap((l) => l.spans);
+  const sel1 = spans1.find((s) => isAccentBg(s.bg));
+  expect(sel1).toBeDefined();
+  expect(sel1!.text).toContain("gpt-5-mini");
+});
+
 it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普通会话白字条目区分）", async () => {
   const sessions = [
     { id: "ab3f90", title: "重构 partition", model: "m", updatedAt: "now", sizeBytes: 0 },

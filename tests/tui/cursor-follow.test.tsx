@@ -31,6 +31,8 @@ describe("agent 条变化时光标跟随（P12）", () => {
     const rowAfterExpiry = tuiCursor.row;
     // agent 条（3 行）消失后输入框下移，光标行增大 3
     expect(rowAfterExpiry).toBe(rowWithAgent + 3);
+    // 测试卫生：销毁渲染器触发 App onCleanup，停掉秒级 interval，防泄漏到其它用例（审查补）
+    (setup as { renderer?: { destroy?: () => void } }).renderer?.destroy?.();
   });
 
   it("派生出现 agent 条时光标上移避让（行数增加即重算，P12 同机制）", async () => {
@@ -45,5 +47,6 @@ describe("agent 条变化时光标跟随（P12）", () => {
     await setup.waitForVisualIdle();
     const rowWithAgent = tuiCursor.row;
     expect(rowWithAgent).toBe(rowNoAgent - 3);
+    (setup as { renderer?: { destroy?: () => void } }).renderer?.destroy?.();
   });
 });

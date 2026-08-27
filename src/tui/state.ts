@@ -311,11 +311,15 @@ export function selectedPromptText(p: PromptState): string {
 
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
  *  user/assistant 消息带创建时间戳（后端消息结构 P11）时回填发送时间，切模型等 reconfigure
- *  重建后历史消息的时间不丢（此前只有流式新消息才有 time） */
+ *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示（审查补） */
 export function initState(messages: Message[], title = ""): TuiState {
   const blocks: BlockView[] = [];
-  const msgTime = (m: Message): string | undefined =>
-    m.timestamp ? formatTime(new Date(m.timestamp)) : undefined;
+  const msgTime = (m: Message): string | undefined => {
+    if (!m.timestamp) return undefined;
+    const t = new Date(m.timestamp);
+    if (Number.isNaN(t.getTime())) return undefined;
+    return formatTime(t);
+  };
   for (const message of messages) {
     if (message.role === "user") {
       blocks.push({
@@ -680,7 +684,8 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
     case "AgentSpawned":
       // 已存在条目（followup 唤醒已完成/中断的 agent，P9）：重置为运行态、清完成时刻，
       // 树重新亮起（否则条目停在上一次终态、AgentStrip 10s 后过滤消失后不再出现）；
-      // 不存在（初次派生）：追加新条目。两种都加一条 spawned 活动行
+      // 不存在（初次派生）：追加新条目。两种都加一条 spawned 活动行。
+      // spawnedAt：事件未携带时保留原值（loop 订阅侧恒注入当前时刻，此处兜底直调 reducer 的测试路径）
       return {
         ...state,
         agents: state.agents.some((a) => a.path === event.path)
