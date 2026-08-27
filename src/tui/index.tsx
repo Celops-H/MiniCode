@@ -57,8 +57,9 @@ export interface RunTuiEntryOptions {
 
 /** 初始会话解析（P6-1/2）：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
  *  启动不发消息不创建会话：草稿不带 meta 文件，第一条用户消息经 interact 轮末 flush 才写盘，
- *  启动不开会走人不在 sessions 目录留空会话。显式 id 支持短前缀——/session 面板展示的是
- *  哈希后 6 位，用户照面板输入即可续会话（P2）；多个会话撞前缀时取最近活跃的一个。
+ *  启动不开会走人不在 sessions 目录留空会话。显式 id 支持短前缀——/session 面板展示 id 前 6 位
+ *  （P2 审查修正：与面板展示同向，避免照抄仍匹配不上；沿用 git 式唯一前缀惯例，多敲几位可加长区分），
+ *  多个会话撞前缀时取最近活跃的一个。
  *  纯函数便于层 1 测试。 */
 export async function resolveInitialSession(
   options: { sessionId?: string; continueRecent?: boolean },

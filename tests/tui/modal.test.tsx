@@ -117,7 +117,7 @@ it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副�
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("会话列表");
-  expect(frame).toContain("90d1e2"); // 哈希后 6 位（第三列）
+  expect(frame).toContain("ab3f90"); // id 前 6 位（第三列，-c 短前缀可直接照抄，P2 审查修正）
   expect(frame).toContain("重构 partition");
   expect(frame).toContain("deepseek-v4-flash");
   // 副行：相对时间 + 消息文件大小
@@ -127,7 +127,7 @@ it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副�
   expect(frame).toContain("＋ 新建会话");
   const lines2 = frame.split("\n");
   const newIdx = lines2.findIndex((l) => l.includes("＋ 新建会话"));
-  const sessIdx = lines2.findIndex((l) => l.includes("90d1e2"));
+  const sessIdx = lines2.findIndex((l) => l.includes("deepseek") && l.includes("ab3f90"));
   expect(newIdx).toBeGreaterThanOrEqual(0);
   expect(newIdx).toBeLessThan(sessIdx); // 新建行在会话行之前
   expect(frame).toContain("Esc 返回");
@@ -147,7 +147,7 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 70, height: 16 });
   await setup.waitForVisualIdle();
   const lines = setup.captureCharFrame().split("\n");
-  // 用模型列定位行（哈希是 id 后 6 位，如 aaaa1111 → aa1111，不含完整 id）
+  // 用模型列定位行（id 列只显前 6 位，如 aaaa1111 → aaaa11，不含完整 id）
   const rowA = lines.find((l) => l.includes("model-alpha")) ?? "";
   const rowB = lines.find((l) => l.includes("model-beta-9")) ?? "";
   // 两行模型列（第二列）起始显示列一致：CJK 全角使字符索引 ≠ 列索引，须按 colWidth 折算
@@ -156,12 +156,12 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
   const modelColB = colWidth(rowB.slice(0, rowB.indexOf("model-beta-9")));
   expect(modelColA).toBe(modelColB);
   // 两行哈希列（第三列）起始显示列一致：模型列 padCols 补齐后不随各模型宽度错位（S-1 审查修正）
-  const hashColA = colWidth(rowA.slice(0, rowA.indexOf("aa1111")));
-  const hashColB = colWidth(rowB.slice(0, rowB.indexOf("bb2222")));
+  const hashColA = colWidth(rowA.slice(0, rowA.indexOf("aaaa11")));
+  const hashColB = colWidth(rowB.slice(0, rowB.indexOf("bbbb22")));
   expect(hashColA).toBe(hashColB);
   // 列序：标题第一列、模型第二列、哈希第三列（模型在标题后、哈希在模型后）
   expect(rowA.indexOf("model-alpha")).toBeGreaterThan(rowA.indexOf("短"));
-  expect(rowA.indexOf("aa1111")).toBeGreaterThan(rowA.indexOf("model-alpha"));
+  expect(rowA.indexOf("aaaa11")).toBeGreaterThan(rowA.indexOf("model-alpha"));
 });
 
 it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换 P4-2；新建行无操作态）", async () => {

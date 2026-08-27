@@ -61,9 +61,10 @@ it("sessionId 指向不存在的会话：报错（minicode -c <坏 id> 由入口
   await expect(resolveInitialSession({ sessionId: "nope" }, store, "m2")).rejects.toThrow();
 });
 
-it("sessionId 短前缀：命中唯一会话加载（面板显示哈希后 6 位，照抄即可续会话，P2）", async () => {
+it("sessionId 短前缀：命中唯一会话加载（面板显示 id 前 6 位，照抄即可续会话，P2）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "目标会话" });
+  // 与 /session 面板展示口径一致：id 前 6 位
   const session = await resolveInitialSession({ sessionId: created.meta.id.slice(0, 6) }, store, "m2");
   expect(session.meta.id).toBe(created.meta.id);
   expect(session.meta.title).toBe("目标会话");
@@ -91,6 +92,13 @@ it("sessionId 短前缀无匹配：保持报错（不静默改草稿态）", asy
   await expect(
     resolveInitialSession({ sessionId: `${created.meta.id.slice(0, 4)}ffff` }, store, "m2"),
   ).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("sessionId meta 损坏：非 ENOENT 读盘错误原样上抛（不吞数据，P2 审查补）", async () => {
+  const store = makeStore();
+  const created = await store.createSession({ model: "m1", title: "损坏" });
+  writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
+  await expect(resolveInitialSession({ sessionId: created.meta.id }, store, "m2")).rejects.toThrow(SyntaxError);
 });
 
 it("reloadOrDraftSession：已落盘会话读盘续跑（含 /model 改过的模型）", async () => {

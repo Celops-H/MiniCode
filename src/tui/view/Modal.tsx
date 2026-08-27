@@ -111,7 +111,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       const title = padCols(fitWidth(s.title || "新会话", titleCols), titleCols);
       // 模型列同样补齐定宽：哈希列（第三列）不随各会话模型宽度错位（S-1 审查修正）
       const model = padCols(fitWidth(s.model, modelCols), modelCols);
-      const idCell = padCols(s.id.slice(-idCols), idCols);
+      const idCell = padCols(s.id.slice(0, idCols), idCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(
         <box flexDirection="column">
