@@ -152,6 +152,28 @@ it("Stop：子 agent 的 Stop 不把主界面打成空闲（P8）；主 agent（
   expect(rootStop.status).toBe("idle");
 });
 
+it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 hasRunningAgent 判打断（P8 整体审视补）", () => {
+  // 复刻 loop esc 分支的组合：running 并入 agent 树运行态
+  const withSubRunning: TuiState = {
+    ...initState([]),
+    agents: [
+      { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+      { path: "/root/t", status: "running", spawnedAt: 1, completedAt: null },
+    ],
+  };
+  const escRunning = withSubRunning.status === "running" || hasRunningAgent(withSubRunning.agents);
+  expect(escRunning).toBe(true);
+  // 子 agent 全部完成/中断：不再判打断（空闲双击退出逻辑恢复）
+  const allDone: TuiState = {
+    ...initState([]),
+    agents: [
+      { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+      { path: "/root/t", status: "completed", spawnedAt: 1, completedAt: 2 },
+    ],
+  };
+  expect(allDone.status === "running" || hasRunningAgent(allDone.agents)).toBe(false);
+});
+
 it("initState 恢复历史消息：user/assistant 带创建时间戳（P11，reconfigure 后时间不丢）", () => {
   const messages: Message[] = [
     { role: "user", id: "u1", content: "你好", timestamp: "2026-08-27T03:04:05.000Z" },
