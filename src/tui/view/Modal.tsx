@@ -2,7 +2,8 @@
  * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P5 C 组统一黑白）：权限确认 / 会话面板 / /connect / /model。
  * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
  * 框线风格与消息区工具卡一体：rounded 边框 + 边框内标题，分区（标题/参数/选项/键位提示）。
- * C 组统一：弹窗整体黑白灰阶（边框/标题/高亮去彩），错误/API error 文本才用红色（严重语义）；
+ * 线条统一黑白灰阶（边框/标题/分隔，P6-3 修正 C 组过犹不及：文字也黑白不染色）——
+ * 仅「选中项」用浅蓝背景块（foregroundAccent 底 + 黑字）做高亮，一眼可辨且与普通文字区分。
  * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）。
  * 键位：权限三决策 1/2/3 或 ←→ 选择 Enter 确认 Esc 拒绝；会话列表 ↑↓ 选择 Enter 切换 Esc 取消。
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
@@ -21,7 +22,7 @@ function modalWidth(dims: { width?: number }): number {
   return Math.max(30, (dims.width ?? 80) - 6);
 }
 
-/** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项灰阶 chip，随 ←→ 移动） */
+/** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项浅蓝背景块黑字，随 ←→ 移动；文字黑白不染色） */
 function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
@@ -30,7 +31,7 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
     PERMISSION_OPTIONS.map((opt, i) => {
       const sel = b.selected === i;
       return sel ? (
-        <span style={{ bg: theme.backgroundRaised, fg: theme.text }}>
+        <span style={{ bg: theme.foregroundAccent, fg: theme.background }}>
           [{opt.key}] {opt.label} ◀
         </span>
       ) : (
@@ -62,42 +63,61 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板（P4-3 全屏化 + P5 C-3/4/5/6）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
- *  四周留边距、标题与列表间空行分隔；每会话两行——主行「哈希 标题 模型」三列各自定宽对齐、
- *  列间距固定（C-4/72），副行缩进对齐标题列；条目间空行加大间距（C-5）；
+/** 会话切换面板（P4-3 全屏化 + P5 C-3/4/5/6 + P6-4/5）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
+ *  四周留边距、标题与列表间空行分隔；每会话两行——主行「标题 模型 哈希」三列各自定宽对齐（P6-5 会话名
+ *  第一列、间距加大），副行缩进对齐标题列；条目间空行加大间距（C-5）；
+ *  「新建会话」置顶固定为第一项并默认选中（P6-4），＋ 图标 + 选中浅蓝底黑字特殊化，不随会话滚动区滚出。
  *  当前活跃会话不在列表（loop 已过滤）；选中行操作态进入/删除 ←→ 切换（P4-2）。
- *  滚动：选中项落在页底、到本页最后一个再按 ↓ 才滚下一页（C-6）。 */
+ *  滚动：选中项落在页底、到本页最后一个再按 ↓ 才滚下一页（C-6）；滚动只作用于会话区。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    // 列表区可用高度：标题(1) + 标题下空行(1) + 提示(1) + 底部余量(1)
+    // 列表区可用高度：标题(1) + 标题下空行(1) + 新建会话行(1) + 新建与会话间隔(1) + 提示(1) + 底部余量(1)
     const avail = Math.max(8, (dims().height ?? 20) - 7);
     // 每条占 3 行：主行 + 副行 + 条目间空行
     const perRow = 3;
     const sessRows = Math.max(1, Math.min(total, Math.floor(avail / perRow)));
+    // 会话区选中索引：selected 0=新建会话、1..n=会话（P6-4 新建置顶）；滚动只滚会话区
+    const selIndex = Math.max(0, b.selected - 1);
     // 滚动（C-6）：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）
-    const start = Math.max(0, Math.min(b.selected - (sessRows - 1), total - sessRows));
+    const start = Math.max(0, Math.min(selIndex - (sessRows - 1), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
-    // 三列定宽（C-4/72）：哈希固定 6、标题/模型按可见内容取最大（截断上限防顶开），列间距固定
+    // 三列（P6-5）：标题第一列、模型第二列、哈希第三列；列宽按可见内容取最大（截断上限防顶开），列间距 GAP
+    const titleCols = Math.min(26, Math.max(4, ...visible.map((s) => colWidth(s.title || "新会话"))));
+    const modelCols = Math.min(18, Math.max(4, ...visible.map((s) => colWidth(s.model))));
     const idCols = 6;
-    const titleCols = Math.min(30, Math.max(4, ...visible.map((s) => colWidth(s.title || "新会话"))));
-    const modelCols = Math.min(22, Math.max(4, ...visible.map((s) => colWidth(s.model))));
-    const GAP = 3; // 列间空格
+    const GAP = 4;
     const items: JSX.Element[] = [];
+    // 新建会话固定顶部（P6-4）：不随会话滚动区滚出、无删除操作态；选中=浅蓝底黑字（与普通会话白字+操作态区分）
+    const newSel = b.selected === 0;
+    items.push(
+      newSel ? (
+        <text paddingLeft={2} style={{ bg: theme.foregroundAccent, fg: theme.background }}>
+          ▸ ＋ 新建会话
+        </text>
+      ) : (
+        <text paddingLeft={2} fg={theme.text}>
+          {"  "}＋ 新建会话
+        </text>
+      ),
+    );
+    // 新建会话与列表间隔空行
+    items.push(<text> </text>);
     visible.forEach((s, i) => {
-      const sel = start + i === b.selected;
-      const idCell = padCols(s.id.slice(-idCols), idCols);
+      const sel = start + i === selIndex;
       const title = padCols(fitWidth(s.title || "新会话", titleCols), titleCols);
       const model = fitWidth(s.model, modelCols);
+      const idCell = padCols(s.id.slice(-idCols), idCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(
         <box flexDirection="column">
           <text paddingLeft={2} fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
-            {`${sel ? "▸ " : "  "}${idCell}${" ".repeat(GAP)}${title}${" ".repeat(GAP)}${model}${actionTag}`}
+            {`${sel ? "▸ " : "  "}${title}${" ".repeat(GAP)}${model}${" ".repeat(GAP)}${idCell}${actionTag}`}
           </text>
-          <text paddingLeft={2 + idCols + GAP} fg={theme.textMuted}>
+          {/* 副行缩进对齐第一列标题（P6-5：列序改标题·模型·哈希，副行不再对旧第二列错位） */}
+          <text paddingLeft={2} fg={theme.textMuted}>
             {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
           </text>
         </box>,
@@ -105,18 +125,6 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       // 条目间空行（最后一条后不加，避免底部多余空隙）
       if (i < visible.length - 1) items.push(<text> </text>);
     });
-    const newSel = b.selected === total;
-    items.push(
-      newSel ? (
-        <text paddingX={1} paddingTop={1} fg={theme.text}>
-          ▸ ── 新建会话 ──
-        </text>
-      ) : (
-        <text paddingX={1} paddingTop={1} fg={theme.textMuted}>
-          {"  "}── 新建会话 ──
-        </text>
-      ),
-    );
     const overflow = total > sessRows ? `（${start + 1}-${Math.min(start + sessRows, total)}/${total}）` : "";
     items.push(
       <text fg={theme.textMuted} paddingX={1} paddingY={1}>

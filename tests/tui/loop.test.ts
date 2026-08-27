@@ -6,7 +6,7 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, sessionModalTarget, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -56,6 +56,21 @@ describe("connect key 输入态（弹窗内）", () => {
     const s = withKeyModal(initState([]));
     expect(reduceAction(s, { type: "modal-confirm" }).modal).toMatchObject({ kind: "connect-key", key: "" });
     expect(reduceAction(s, { type: "cancel" }).modal).toMatchObject({ kind: "connect-key", key: "" });
+  });
+});
+
+describe("sessionModalTarget：/session 面板确认目标（P6-4 新建置顶，selected 0=新建、1..n=会话）", () => {
+  const sessions = [{ id: "aaa" }, { id: "bbb" }];
+  it("selected 0 = 新建会话（默认选项）", () => {
+    expect(sessionModalTarget(0, sessions)).toEqual({ kind: "new" });
+  });
+  it("selected 1..n = 会话下标 selected-1", () => {
+    expect(sessionModalTarget(1, sessions)).toEqual({ kind: "session", id: "aaa" });
+    expect(sessionModalTarget(2, sessions)).toEqual({ kind: "session", id: "bbb" });
+  });
+  it("越界 selected 兜底为新建（防御，正常由 loop clamp）", () => {
+    expect(sessionModalTarget(5, sessions)).toEqual({ kind: "new" });
+    expect(sessionModalTarget(-1, sessions)).toEqual({ kind: "new" });
   });
 });
 

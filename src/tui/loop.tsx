@@ -13,7 +13,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -352,6 +352,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         sessions: sessions
           .filter((s) => s.id !== session.meta.id)
           .map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
+        // selected 0=新建会话（置顶默认选中，P6-4）；1..n=会话
         selected: 0,
         action: "enter",
       },
@@ -467,10 +468,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
               showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
             }
           } else {
-            // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表
-            const targetIndex = state.modal.selected;
-            if (state.modal.action === "delete" && targetIndex < state.modal.sessions.length) {
-              const targetId = state.modal.sessions[targetIndex]!.id;
+            // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表。
+            // selected 0=新建会话、1..n=会话（P6-4 新建置顶，索引映射见 sessionModalTarget）
+            const target = sessionModalTarget(state.modal.selected, state.modal.sessions);
+            if (state.modal.action === "delete" && target.kind === "session") {
+              const targetId = target.id;
+              // 回调外捕获选中下标：异步内 state.modal 不受外层 if 的 narrowing（TS 报 possibly undefined）
+              const delSelected = state.modal.selected;
               void (async () => {
                 try {
                   await store.deleteSession(targetId);
@@ -481,7 +485,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                     modal: {
                       kind: "session",
                       sessions: remaining.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
-                      selected: Math.min(targetIndex, remaining.length),
+                      // 删除后选中原位置下一项（selected=会话下标+1，删除 selected=k 的会话后仍落 k，clamp 到新长度）
+                      selected: Math.min(delSelected, remaining.length),
                       action: "enter",
                     },
                   });
@@ -491,10 +496,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                 }
               })();
             } else {
-              pendingSwitch =
-                targetIndex < state.modal.sessions.length
-                  ? state.modal.sessions[targetIndex]!.id
-                  : NEW_SESSION_ID;
+              pendingSwitch = target.kind === "new" ? NEW_SESSION_ID : target.id;
               exitLoop();
             }
           }

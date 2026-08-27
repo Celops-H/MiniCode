@@ -113,8 +113,9 @@ export interface PermissionModalState {
   selected: number;
 }
 
-/** 会话切换面板：最近会话列表 + 新建入口（选中项 = 下标，新建占末位）；
- *  当前活跃会话不展示（列表=切换其它会话，P4-2 防误删本会话）；选中行动作态 ←→ 切换 */
+/** 会话切换面板：最近会话列表 + 新建入口（P6-4 新建置顶固定第一项并默认选中，selected 0=新建、1..n=会话；
+ *  新建行不参与会话滚动区、无删除操作态）；当前活跃会话不展示（列表=切换其它会话，P4-2 防误删本会话）；
+ *  选中行动作态 ←→ 切换 */
 export interface SessionModalState {
   kind: "session";
   /** 会话列表（title 随 /rename 更新；sizeBytes=消息文件大小 P4-3 副行展示） */
@@ -152,6 +153,16 @@ export interface ModelModalState {
 
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
+
+/** /session 面板确认目标解析（P6-4 新建置顶）：selected 0=新建会话、1..n=会话（下标 selected-1）；
+ *  返回「新建」或切换目标会话 id；越界 selected 兜底为新建（防御，正常由 loop clamp）。 */
+export function sessionModalTarget(
+  selected: number,
+  sessions: ReadonlyArray<{ id: string }>,
+): { kind: "new" } | { kind: "session"; id: string } {
+  if (selected >= 1 && selected <= sessions.length) return { kind: "session", id: sessions[selected - 1]!.id };
+  return { kind: "new" };
+}
 
 /** 思考等级循环序（/model 左右调整）：low → medium → high → 缺省 → low */
 export const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
