@@ -4,7 +4,7 @@
  * 即响应式订阅；键盘事件经 opentuiKeyToKey → mapKey → onAction 送回 reducer 落地。
  * （传函数 getter 给组件在 opentui reconciler 下不触发重渲染，改用 store proxy 属性访问。）
  */
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useKeyboard, usePaste } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { TuiState } from "../state.js";
@@ -58,6 +58,15 @@ export function App(props: AppProps): JSX.Element {
   // 曾致全屏化完全不生效（审查 S-1，同 AgentStrip「组件体 if return null 不刷新」同型坑）
   const fullscreen = createMemo(() => props.state.modal?.kind === "session");
 
+  // 秒级时钟（P12）：agent 条完成条目的「10s 消失」由时间驱动，老化出树后 store 没有新通知，
+  // 光标定位的 bottomRows 若只订阅 agents 会停在旧行。每秒翻一次时钟信号让 bottomRows 重算；
+  // 树没有完成条目时刷新结果不变，无额外渲染成本
+  const [now, setNow] = createSignal(Date.now());
+  onMount(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => clearInterval(timer));
+  });
+
   return (
     <box flexDirection="column" flexGrow={1} backgroundColor={theme.background}>
       <Show when={!fullscreen()}>
@@ -87,8 +96,9 @@ export function App(props: AppProps): JSX.Element {
           candidate={props.state.candidate}
           // /connect key 弹窗输入时隐藏底部输入框光标（光标移到弹窗内 key 输入区）
           showCursor={props.state.modal?.kind !== "connect-key"}
-          // 光标定位（D-1）：输入框下方占用行数 = 底边框 1 + 状态行 1 + agent 条（含 paddingTop）
-          bottomRows={2 + agentRowCount(props.state.agents)}
+          // 光标定位（D-1）：输入框下方占用行数 = 底边框 1 + 状态行 1 + agent 条（含 paddingTop）；
+          // agent 条行数带时钟参数——完成条目老化出树后行数随秒级节拍重算，光标跟着回移（P12）
+          bottomRows={2 + agentRowCount(props.state.agents, now())}
         />
         <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
         {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
