@@ -13,7 +13,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -564,11 +564,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         return;
       }
       case "esc": {
-        // Esc：有折叠聚焦先取消聚焦；运行中打断；空闲第一次 arm、窗口内第二次退出（decideEsc 纯判定）。
-        // （/connect key 输入态 Esc 由 mapModalKey → cancel 分支关弹窗，不走到这里）
+        // Esc：有折叠聚焦先取消聚焦；运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
+        // 子 agent 活跃时主状态可能非 running（主 agent 在等结论）——判定并入 agent 树运行态，
+        // 否则 Esc 会被 arm 成双击退出、按两次才打断（P8）
         const verdict = decideEsc({
           hasFocus: state.focusIndex >= 0,
-          running: state.status === "running",
+          running: state.status === "running" || hasRunningAgent(state.agents),
           lastEscAt,
           now: Date.now(),
           windowMs: ESC_EXIT_WINDOW_MS,

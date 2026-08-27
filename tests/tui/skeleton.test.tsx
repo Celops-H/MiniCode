@@ -8,7 +8,19 @@ import { it, expect } from "vitest";
 import { createChannel } from "../../src/tui/loop.js";
 import { opentuiKeyToKey } from "../../src/tui/opentuiKeys.js";
 import { mapKey } from "../../src/tui/keymap.js";
-import { initState, reduceAction, reduceHook, cyclePermissionMode, cycleThinkingLevel, permissionModeLabel, type TuiState } from "../../src/tui/state.js";
+import {
+  initState,
+  reduceAction,
+  reduceHook,
+  cyclePermissionMode,
+  cycleThinkingLevel,
+  permissionModeLabel,
+  hasRunningAgent,
+  formatTime,
+  type TuiState,
+  type MessageBlock,
+} from "../../src/tui/state.js";
+import type { Message } from "../../src/core/index.js";
 
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   const base = initState([]);
@@ -103,6 +115,60 @@ it("AgentSpawned 追加到 agents 树（main 恒在首位，去重；完成带�
   // 中断事件：状态改 interrupted + 记录完成时刻（同样 10s 后从树消失）
   const aborted = reduceHook(done, { type: "AgentInterrupted", path: "/root/task_1", parentPath: "/root", completedAt: 2000 });
   expect(aborted.agents[1]).toEqual({ path: "/root/task_1", status: "interrupted", spawnedAt: null, completedAt: 2000 });
+});
+
+it("AgentSpawned 唤醒已完成 agent：条目重置为运行态（P9，树重新亮起）", () => {
+  const base = initState([]);
+  const spawned = reduceHook(base, { type: "AgentSpawned", path: "/root/t", parentPath: "/root", spawnedAt: 100 });
+  const done = reduceHook(spawned, {
+    type: "AgentCompleted",
+    path: "/root/t",
+    parentPath: "/root",
+    conclusion: "ok",
+    completedAt: 200,
+  });
+  expect(done.agents[1]).toMatchObject({ status: "completed" });
+  // followup 唤醒：再发 AgentSpawned → 条目回运行态、完成时刻清空，spawnedAt 保留
+  const revived = reduceHook(done, { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  expect(revived.agents[1]).toEqual({ path: "/root/t", status: "running", spawnedAt: 100, completedAt: null });
+});
+
+it("hasRunningAgent：主 agent 或 completed/interrupted 不算，运行中的子 agent 才算（P8）", () => {
+  expect(hasRunningAgent(initState([]).agents)).toBe(false);
+  const withSub = (status: "running" | "completed" | "interrupted"): TuiState["agents"] => [
+    { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+    { path: "/root/t", status, spawnedAt: 1, completedAt: status === "running" ? null : 2 },
+  ];
+  expect(hasRunningAgent(withSub("running"))).toBe(true);
+  expect(hasRunningAgent(withSub("completed"))).toBe(false);
+  expect(hasRunningAgent(withSub("interrupted"))).toBe(false);
+});
+
+it("Stop：子 agent 的 Stop 不把主界面打成空闲（P8）；主 agent（/root）的才回空闲", () => {
+  const base: TuiState = { ...initState([]), status: "running" };
+  const subStop = reduceHook(base, { type: "Stop", agentPath: "/root/t" });
+  expect(subStop.status).toBe("running"); // 子 agent 每轮结束不打断主回合
+  const rootStop = reduceHook(subStop, { type: "Stop", agentPath: "/root" });
+  expect(rootStop.status).toBe("idle");
+});
+
+it("initState 恢复历史消息：user/assistant 带创建时间戳（P11，reconfigure 后时间不丢）", () => {
+  const messages: Message[] = [
+    { role: "user", id: "u1", content: "你好", timestamp: "2026-08-27T03:04:05.000Z" },
+    {
+      role: "assistant",
+      id: "a1",
+      content: [{ type: "text", text: "回复" }],
+      timestamp: "2026-08-27T03:04:06.000Z",
+    },
+    { role: "user", id: "u2", content: "无时间戳旧数据" },
+  ];
+  const state = initState(messages);
+  const msgs = state.blocks.filter((b) => b.kind === "message") as MessageBlock[];
+  expect(msgs[0]?.time).toBe(formatTime(new Date("2026-08-27T03:04:05.000Z")));
+  expect(msgs[1]?.time).toBe(formatTime(new Date("2026-08-27T03:04:06.000Z")));
+  // 旧数据缺 timestamp：不显示时间，不回退乱值
+  expect(msgs[2]?.time).toBeUndefined();
 });
 
 it("键盘字符：opentui 键→mapKey→输入插件 reducer", () => {

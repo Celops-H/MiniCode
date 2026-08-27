@@ -309,9 +309,13 @@ export function selectedPromptText(p: PromptState): string {
   return [head, ...mid, tail].join("\n");
 }
 
-/** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步） */
+/** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
+ *  user/assistant 消息带创建时间戳（后端消息结构 P11）时回填发送时间，切模型等 reconfigure
+ *  重建后历史消息的时间不丢（此前只有流式新消息才有 time） */
 export function initState(messages: Message[], title = ""): TuiState {
   const blocks: BlockView[] = [];
+  const msgTime = (m: Message): string | undefined =>
+    m.timestamp ? formatTime(new Date(m.timestamp)) : undefined;
   for (const message of messages) {
     if (message.role === "user") {
       blocks.push({
@@ -321,6 +325,7 @@ export function initState(messages: Message[], title = ""): TuiState {
         source: message.source,
         text: message.content,
         thinkingCollapsed: true,
+        time: msgTime(message),
       });
     } else if (message.role === "assistant") {
       const text = message.content
@@ -339,6 +344,7 @@ export function initState(messages: Message[], title = ""): TuiState {
           text,
           thinking: thinking || undefined,
           thinkingCollapsed: true,
+          time: msgTime(message),
         });
       }
       for (const call of message.content.filter(
@@ -587,6 +593,12 @@ export function interruptTurn(state: TuiState): TuiState {
   return { ...state, blocks, streaming: undefined, status: "idle" };
 }
 
+/** 是否有运行中的子 agent（P8）：主 agent 等子 agent 结论时主状态非 running，
+ *  Esc 判定据此仍走「打断」而非「双击退出」，子 agent 活跃时 Esc 一次即级联中断 */
+export function hasRunningAgent(agents: AgentNode[]): boolean {
+  return agents.some((a) => a.path !== "/root" && a.status === "running");
+}
+
 /** 追加消息块 */
 function appendMessageBlock(
   state: TuiState,
@@ -666,10 +678,17 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks };
     }
     case "AgentSpawned":
+      // 已存在条目（followup 唤醒已完成/中断的 agent，P9）：重置为运行态、清完成时刻，
+      // 树重新亮起（否则条目停在上一次终态、AgentStrip 10s 后过滤消失后不再出现）；
+      // 不存在（初次派生）：追加新条目。两种都加一条 spawned 活动行
       return {
         ...state,
         agents: state.agents.some((a) => a.path === event.path)
-          ? state.agents
+          ? state.agents.map((a) =>
+              a.path === event.path
+                ? { path: a.path, status: "running" as const, spawnedAt: event.spawnedAt ?? a.spawnedAt, completedAt: null }
+                : a,
+            )
           : [...state.agents, { path: event.path, status: "running", spawnedAt: event.spawnedAt ?? null, completedAt: null }],
         blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path, collapsed: true }],
       };
@@ -700,6 +719,9 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         blocks: [...state.blocks, { kind: "agent", event: "interrupted", path: event.path, collapsed: true }],
       };
     case "Stop":
+      // 只把主 agent（/root）的 Stop 视为回合空闲：子 agent 每轮结束也发 Stop，
+      // 放行会把主界面误打成「空闲」（P8——Esc 判定依赖状态，见 hasRunningAgent）
+      if (event.agentPath && event.agentPath !== "/root") return state;
       return { ...state, status: "idle" };
     default:
       return state;
