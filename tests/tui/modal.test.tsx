@@ -152,6 +152,10 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
   const modelColA = colWidth(rowA.slice(0, rowA.indexOf("model-alpha")));
   const modelColB = colWidth(rowB.slice(0, rowB.indexOf("model-beta-9")));
   expect(modelColA).toBe(modelColB);
+  // 两行哈希列（第三列）起始显示列一致：模型列 padCols 补齐后不随各模型宽度错位（S-1 审查修正）
+  const hashColA = colWidth(rowA.slice(0, rowA.indexOf("aa1111")));
+  const hashColB = colWidth(rowB.slice(0, rowB.indexOf("bb2222")));
+  expect(hashColA).toBe(hashColB);
   // 列序：标题第一列、模型第二列、哈希第三列（模型在标题后、哈希在模型后）
   expect(rowA.indexOf("model-alpha")).toBeGreaterThan(rowA.indexOf("短"));
   expect(rowA.indexOf("aa1111")).toBeGreaterThan(rowA.indexOf("model-alpha"));

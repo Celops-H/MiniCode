@@ -544,9 +544,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       case "session-action-toggle": {
         // /session 面板 ←→：切换当前行操作态（进入 ↔ 删除）
         if (state.modal?.kind === "session") {
+          // 新建行（selected 0）无删除操作态（P6-4）：恒为进入，←→ 不切删除避免「新建行显示删除」歧义（N-1）
+          const action = state.modal.selected === 0 ? "enter" : state.modal.action === "enter" ? "delete" : "enter";
           commit({
             ...state,
-            modal: { ...state.modal, action: state.modal.action === "enter" ? "delete" : "enter" },
+            modal: { ...state.modal, action },
           });
         }
         return;

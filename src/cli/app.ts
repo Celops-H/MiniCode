@@ -54,7 +54,10 @@ export function environmentPrompt(): string {
 }
 
 export const program = new Command();
-program.name("minicode").description("AI 编程 Agent 命令行工具").version("0.0.1");
+program
+  .name("minicode")
+  .description("AI 编程 Agent 命令行工具（无参数直接进 TUI；minicode -c 继续最近会话）")
+  .version("0.0.1");
 
 program
   .command("new")
@@ -104,19 +107,42 @@ program
     });
   });
 
-// 无子命令默认进 TUI（P6-1/2）：minicode 直接进 TUI 空态（不发消息不建会话）；
-// minicode -c 继续最近活跃会话；minicode -c <id> 继续指定。TUI 入口装配在 src/tui/index.tsx
-program
-  .option("-c, --continue [sessionId]", "继续会话（无参数取最近活跃；缺省进 TUI 不建会话）")
-  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
-  .action(async (options: { continue?: string | boolean; agents?: boolean }) => {
-    const { runTuiEntry } = await import("../tui/index.js");
-    await runTuiEntry({
-      sessionId: typeof options.continue === "string" ? options.continue : undefined,
-      continueRecent: options.continue === true,
-      agents: options.agents,
-    });
-  });
+/**
+ * 识别无子命令的顶层 TUI 形态（P6-1/2）：minicode（无参）进 TUI 空态、minicode -c [id] 继续最近/指定、
+ * minicode --no-agents 禁多 Agent。其余形态返回 null（交 commander 正常分派子命令）。
+ * 不用 commander 默认 action：commander 15 默认 action 与子命令混用实测不可靠（minicode tui 会被默认
+ * action 截走、顶层可选 option 的 -c <id> 报 too many arguments），故 main 在 parseAsync 前手动接管。
+ */
+export function topLevelTui(argv: string[]): { sessionId?: string; continueRecent?: boolean; agents?: boolean } | null {
+  if (argv.length === 0) return { agents: true };
+  const first = argv[0] ?? "";
+  if (first === "-c" || first === "--continue" || first.startsWith("--continue=")) {
+    // --continue=abc 等号内联形式（commander 同款写法）
+    const inline = first.startsWith("--continue=") ? first.slice("--continue=".length) : undefined;
+    if (inline !== undefined) {
+      return inline
+        ? { sessionId: inline, agents: !argv.includes("--no-agents") }
+        : { continueRecent: true, agents: !argv.includes("--no-agents") };
+    }
+    const rest = argv.slice(1);
+    const head = rest[0];
+    const hasValue = head !== undefined && !head.startsWith("-");
+    return hasValue
+      ? { sessionId: head, agents: !argv.includes("--no-agents") }
+      : { continueRecent: true, agents: !argv.includes("--no-agents") };
+  }
+  if (first === "--no-agents") return { agents: false };
+  return null;
+}
+
+/** 顶层 TUI 形态接管：识别成功则进 TUI 并返回 true，否则返回 false（main 交 commander） */
+async function tryTopLevelTui(argv: string[]): Promise<boolean> {
+  const entry = topLevelTui(argv);
+  if (!entry) return false;
+  const { runTuiEntry } = await import("../tui/index.js");
+  await runTuiEntry(entry);
+  return true;
+}
 
 export async function main(): Promise<void> {
   // 进程退出统一清理后台任务（DESIGN 7.5），防孤儿进程残留
@@ -124,6 +150,8 @@ export async function main(): Promise<void> {
     killAllBackgroundTasks();
   });
   await loadDotEnv();
+  // 顶层 TUI 快捷入口在 commander 前手动接管（见 topLevelTui）；其余交 commander 分派子命令
+  if (await tryTopLevelTui(process.argv.slice(2))) return;
   await program.parseAsync(process.argv);
 }
 

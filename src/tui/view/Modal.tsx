@@ -1,5 +1,5 @@
 /**
- * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P5 C 组统一黑白）：权限确认 / 会话面板 / /connect / /model。
+ * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P6-3 弹窗观感修正）：权限确认 / 会话面板 / /connect / /model。
  * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
  * 框线风格与消息区工具卡一体：rounded 边框 + 边框内标题，分区（标题/参数/选项/键位提示）。
  * 线条统一黑白灰阶（边框/标题/分隔，P6-3 修正 C 组过犹不及：文字也黑白不染色）——
@@ -74,7 +74,8 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
   const dims = useTerminalDimensions();
   const rows = createMemo(() => {
     const total = b.sessions.length;
-    // 列表区可用高度：标题(1) + 标题下空行(1) + 新建会话行(1) + 新建与会话间隔(1) + 提示(1) + 底部余量(1)
+    // 列表区可用高度：外层 paddingTop(1) + 标题(1) + 标题下空行(1) + 新建会话行(1) + 新建与会话间隔(1)
+    //   + 提示(1) + 底部余量(1)
     const avail = Math.max(8, (dims().height ?? 20) - 7);
     // 每条占 3 行：主行 + 副行 + 条目间空行
     const perRow = 3;
@@ -108,7 +109,8 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     visible.forEach((s, i) => {
       const sel = start + i === selIndex;
       const title = padCols(fitWidth(s.title || "新会话", titleCols), titleCols);
-      const model = fitWidth(s.model, modelCols);
+      // 模型列同样补齐定宽：哈希列（第三列）不随各会话模型宽度错位（S-1 审查修正）
+      const model = padCols(fitWidth(s.model, modelCols), modelCols);
       const idCell = padCols(s.id.slice(-idCols), idCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(
@@ -116,8 +118,9 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
           <text paddingLeft={2} fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
             {`${sel ? "▸ " : "  "}${title}${" ".repeat(GAP)}${model}${" ".repeat(GAP)}${idCell}${actionTag}`}
           </text>
-          {/* 副行缩进对齐第一列标题（P6-5：列序改标题·模型·哈希，副行不再对旧第二列错位） */}
-          <text paddingLeft={2} fg={theme.textMuted}>
+          {/* 副行缩进对齐第一列标题文字（第 4 列 = paddingLeft 2 + 行首 ▸/空格标记 2 列），
+              P6-5/S-2：不是对齐标记列，否则副行比标题偏左 2 列 */}
+          <text paddingLeft={4} fg={theme.textMuted}>
             {`${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
           </text>
         </box>,

@@ -105,10 +105,12 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         session = await store.loadSession(result.switchTo);
       } else {
         // 当前会话可能已落盘（/model、/rename 等命令触发过 rewriteMessages 写盘），也可能仍是
-        // 启动草稿（未发消息）：读盘成功则续跑（含 /model 改过的模型），失败重建草稿不报错
+        // 启动草稿（未发消息）：读盘成功则续跑（含 /model 改过的模型）；仅「草稿未落盘」（ENOENT）
+        // 重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据（S-3 审查修正）
         try {
           session = await store.loadSession(session.meta.id);
-        } catch {
+        } catch (err) {
+          if ((err as { code?: string }).code !== "ENOENT") throw err;
           session = await resolveInitialSession({}, store, modelId);
         }
       }
