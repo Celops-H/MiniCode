@@ -8,14 +8,17 @@ import { ModalView } from "../../src/tui/view/Modal.js";
 import { colWidth } from "../../src/tui/view/fit.js";
 import type { ModalState } from "../../src/tui/state.js";
 
-/** 判断 CapturedSpan 背景是否为主题浅蓝（foregroundAccent #61afef；RGBA.toInts 为 0-255，.r/.g/.b 是 0-1 归一化） */
-function isAccentBg(rgba: { toInts: () => number[] }): boolean {
+/** 判断 CapturedSpan 背景是否为主题浅蓝（foregroundAccent #61afef；RGBA.toInts 为 0-255，.r/.g/.b 是 0-1 归一化）；
+ *  bg/fg 为 null 时返回 false（失败信息更友好，避免 TypeError） */
+function isAccentBg(rgba: { toInts: () => number[] } | null | undefined): boolean {
+  if (!rgba) return false;
   const [r, g, b] = rgba.toInts();
   return r === 0x61 && g === 0xaf && b === 0xef;
 }
 
 /** 判断 CapturedSpan 前景是否为主题黑底（background #101013） */
-function isBlackFg(rgba: { toInts: () => number[] }): boolean {
+function isBlackFg(rgba: { toInts: () => number[] } | null | undefined): boolean {
+  if (!rgba) return false;
   const [r, g, b] = rgba.toInts();
   return r === 0x10 && g === 0x10 && b === 0x13;
 }

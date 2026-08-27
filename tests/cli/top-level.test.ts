@@ -31,6 +31,17 @@ it("-c 配 --no-agents：继续且禁用多 Agent", () => {
   expect(topLevelTui(["-c", "abc", "--no-agents"])).toEqual({ sessionId: "abc", agents: false });
 });
 
+it("参数顺序无关：--no-agents 在 -c 前后等价（整体审视必改，防静默丢 continue）", () => {
+  expect(topLevelTui(["--no-agents", "-c"])).toEqual({ continueRecent: true, agents: false });
+  expect(topLevelTui(["--no-agents", "-c", "abc"])).toEqual({ sessionId: "abc", agents: false });
+  expect(topLevelTui(["--no-agents", "--continue=abc"])).toEqual({ sessionId: "abc", agents: false });
+});
+
+it("空值统一按继续最近：-c 后空串 / --continue= 空内联（整体审视建议）", () => {
+  expect(topLevelTui(["-c", ""])).toEqual({ continueRecent: true, agents: true });
+  expect(topLevelTui(["--continue="])).toEqual({ continueRecent: true, agents: true });
+});
+
 it("--no-agents：禁多 Agent 进 TUI", () => {
   expect(topLevelTui(["--no-agents"])).toEqual({ agents: false });
 });

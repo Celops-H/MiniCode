@@ -485,7 +485,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
                     modal: {
                       kind: "session",
                       sessions: remaining.map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
-                      // 删除后选中原位置下一项（selected=会话下标+1，删除 selected=k 的会话后仍落 k，clamp 到新长度）
+                      // 删除后选中落原位置下一项：删除 selected=k 的会话（会话下标 k-1），删除后仍选中
+                      // selected=k（原下一会话前移到下标 k-1）；删末位则 clamp 到新列表末位
                       selected: Math.min(delSelected, remaining.length),
                       action: "enter",
                     },

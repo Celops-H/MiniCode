@@ -110,37 +110,60 @@ program
 /**
  * 识别无子命令的顶层 TUI 形态（P6-1/2）：minicode（无参）进 TUI 空态、minicode -c [id] 继续最近/指定、
  * minicode --no-agents 禁多 Agent。其余形态返回 null（交 commander 正常分派子命令）。
+ * 解析**位置无关**（--no-agents 在 -c 前后等价，整体审视 F 级修正）；-c/--continue 后跟非 flag 参数即会话
+ * id，--continue=id 内联；空值（-c 后无值 / --continue= 空串）统一按「继续最近」。
  * 不用 commander 默认 action：commander 15 默认 action 与子命令混用实测不可靠（minicode tui 会被默认
  * action 截走、顶层可选 option 的 -c <id> 报 too many arguments），故 main 在 parseAsync 前手动接管。
  */
 export function topLevelTui(argv: string[]): { sessionId?: string; continueRecent?: boolean; agents?: boolean } | null {
   if (argv.length === 0) return { agents: true };
-  const first = argv[0] ?? "";
-  if (first === "-c" || first === "--continue" || first.startsWith("--continue=")) {
-    // --continue=abc 等号内联形式（commander 同款写法）
-    const inline = first.startsWith("--continue=") ? first.slice("--continue=".length) : undefined;
-    if (inline !== undefined) {
-      return inline
-        ? { sessionId: inline, agents: !argv.includes("--no-agents") }
-        : { continueRecent: true, agents: !argv.includes("--no-agents") };
+  let sessionId: string | undefined;
+  let continueFlag = false;
+  let agents: boolean | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "") continue; // 空参数（-c "" 的空值已由 next 判定消费）无意义，忽略
+    if (a === "-c" || a === "--continue") {
+      continueFlag = true;
+      const next = argv[i + 1];
+      // 空串视为无值（统一空值语义：按继续最近，不产生空会话 id）
+      if (next && !next.startsWith("-")) {
+        sessionId = next;
+        i++;
+      }
+    } else if (a.startsWith("--continue=")) {
+      continueFlag = true;
+      const inline = a.slice("--continue=".length);
+      if (inline) sessionId = inline;
+    } else if (a === "--no-agents") {
+      agents = false;
+    } else {
+      // 非顶层形态参数（子命令名如 tui/list、未知 flag）→ 交 commander
+      return null;
     }
-    const rest = argv.slice(1);
-    const head = rest[0];
-    const hasValue = head !== undefined && !head.startsWith("-");
-    return hasValue
-      ? { sessionId: head, agents: !argv.includes("--no-agents") }
-      : { continueRecent: true, agents: !argv.includes("--no-agents") };
   }
-  if (first === "--no-agents") return { agents: false };
-  return null;
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    ...(continueFlag && !sessionId ? { continueRecent: true } : {}),
+    agents: agents ?? true,
+  };
 }
 
 /** 顶层 TUI 形态接管：识别成功则进 TUI 并返回 true，否则返回 false（main 交 commander） */
 async function tryTopLevelTui(argv: string[]): Promise<boolean> {
   const entry = topLevelTui(argv);
   if (!entry) return false;
-  const { runTuiEntry } = await import("../tui/index.js");
-  await runTuiEntry(entry);
+  try {
+    const { runTuiEntry } = await import("../tui/index.js");
+    await runTuiEntry(entry);
+  } catch (err) {
+    // minicode -c <不存在的会话 id>：loadSession 抛 ENOENT，给可读提示而非原始文件路径（N-6）
+    if ((err as { code?: string }).code === "ENOENT" && entry.sessionId) {
+      console.error(`会话不存在：${entry.sessionId}`);
+      return true;
+    }
+    throw err;
+  }
   return true;
 }
 

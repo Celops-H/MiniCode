@@ -79,6 +79,18 @@ export async function resolveInitialSession(
   });
 }
 
+/** reconfigure（/connect、/model）后恢复当前会话（P6-1/S-3）：读盘成功续跑（含 /model 改过的模型）；
+ *  仅「草稿未落盘」（ENOENT）重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据。
+ *  纯函数便于层 1 测试。 */
+export async function reloadOrDraftSession(store: SessionStore, current: Session, modelId: string): Promise<Session> {
+  try {
+    return await store.loadSession(current.meta.id);
+  } catch (err) {
+    if ((err as { code?: string }).code !== "ENOENT") throw err;
+    return await resolveInitialSession({}, store, modelId);
+  }
+}
+
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   let config: Config = await loadConfig();
@@ -99,20 +111,14 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
       await loadDotEnv();
       models = buildModelClient(config);
       modelId = resolveMainModel(config);
+      // switchTo===NEW_SESSION_ID 分支实际不可达（/model 带自身 id、/connect 不带 switchTo），
+      // 保留作防御（未来 reconfigure + 新建语义的兜底，整体审视 N-2）
       if (result.switchTo === NEW_SESSION_ID) {
         session = await store.createSession({ model: modelId });
       } else if (result.switchTo) {
         session = await store.loadSession(result.switchTo);
       } else {
-        // 当前会话可能已落盘（/model、/rename 等命令触发过 rewriteMessages 写盘），也可能仍是
-        // 启动草稿（未发消息）：读盘成功则续跑（含 /model 改过的模型）；仅「草稿未落盘」（ENOENT）
-        // 重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据（S-3 审查修正）
-        try {
-          session = await store.loadSession(session.meta.id);
-        } catch (err) {
-          if ((err as { code?: string }).code !== "ENOENT") throw err;
-          session = await resolveInitialSession({}, store, modelId);
-        }
+        session = await reloadOrDraftSession(store, session, modelId);
       }
       continue;
     }

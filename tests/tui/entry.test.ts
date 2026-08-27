@@ -2,12 +2,12 @@
  * 层 1：TUI 初始会话解析（P6-1/2）——启动不创建会话（内存草稿不落盘）、
  * minicode -c 继续最近活跃会话（listSessions 倒序首个）、无最近回落草稿。
  */
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SessionStore } from "../../src/storage/index.js";
-import { resolveInitialSession } from "../../src/tui/index.js";
+import { resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
 
 let dir = "";
 
@@ -54,4 +54,33 @@ it("continueRecent 无历史会话：回落启动草稿态（不报错、不落�
   const session = await resolveInitialSession({ continueRecent: true }, store, "mock-model");
   expect(session.meta.title).toBe("新会话");
   expect(readdirSync(dir)).toHaveLength(0);
+});
+
+it("sessionId 指向不存在的会话：报错（minicode -c <坏 id> 由入口层给可读提示）", async () => {
+  const store = makeStore();
+  await expect(resolveInitialSession({ sessionId: "nope" }, store, "m2")).rejects.toThrow();
+});
+
+it("reloadOrDraftSession：已落盘会话读盘续跑（含 /model 改过的模型）", async () => {
+  const store = makeStore();
+  const created = await store.createSession({ model: "m1", title: "已落盘" });
+  const reloaded = await reloadOrDraftSession(store, created, "m3");
+  expect(reloaded.meta.id).toBe(created.meta.id);
+  expect(reloaded.meta.title).toBe("已落盘");
+});
+
+it("reloadOrDraftSession：草稿未落盘（ENOENT）重建草稿不报错", async () => {
+  const store = makeStore();
+  const draft = await resolveInitialSession({}, store, "m2");
+  const reloaded = await reloadOrDraftSession(store, draft, "m2");
+  expect(reloaded.meta.title).toBe("新会话");
+  expect(reloaded.meta.model).toBe("m2");
+  expect(readdirSync(dir)).toHaveLength(0); // 重建仍是草稿，不落盘
+});
+
+it("reloadOrDraftSession：非 ENOENT 读盘错误上抛（meta 损坏不静默吞数据，S-3）", async () => {
+  const store = makeStore();
+  const created = await store.createSession({ model: "m1", title: "损坏" });
+  writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
+  await expect(reloadOrDraftSession(store, created, "m3")).rejects.toThrow();
 });
