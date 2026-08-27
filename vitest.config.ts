@@ -36,6 +36,8 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     environment: "node",
+    // 全局准备（tests/setup.ts）：压测试环境下 process 监听器累积超限的警告刷屏
+    setupFiles: ["tests/setup.ts"],
   },
   // 与 vite.config 的 noExternal 保持一致：统一 solid-js 单实例（组件与 @opentui/solid 共享，
   // 否则 store 更新驱动不了 reconciler 渲染），TUI 回归测试依赖此配置
