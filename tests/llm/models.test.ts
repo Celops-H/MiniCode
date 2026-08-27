@@ -145,6 +145,36 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.select(["openrouter-1", "deepseek-1"])).toBe("deepseek-1");
   });
 
+  it("401 冷却期内第二次请求：跳过主模型直接走备选，不再请求坏 key（P13 复测观感）", async () => {
+    const router = new ModelRouter({ cooldownMs: 60_000 });
+    const models = new Models({ router, chain: ["openrouter-1", "deepseek-1"] });
+    let openrouterCalls = 0;
+    const openrouter = makeFaultyProvider("openrouter", "openrouter-1", { failWith: 401 });
+    // 包一层计数：断言冷却期内第二次 stream 不碰主模型
+    const counting: Provider = {
+      ...openrouter,
+      async *stream(modelId, context, options) {
+        openrouterCalls++;
+        yield* openrouter.stream(modelId, context, options);
+      },
+    };
+    models.register(counting);
+    models.register(makeFaultyProvider("deepseek", "deepseek-1"));
+
+    // 第一次：401 → 切备选，主模型被冷却
+    const first: StreamEvent[] = [];
+    for await (const e of models.stream("openrouter-1", createContext("s"))) first.push(e);
+    expect(first[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
+    expect(openrouterCalls).toBe(1);
+
+    // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求、无 fallback 通知（没发生切换）
+    const second: StreamEvent[] = [];
+    for await (const e of models.stream("openrouter-1", createContext("s"))) second.push(e);
+    expect(openrouterCalls).toBe(1); // 坏 key 模型零重试
+    expect(second[0]).toEqual({ type: "text_delta", text: "deepseek:deepseek-1" });
+    expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
+  });
+
   it("传入 modelId 不在配置链时以其打头（/@/model 切到链外模型生效）", async () => {
     const router = new ModelRouter();
     const models = new Models({ router, chain: ["main-1", "backup-1"] });

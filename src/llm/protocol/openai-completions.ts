@@ -4,7 +4,8 @@ import type { Protocol } from "../types.js";
 
 interface Choice {
   delta?: {
-    content?: string;
+    /** 正文文本：OpenAI 标准为字符串；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接（P10） */
+    content?: string | Array<{ type?: string; text?: string }>;
     /** 推理模型思考增量（DeepSeek 等）→ 统一成 thinking_delta */
     reasoning_content?: string;
     reasoning?: string;
@@ -79,7 +80,14 @@ export class OpenAICompletionsProtocol implements Protocol {
           yield { type: "thinking_delta", thinking: reasoning };
         }
         if (delta?.content) {
-          yield { type: "text_delta", text: delta.content };
+          // 正文文本：字符串直接用；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接（P10）
+          const text =
+            typeof delta.content === "string"
+              ? delta.content
+              : delta.content
+                  .map((b) => (b.type === "text" || b.text != null ? (b.text ?? "") : ""))
+                  .join("");
+          if (text) yield { type: "text_delta", text };
         }
 
         // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量。

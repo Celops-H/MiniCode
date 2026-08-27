@@ -181,6 +181,24 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
+  it("content 块数组（glm 等兼容厂商格式）：取文本块拼接为 text_delta（P10）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: [{ type: "text", text: "正文" }, { type: "refusal" }] }, index: 0 }] },
+        { choices: [{ delta: { content: [{ type: "text", text: "继续" }] }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "正文" },
+      { type: "text_delta", text: "继续" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
   it("工具调用流：start → delta → end → done", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
