@@ -141,8 +141,15 @@ export class SessionStore {
     for (const file of files) {
       if (file.endsWith(".meta.json")) {
         const id = file.slice(0, -".meta.json".length);
-        const raw = await readFile(path.join(this.dir, file), "utf8");
-        const meta = JSON.parse(raw) as SessionMeta;
+        let meta: SessionMeta;
+        try {
+          const raw = await readFile(path.join(this.dir, file), "utf8");
+          meta = JSON.parse(raw) as SessionMeta;
+        } catch {
+          // 单个会话 meta 损坏（手改/写盘中断）：跳过该条不拖垮整个列表——
+          // 与消息坏行跳过的处理一致（宁丢一条不拖垮整体）；坏 meta 的会话仍可直接删文件清理
+          continue;
+        }
         let sizeBytes = 0;
         try {
           sizeBytes = (await stat(this.messageFile(id))).size;
