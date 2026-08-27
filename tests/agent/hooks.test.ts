@@ -149,6 +149,8 @@ describe("Agent 接入 Hook 事件", () => {
     }
 
     expect(handler).toHaveBeenCalledTimes(1);
+    // Stop 带 agentPath（P8）：独立 agent 无团队归属记 /root，多 agent 下按路径区分谁空闲
+    expect(handler.mock.calls[0]?.[0]).toMatchObject({ type: "Stop", agentPath: "/root" });
   });
 
   it("工具调用轮不触发 Stop，最终无工具调用的总结轮才触发一次", async () => {

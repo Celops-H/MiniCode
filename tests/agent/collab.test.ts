@@ -842,6 +842,14 @@ describe("协作工具集（多 agent 环境）", () => {
     const completed = (await root.getMessages()).find((m) => m.role === "user" && m.source === "system");
     expect(String(completed?.content)).toContain("完成");
 
+    // followup 唤醒已完成 agent（P9）：后台驱动再次发 AgentSpawned——
+    // 宿主据此把已完成/中断的树条目重新置为运行态（否则唤醒后树仍停在旧状态）
+    await team.sendMessage(path, { type: "NEW_TASK", from: AgentPath.root(), content: "再干一次", triggerTurn: true });
+    await sleep(200);
+    expect(events.filter((e) => e === "spawn:/root/worker")).toHaveLength(2);
+    // 唤醒后完成结论再回灌父（同一 worker 二次生命周期完整走通）
+    expect(events.filter((e) => e === "complete:/root/worker").length).toBeGreaterThanOrEqual(2);
+
     // 被中断的 agent：发 AgentInterrupted（而非 Completed）
     const slowWorker = new Agent({
       modelClient: {

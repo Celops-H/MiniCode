@@ -18,7 +18,7 @@ describe("HookBus 事件总线", () => {
     const handler = vi.fn();
     const unsubscribe = bus.on("Stop", handler);
     unsubscribe();
-    await bus.emit({ type: "Stop" });
+    await bus.emit({ type: "Stop", agentPath: "/root" });
 
     expect(handler).not.toHaveBeenCalled();
   });

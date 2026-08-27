@@ -141,22 +141,14 @@ export class Team {
     return child;
   }
 
-  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）；触发派生事件（此前确认） */
+  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）。
+   *  派生观测事件（AgentSpawned）由驱动层（consumeDriving）发射——初次派生与 followup 唤醒
+   *  都经后台驱动续跑，统一在驱动起点发，避免 commitSpawn 发一次、唤醒又发一次的重复（P9）。 */
   commitSpawn(path: AgentPath, agent: Agent): void {
     const member = this.members.get(path.toString());
     if (!member) return;
     member.agent = agent;
     agent.agentPath = path;
-    if (member.parentPath) {
-      // 观测事件触发失败不影响 spawn 流程（review 修复：unhandled rejection 会崩进程）
-      void this.hooks
-        ?.emit({
-          type: "AgentSpawned",
-          path: path.toString(),
-          parentPath: member.parentPath.toString(),
-        })
-        .catch(() => {});
-    }
   }
 
   /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏）；有 worktree 时一并清理 */
@@ -243,6 +235,18 @@ export class Team {
   /** 消费单个 agent 的续跑循环；结束后释放槽位、重试待驱动队列并回灌结论（watcher） */
   private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
     try {
+      // 后台驱动起点发派生观测事件（P9）：初次派生与 followup 唤醒都经这里——
+      // TUI 树靠该事件把条目置为运行态（唤醒一个已完成/中断的 agent 时树重新亮起）；
+      // root 恒常驻不发（否则每次子完成回灌唤醒 root 都会误发一次「派生」）
+      const path = agent.agentPath;
+      const parentPath = path ? this.members.get(path.toString())?.parentPath : undefined;
+      if (path && !path.isRoot() && parentPath) {
+        await this.safeEmit({
+          type: "AgentSpawned",
+          path: path.toString(),
+          parentPath: parentPath.toString(),
+        });
+      }
       // root 被后台驱动（如子 agent 完成唤醒续跑）时事件无人渲染——
       // 转发给 onRootEvent（宿主 CLI 渲染 root 迟到结论），否则汇总结论被消费丢弃（review 修复）
       const isRoot = agent.agentPath?.isRoot() ?? false;

@@ -427,9 +427,11 @@ export class Agent {
 
     const calls = toolCallsOf(assistant);
     if (calls.length === 0) {
-      // Stop：模型回复无工具调用，本轮对话准备结束
+      // Stop：模型回复无工具调用，本轮对话准备结束。
+      // 带 agentPath（多 agent 下区分「谁」空闲）：TUI 据此只把主 agent 的 Stop 视为回合空闲
+      //（子 agent 轮次结束不应把主界面打成空闲，P8）
       this.stopped = true;
-      await this.safeEmit({ type: "Stop" });
+      await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
       // 会话记忆（DESIGN 9.7）：每轮结束后增量维护记忆，压缩时用记忆替代现场摘要省模型调用
       if (this.memoryEnabled) {
         await this.maybeUpdateMemory();

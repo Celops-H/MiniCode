@@ -46,7 +46,7 @@ export type HookEvent =
       error: string;
       agentPath: string;
     }
-  | { type: "Stop" }
+  | { type: "Stop"; agentPath: string }
   | { type: "SessionStart" }
   | { type: "SessionEnd" }
   | { type: "AgentSpawned"; path: string; parentPath: string }
