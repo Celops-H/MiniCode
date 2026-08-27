@@ -93,11 +93,29 @@ program
 program
   .command("tui")
   .description("进入 TUI 会话界面")
-  .option("-c, --continue <sessionId>", "继续指定会话")
+  .option("-c, --continue [sessionId]", "继续会话（无参数取最近活跃）")
   .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
-  .action(async (options: { continue?: string; agents?: boolean }) => {
+  .action(async (options: { continue?: string | boolean; agents?: boolean }) => {
     const { runTuiEntry } = await import("../tui/index.js");
-    await runTuiEntry({ sessionId: options.continue, agents: options.agents });
+    await runTuiEntry({
+      sessionId: typeof options.continue === "string" ? options.continue : undefined,
+      continueRecent: options.continue === true,
+      agents: options.agents,
+    });
+  });
+
+// 无子命令默认进 TUI（P6-1/2）：minicode 直接进 TUI 空态（不发消息不建会话）；
+// minicode -c 继续最近活跃会话；minicode -c <id> 继续指定。TUI 入口装配在 src/tui/index.tsx
+program
+  .option("-c, --continue [sessionId]", "继续会话（无参数取最近活跃；缺省进 TUI 不建会话）")
+  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
+  .action(async (options: { continue?: string | boolean; agents?: boolean }) => {
+    const { runTuiEntry } = await import("../tui/index.js");
+    await runTuiEntry({
+      sessionId: typeof options.continue === "string" ? options.continue : undefined,
+      continueRecent: options.continue === true,
+      agents: options.agents,
+    });
   });
 
 export async function main(): Promise<void> {

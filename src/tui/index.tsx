@@ -5,7 +5,8 @@
  */
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import path from "node:path";
-import { SessionStore } from "../storage/index.js";
+import { randomUUID } from "node:crypto";
+import { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
@@ -16,7 +17,6 @@ import { runTui } from "./loop.js";
 import type { Config } from "../config/index.js";
 import type { ThinkingLevel } from "../core/index.js";
 import type { Models } from "../llm/index.js";
-import type { Session } from "../storage/index.js";
 
 /**
  * 系统提示词（对齐主流 agent CLI 的写法，2026-08-26 打磨）：
@@ -46,16 +46,47 @@ export const SYSTEM_PROMPT = [
   "9. 破坏性操作（删除/覆盖/强制提交等）先征得用户同意；不外泄密钥/隐私。",
 ].join("\n");
 
+/** TUI 入口选项：sessionId 显式继续指定会话；continueRecent 为 -c 无参数（取最近活跃）；缺省启动草稿态 */
+export interface RunTuiEntryOptions {
+  /** 显式继续指定会话（minicode -c <id> / minicode tui -c <id>） */
+  sessionId?: string;
+  /** -c 无参数：继续最近活跃会话（listSessions 倒序首个）；无最近会话回落启动草稿态 */
+  continueRecent?: boolean;
+  agents?: boolean;
+}
+
+/** 初始会话解析（P6-1/2）：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
+ *  启动不发消息不创建会话：草稿不带 meta 文件，第一条用户消息经 interact 轮末 flush 才写盘，
+ *  启动不开会走人不在 sessions 目录留空会话。纯函数便于层 1 测试。 */
+export async function resolveInitialSession(
+  options: { sessionId?: string; continueRecent?: boolean },
+  store: SessionStore,
+  modelId: string,
+): Promise<Session> {
+  if (options.sessionId) return await store.loadSession(options.sessionId);
+  if (options.continueRecent) {
+    const recent = (await store.listSessions())[0];
+    if (recent) return await store.loadSession(recent.id);
+  }
+  const now = new Date().toISOString();
+  return new Session({
+    id: randomUUID(),
+    title: "新会话",
+    model: modelId,
+    createdAt: now,
+    updatedAt: now,
+    formatVersion: 1,
+  });
+}
+
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
-export async function runTuiEntry(options: { sessionId?: string; agents?: boolean }): Promise<void> {
+export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   let config: Config = await loadConfig();
   await loadDotEnv();
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
   let models: Models = buildModelClient(config);
   let modelId: string = resolveMainModel(config);
-  let session = options.sessionId
-    ? await store.loadSession(options.sessionId)
-    : await store.createSession({ model: modelId });
+  let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
   for (;;) {
@@ -68,10 +99,19 @@ export async function runTuiEntry(options: { sessionId?: string; agents?: boolea
       await loadDotEnv();
       models = buildModelClient(config);
       modelId = resolveMainModel(config);
-      session =
-        result.switchTo === NEW_SESSION_ID
-          ? await store.createSession({ model: modelId })
-          : await store.loadSession(result.switchTo ?? session.meta.id);
+      if (result.switchTo === NEW_SESSION_ID) {
+        session = await store.createSession({ model: modelId });
+      } else if (result.switchTo) {
+        session = await store.loadSession(result.switchTo);
+      } else {
+        // 当前会话可能已落盘（/model、/rename 等命令触发过 rewriteMessages 写盘），也可能仍是
+        // 启动草稿（未发消息）：读盘成功则续跑（含 /model 改过的模型），失败重建草稿不报错
+        try {
+          session = await store.loadSession(session.meta.id);
+        } catch {
+          session = await resolveInitialSession({}, store, modelId);
+        }
+      }
       continue;
     }
     if (!result.switchTo) break;
