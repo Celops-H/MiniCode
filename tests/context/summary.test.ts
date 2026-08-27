@@ -76,6 +76,7 @@ describe("replaceWithSummary（摘要替换）", () => {
         id: expect.any(String),
         content: "【会话摘要】\n目标是重构",
         source: "system",
+        timestamp: expect.any(String),
       },
     ]);
   });

@@ -75,6 +75,7 @@ export async function assembleAssistantMessage(
     role: "assistant",
     id: randomUUID(),
     content,
+    timestamp: new Date().toISOString(),
     ...(meta ? { meta: { stopReason: stopReason ?? `error: ${error}` } } : {}),
   };
 }

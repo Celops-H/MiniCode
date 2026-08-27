@@ -51,6 +51,8 @@ export interface UserMessage {
   content: string;
   /** 消息来源，缺省 human；系统注入的合成消息标 "system"，让模型区分背景信息与用户指令 */
   source?: MessageSource;
+  /** 消息创建时间（ISO）：会话恢复时展示用；旧数据可能缺失 */
+  timestamp?: string;
 }
 
 /** 模型回复：内容块数组 + 调用元数据 */
@@ -60,6 +62,8 @@ export interface AssistantMessage {
   id: string;
   content: ContentBlock[];
   meta?: AssistantMeta;
+  /** 消息创建时间（ISO）：会话恢复时展示用；旧数据可能缺失 */
+  timestamp?: string;
 }
 
 /** 工具结果：toolCallId 配对键 + toolName 来源工具 + isError 成败标记 */
@@ -82,14 +86,16 @@ export type Message = UserMessage | AssistantMessage | ToolResultMessage;
  * @param content 用户输入内容
  * @param source 消息来源，系统注入的合成消息标 "system"，缺省 human
  * @param id 稳定 id，缺省随机生成
+ * @param timestamp 消息创建时间，缺省当前时间（会话恢复展示用）
  * @returns 用户消息
  */
 export function userMessage(
   content: string,
   source?: MessageSource,
   id: string = randomUUID(),
+  timestamp = new Date().toISOString(),
 ): UserMessage {
-  return { role: "user", id, content, ...(source ? { source } : {}) };
+  return { role: "user", id, content, ...(source ? { source } : {}), timestamp };
 }
 
 /**
@@ -97,14 +103,16 @@ export function userMessage(
  * @param content 内容块数组（文本 / 思考 / 工具调用）
  * @param meta 调用元数据（模型、用量、停因等），可选
  * @param id 稳定 id，缺省随机生成
+ * @param timestamp 消息创建时间，缺省当前时间（会话恢复展示用）
  * @returns 模型回复消息
  */
 export function assistantMessage(
   content: ContentBlock[],
   meta?: AssistantMeta,
   id: string = randomUUID(),
+  timestamp = new Date().toISOString(),
 ): AssistantMessage {
-  return { role: "assistant", id, content, ...(meta ? { meta } : {}) };
+  return { role: "assistant", id, content, ...(meta ? { meta } : {}), timestamp };
 }
 
 /**

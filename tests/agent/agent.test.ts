@@ -33,7 +33,7 @@ describe("Agent 主循环：模型对话闭环", () => {
 
     const messages = agent.getMessages();
     expect(messages).toHaveLength(2);
-    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
     expect(messages[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "你好呀" }],
@@ -59,12 +59,12 @@ describe("Agent 主循环：模型对话闭环", () => {
 
     const messages = agent.getMessages();
     expect(messages).toHaveLength(4);
-    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "第一个问题" });
+    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "第一个问题", timestamp: expect.any(String) });
     expect(messages[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "第一轮回复" }],
     });
-    expect(messages[2]).toEqual({ role: "user", id: expect.any(String), content: "第二个问题" });
+    expect(messages[2]).toEqual({ role: "user", id: expect.any(String), content: "第二个问题", timestamp: expect.any(String) });
     expect(messages[3]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "第一轮回复" }],
@@ -1022,7 +1022,7 @@ describe("Agent 主循环：模型对话闭环", () => {
 
     const messages = agent.getMessages();
     expect(messages).toHaveLength(3); // 短消息 + 继续 + assistant
-    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "短消息" });
+    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "短消息", timestamp: expect.any(String) });
   });
 
   it("压缩后注入恢复上下文（最近文件/活跃任务/会话起始）", async () => {

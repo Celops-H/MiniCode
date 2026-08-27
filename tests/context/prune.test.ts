@@ -21,7 +21,7 @@ describe("pruneToolResults（历史裁剪）", () => {
   it("只替换工具结果内容，不修改其他消息", () => {
     const messages = [userMessage("问题"), result("1", "输出1"), result("2", "输出2")];
     const pruned = pruneToolResults(messages, 1);
-    expect(pruned[0]).toEqual({ role: "user", id: expect.any(String), content: "问题" });
+    expect(pruned[0]).toEqual({ role: "user", id: expect.any(String), content: "问题", timestamp: expect.any(String) });
     expect(pruned[1]!.content).toBe(PRUNED_MARKER);
     expect(pruned[2]!.content).toBe("输出2");
   });

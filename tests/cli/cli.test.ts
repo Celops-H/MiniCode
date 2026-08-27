@@ -656,7 +656,7 @@ describe("CLI 交互循环", () => {
     // 两轮对话：user + assistant × 2
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages()).toHaveLength(4);
-    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
     expect(loaded.getMessages()[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "回复内容" }],
@@ -691,7 +691,7 @@ describe("CLI 交互循环", () => {
     const loaded = await store.loadSession(session.meta.id);
     // 只有 "你好" 一轮，/exit 后不再处理
     expect(loaded.getMessages()).toHaveLength(2);
-    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
   });
 
   it("渲染思考、工具调用与工具结果", async () => {

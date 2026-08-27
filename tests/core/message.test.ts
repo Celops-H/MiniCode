@@ -9,7 +9,7 @@ import type { ContentBlock, ToolCall } from "../../src/core/index.js";
 
 describe("消息构造", () => {
   it("userMessage 构造用户输入（默认来源 human）", () => {
-    expect(userMessage("你好")).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+    expect(userMessage("你好")).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
   });
 
   it("userMessage 可标记系统来源并传固定 id", () => {
@@ -18,6 +18,7 @@ describe("消息构造", () => {
       id: "u1",
       content: "【摘要】",
       source: "system",
+      timestamp: expect.any(String),
     });
   });
 
@@ -28,11 +29,12 @@ describe("消息构造", () => {
       id: expect.any(String),
       content,
       meta: { model: "deepseek", stopReason: "end_turn" },
+      timestamp: expect.any(String),
     });
   });
 
   it("assistantMessage 无元数据时不带 meta 字段", () => {
-    expect(assistantMessage([])).toEqual({ role: "assistant", id: expect.any(String), content: [] });
+    expect(assistantMessage([])).toEqual({ role: "assistant", id: expect.any(String), content: [], timestamp: expect.any(String) });
   });
 
   it("toolResultMessage 构造工具结果（默认非错误）", () => {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -61,7 +61,7 @@ describe("会话持久化与续跑", () => {
 
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages()).toHaveLength(2);
-    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好" });
+    expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
     expect(loaded.getMessages()[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "嗨" }],
@@ -90,6 +90,16 @@ describe("会话持久化与续跑", () => {
     const byId = new Map(list.map((m) => [m.id, m]));
     expect(byId.get(a.meta.id)?.sizeBytes).toBeGreaterThan(0);
     expect(byId.get(empty.meta.id)?.sizeBytes).toBe(0);
+  });
+
+  it("listSessions：单个会话 meta 损坏时跳过该条，不拖垮整个列表（P2 审查）", async () => {
+    const store = setup();
+    const good = await store.createSession({ model: "m", title: "完好" });
+    const bad = await store.createSession({ model: "m", title: "损坏" });
+    writeFileSync(path.join(dir, `${bad.meta.id}.meta.json`), "{ 坏 json");
+
+    const list = await store.listSessions();
+    expect(list.map((m) => m.id)).toEqual([good.meta.id]);
   });
 
   it("deleteSession：删除消息与元数据文件，列表不再包含该会话", async () => {
@@ -267,8 +277,8 @@ describe("会话持久化与续跑", () => {
 
     const messages = agent.getMessages();
     expect(messages).toHaveLength(3);
-    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "第一问" }); // 历史
-    expect(messages[1]).toEqual({ role: "user", id: expect.any(String), content: "第二问" });
+    expect(messages[0]).toEqual({ role: "user", id: expect.any(String), content: "第一问", timestamp: expect.any(String) }); // 历史
+    expect(messages[1]).toEqual({ role: "user", id: expect.any(String), content: "第二问", timestamp: expect.any(String) });
     expect(messages[2]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "这是历史之后的回复" }],
