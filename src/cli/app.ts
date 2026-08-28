@@ -8,7 +8,7 @@ import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
-import { McpManager } from "../mcp/index.js";
+import { McpManager, killAllMcpServers } from "../mcp/index.js";
 import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
@@ -170,9 +170,11 @@ async function tryTopLevelTui(argv: string[]): Promise<boolean> {
 }
 
 export async function main(): Promise<void> {
-  // 进程退出统一清理后台任务（DESIGN 7.5），防孤儿进程残留
+  // 进程退出统一清理后台任务与 MCP server（DESIGN 7.5 + BACKEND §19），防孤儿进程残留：
+  // 崩溃路径（uncaughtException 等先于 process.exit）会话 finally 不执行，exit 钩子是最后防线
   process.on("exit", () => {
     killAllBackgroundTasks();
+    killAllMcpServers();
   });
   await loadDotEnv();
   // 顶层 TUI 快捷入口在 commander 前手动接管（见 topLevelTui）；其余交 commander 分派子命令

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ToolRegistry } from "../../src/tools/index.js";
-import { McpManager } from "../../src/mcp/manager.js";
+import { McpManager, killAllMcpServers } from "../../src/mcp/manager.js";
 import { writeFakeServer } from "./helpers.js";
 
 let serverFile: string;
@@ -107,6 +107,27 @@ describe("McpManager（生命周期与工具接入）", () => {
     for (const status of manager.statuses()) {
       expect(status.started).toBe(false);
     }
+  });
+
+  it("killAllMcpServers 进程退出兜底：不经会话 finally 也能杀掉活跃 server", async () => {
+    const manager = new McpManager({ a: fakeConfig() });
+    await manager.startAll();
+    expect(manager.statuses()[0]?.started).toBe(true);
+    // 模拟崩溃路径：不走 stopAll，直接兜底
+    killAllMcpServers();
+    expect(manager.statuses()[0]?.started).toBe(false);
+    // 兜底后 manager 从注册表移除：再次兜底/stopAll 幂等无害
+    killAllMcpServers();
+    manager.stopAll();
+  });
+
+  it("server 中途崩溃的状态标 exited（区别于从未启动）", async () => {
+    const manager = new McpManager({ crash: fakeConfig("crash-after-list") });
+    managers.push(manager);
+    await manager.startAll();
+    await new Promise((r) => setTimeout(r, 150));
+    const status = manager.statuses()[0];
+    expect(status).toMatchObject({ name: "crash", started: false, exited: true });
   });
 
   it("mcp__ 拼接撞名的工具丢弃后者并记错误行（不无声覆盖）", async () => {

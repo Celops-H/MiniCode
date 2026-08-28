@@ -11,12 +11,22 @@ export interface McpServerStatus {
   name: string;
   /** 配置 enabled（缺省 true）；关闭的 server 不启动 */
   enabled: boolean;
-  /** 进程已启动并完成握手 */
+  /** 进程已启动并完成握手且仍在运行 */
   started: boolean;
+  /** 曾启动过但进程已退出（非主动停止）：面板显示「进程已退出」而非「未启动」 */
+  exited?: boolean;
   /** 接入的工具数（未启动为 0） */
   toolCount: number;
   /** 启动失败原因（仅失败 server 有） */
   error?: string;
+}
+
+/** 活跃 manager 注册表：进程退出兜底用（崩溃路径 finally 不执行，靠 exit 钩子杀全部 server 防孤儿） */
+const activeManagers = new Set<McpManager>();
+
+/** 进程退出兜底：强杀全部仍在运行的 MCP server（宿主 process.on("exit") 调用） */
+export function killAllMcpServers(): void {
+  for (const manager of [...activeManagers]) manager.stopAll();
 }
 
 /**
@@ -42,6 +52,7 @@ export class McpManager {
   async startAll(): Promise<Tool[]> {
     const names = Object.entries(this.configs).filter(([, cfg]) => cfg.enabled !== false);
     await Promise.all(names.map(([name, cfg]) => this.startOne(name, cfg)));
+    if (this.clients.size > 0) activeManagers.add(this);
     // 按配置键序收工具（并发启动完成序不定，重名「保留先到」需确定序）；
     // mcp__服务__工具 拼接可能撞名（服务 a+工具 b__c ≡ 服务 a__b+工具 c），同名覆盖会让
     // 工具无声消失，丢弃后者并记错误行
@@ -72,6 +83,8 @@ export class McpManager {
         name,
         enabled,
         started: enabled && !!client?.alive,
+        // 曾启动过但进程已退出（非 stopAll 主动停）：与「从未启动」区分，面板显示不误导
+        exited: enabled && !!client && !client.alive,
         toolCount: this.toolCount.get(name) ?? 0,
         error: this.failure.get(name),
       };
@@ -86,8 +99,9 @@ export class McpManager {
     ];
   }
 
-  /** 会话结束统一停止：按进程树杀全部 server，防孤儿进程 */
+  /** 会话结束统一停止：按进程树杀全部 server，防孤儿进程；并从退出兜底注册表移除 */
   stopAll(): void {
+    activeManagers.delete(this);
     for (const client of this.clients.values()) client.stop();
   }
 

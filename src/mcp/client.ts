@@ -11,6 +11,8 @@ const HANDSHAKE_TIMEOUT_MS = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS = 60_000;
 /** stderr 尾部保留长度：启动失败时拼进错误信息帮助定位（不无限堆积） */
 const MAX_STDERR_TAIL = 2000;
+/** stdout 行缓冲上限：不产换行的坏 server 会无限撑大缓冲，超限丢最旧（协议消息必然已坏） */
+const MAX_LINE_BUFFER = 1_000_000;
 
 /** server 声明的工具（tools/list 返回项的子集，字段均可能缺省） */
 export interface McpToolInfo {
@@ -240,6 +242,7 @@ export class McpClient {
   /** 收 stdout：行缓冲切分、逐行解析分发（解析失败的行丢弃——不把半截日志当协议消息） */
   private handleStdout(chunk: Buffer): void {
     this.buffer += this.stdoutDecoder.write(chunk);
+    if (this.buffer.length > MAX_LINE_BUFFER) this.buffer = this.buffer.slice(-MAX_LINE_BUFFER);
     for (;;) {
       const idx = this.buffer.indexOf("\n");
       if (idx < 0) break;

@@ -99,6 +99,14 @@ describe("McpClient（stdio JSON-RPC）", () => {
     expect(result.output).toBe("汉".repeat(70000));
   }, 10_000);
 
+  it("不产换行的输出灌爆行缓冲后被截断，后续正常消息仍可解析", async () => {
+    const client = makeClient("flood");
+    clients.push(client);
+    await client.start();
+    const result = await client.callTool("echo", {});
+    expect(result.output).toBe("洪水后正常");
+  }, 10_000);
+
   it("命令不存在时 start 报启动失败", async () => {
     const client = new McpClient("bad", { command: "minicode-definitely-not-a-command-xyz" });
     await expect(client.start()).rejects.toThrow(/启动失败|握手完成前退出/);
