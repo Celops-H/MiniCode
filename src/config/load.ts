@@ -28,14 +28,21 @@ export async function loadConfig(opts: LoadConfigOptions = {}): Promise<Config> 
 }
 
 /**
- * 逐级合并配置来源：顶层键后级覆盖前级；providers 例外——按 id 归并（同 id 后级覆盖、
- * 不同 id 都保留），避免项目 .minicode.json 把全局配置里 /connect 新加的供应商整体顶掉。
- * 任一层 providers 不是数组或项缺 id，视为非法整体透传，交给 schema strict 校验报错（不静默吞）。
+ * 逐级合并配置来源：顶层键后级覆盖前级；三个例外——
+ * providers 按 id 归并（同 id 后级覆盖、不同 id 都保留），避免项目 .minicode.json
+ * 把全局配置里 /connect 新加的供应商整体顶掉；
+ * mcpServers 按服务名归并（同服务名后级覆盖整个条目、不同名都保留），语义同 providers；
+ * skills.disabled 两层名单取并集（关闭即关闭，不分层覆盖）。
+ * 任一层相应字段形状非法，视为非法整体透传，交给 schema strict 校验报错（不静默吞）。
  */
 function mergeConfigLayers(layers: Array<Record<string, unknown> | null>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const providerById = new Map<string, unknown>();
+  const serverByName = new Map<string, unknown>();
+  const disabledSkills = new Set<string>();
   let providersInvalid: unknown;
+  let mcpServersInvalid: unknown;
+  let skillsInvalid: unknown;
   for (const layer of layers) {
     if (!layer) continue;
     const providers = layer.providers;
@@ -54,8 +61,48 @@ function mergeConfigLayers(layers: Array<Record<string, unknown> | null>): Recor
     } else if (providers !== undefined) {
       providersInvalid = providers;
     }
+    const mcpServers = layer.mcpServers;
+    if (isPlainObject(mcpServers)) {
+      // 已有非法 mcpServers 层时同 providers：停止归并，非法值整体透传
+      if (mcpServersInvalid === undefined) {
+        for (const [name, cfg] of Object.entries(mcpServers)) {
+          if (!isPlainObject(cfg)) {
+            mcpServersInvalid = mcpServers;
+            break;
+          }
+          serverByName.set(name, cfg);
+        }
+      }
+    } else if (mcpServers !== undefined) {
+      mcpServersInvalid = mcpServers;
+    }
+    const skills = layer.skills;
+    if (isPlainObject(skills)) {
+      const disabled = skills.disabled;
+      if (disabled === undefined) {
+        // skills 只有 disabled 一个合法键；出现其他键即拼错字段，透传给 schema 报错（不静默吞）
+        if (Object.keys(skills).length > 0 && skillsInvalid === undefined) {
+          skillsInvalid = skills;
+        }
+      } else if (Array.isArray(disabled)) {
+        // 已有非法 skills 层时同 providers：停止归并，非法值整体透传
+        if (skillsInvalid === undefined) {
+          for (const name of disabled) {
+            if (typeof name !== "string") {
+              skillsInvalid = skills;
+              break;
+            }
+            disabledSkills.add(name);
+          }
+        }
+      } else if (disabled !== undefined) {
+        skillsInvalid = skills;
+      }
+    } else if (skills !== undefined) {
+      skillsInvalid = skills;
+    }
     for (const [key, value] of Object.entries(layer)) {
-      if (key === "providers") continue;
+      if (key === "providers" || key === "mcpServers" || key === "skills") continue;
       result[key] = value;
     }
   }
@@ -64,7 +111,22 @@ function mergeConfigLayers(layers: Array<Record<string, unknown> | null>): Recor
   } else if (providerById.size > 0) {
     result.providers = [...providerById.values()];
   }
+  if (mcpServersInvalid !== undefined) {
+    result.mcpServers = mcpServersInvalid;
+  } else if (serverByName.size > 0) {
+    result.mcpServers = Object.fromEntries(serverByName);
+  }
+  if (skillsInvalid !== undefined) {
+    result.skills = skillsInvalid;
+  } else if (disabledSkills.size > 0) {
+    result.skills = { disabled: [...disabledSkills] };
+  }
   return result;
+}
+
+/** 是否普通对象（非 null、非数组） */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

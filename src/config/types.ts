@@ -23,6 +23,32 @@ export const providerConfigSchema = z
   .strict();
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
+/** 单个 MCP server 配置（stdio 传输，BACKEND §19）；strict：拼错字段直接报错而非默认忽略 */
+export const mcpServerConfigSchema = z
+  .object({
+    /** 启动命令（如 npx、node） */
+    command: z.string(),
+    /** 命令参数列表 */
+    args: z.array(z.string()).optional(),
+    /** 注入子进程的额外环境变量（在继承环境之上追加） */
+    env: z.record(z.string(), z.string()).optional(),
+    /** 工具调用超时毫秒（缺省 60000） */
+    timeoutMs: z.number().optional(),
+    /** 启用开关（缺省 true）：关闭的 server 装配时跳过不启动 */
+    enabled: z.boolean().optional(),
+  })
+  .strict();
+export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>;
+
+/** Skill 技能配置（BACKEND §20）；strict：拼错字段直接报错而非默认忽略 */
+export const skillsConfigSchema = z
+  .object({
+    /** 关闭名单：命中技能名的技能不注入系统提示词（全局/项目两层名单取并集） */
+    disabled: z.array(z.string()).optional(),
+  })
+  .strict();
+export type SkillsConfig = z.infer<typeof skillsConfigSchema>;
+
 /** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错（DESIGN 16） */
 export const configSchema = z
   .object({
@@ -48,6 +74,11 @@ export const configSchema = z
       keepRecentToolResults: z.number().default(5),
     })
     .optional(),
+  /** MCP 外部工具服务（BACKEND §19）：服务名 → stdio 启动配置；装配时启动并接入工具池，
+   *  全局/项目按服务名归并（load 层例外逻辑，同 providers 按 id 合并） */
+  mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
+  /** Skill 技能配置（BACKEND §20）：disabled 关闭名单，全局/项目两层取并集 */
+  skills: skillsConfigSchema.optional(),
 })
   .strict();
 

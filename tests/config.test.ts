@@ -224,6 +224,60 @@ describe("loadConfig", () => {
     ).rejects.toThrow();
   });
 
+  it("mcpServers 按服务名归并：全局与项目不同服务都保留", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: { mcpServers: { fs: { command: "npx", args: ["-y", "@a/fs"] } } },
+        project: { mcpServers: { git: { command: "npx", args: ["-y", "@b/git"] } } },
+      }),
+    });
+    expect(Object.keys(config.mcpServers ?? {}).sort()).toEqual(["fs", "git"]);
+  });
+
+  it("mcpServers 同服务名：项目覆盖全局整个条目（合并不重复）", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: { mcpServers: { fs: { command: "npx", args: ["-y", "@a/fs"], env: { A: "1" } } } },
+        project: { mcpServers: { fs: { command: "node", enabled: false } } },
+      }),
+    });
+    // 整条覆盖语义同 providers：项目条目缺的 env 不从全局继承
+    expect(config.mcpServers).toEqual({ fs: { command: "node", enabled: false } });
+  });
+
+  it("任一层 mcpServers 非法（非对象/条目非对象）整体透传，schema 校验报错不静默吞", async () => {
+    await expect(loadConfig({ paths: setup({ global: { mcpServers: "oops" } }) })).rejects.toThrow();
+    await expect(
+      loadConfig({ paths: setup({ global: { mcpServers: { fs: "not-an-object" } } }) }),
+    ).rejects.toThrow();
+  });
+
+  it("mcpServers 条目拼错字段直接报错（strict）", async () => {
+    await expect(
+      loadConfig({ paths: setup({ global: { mcpServers: { fs: { command: "npx", cmds: [] } } } }) }),
+    ).rejects.toThrow();
+  });
+
+  it("skills.disabled 全局与项目名单取并集", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: { skills: { disabled: ["a", "b"] } },
+        project: { skills: { disabled: ["b", "c"] } },
+      }),
+    });
+    expect(config.skills?.disabled?.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("任一层 skills 非法（disabled 非数组/元素非字符串/skills 非对象）整体透传，schema 校验报错", async () => {
+    await expect(loadConfig({ paths: setup({ global: { skills: { disabled: "oops" } } }) })).rejects.toThrow();
+    await expect(loadConfig({ paths: setup({ global: { skills: { disabled: [1, 2] } } }) })).rejects.toThrow();
+    await expect(loadConfig({ paths: setup({ global: { skills: "oops" } }) })).rejects.toThrow();
+  });
+
+  it("skills 拼错字段直接报错（strict）", async () => {
+    await expect(loadConfig({ paths: setup({ global: { skills: { enabled: true } } }) })).rejects.toThrow();
+  });
+
   it("全局配置提供会话目录", async () => {
     const config = await loadConfig({ paths: setup({ global: { sessionsDir: "/custom/sessions" } }) });
     expect(config.sessionsDir).toBe("/custom/sessions");
