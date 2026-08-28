@@ -10,7 +10,7 @@ import { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
-import { buildCompactConfig, buildHookBus, createSessionAgent } from "../cli/app.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions } from "../cli/app.js";
 import { buildModelClient, resolveMainModel } from "../cli/models.js";
 import { NEW_SESSION_ID } from "./state.js";
 import { runTui } from "./loop.js";
@@ -165,57 +165,73 @@ async function runTuiSession(
   };
   // 权限模式盒子：Shift+Tab 在 loop 侧改这里，PermissionPipeline 经 options.mode getter 活读（plan/auto 即时生效）
   const permissionModeBox: { value: PermissionMode } = { value: "default" };
-  return runTui({
-    store,
-    session,
-    hooks,
-    modelLabel: modelId,
-    permissionMode: permissionModeBox,
-    thinkingLevel: thinkingLevelBox,
-    modelList: models.listModels().map((m) => ({ id: m.id, providerId: m.providerId, providerName: models.provider(m.providerId)?.name })),
-    assemble: ({ approver, feedRoot }) => {
-      const tools = createBuiltinTools();
-      const pipelineOptions: PermissionPipelineOptions = {
-        rules: [],
-        approver,
-        // plan 模式放行的只读工具集合（Tool.isReadOnly 收集；list_agents 为协作工具中的只读项，
+  // M5 扩展生态装配（BACKEND §19/§20，与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
+  // 启动失败的 server 已跳过，错误行 toast 一次提示、完整状态在 /mcp 面板
+  const extensions = await assembleSessionExtensions(config);
+  try {
+    return await runTui({
+      store,
+      session,
+      hooks,
+      modelLabel: modelId,
+      permissionMode: permissionModeBox,
+      thinkingLevel: thinkingLevelBox,
+      modelList: models.listModels().map((m) => ({ id: m.id, providerId: m.providerId, providerName: models.provider(m.providerId)?.name })),
+      // 扩展面板数据源（/mcp /skill，BACKEND §19/§20）
+      mcpServers: config.mcpServers ?? {},
+      getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
+      skillsDisabled: config.skills?.disabled ?? [],
+      startupNotices: extensions.mcpErrors,
+      assemble: ({ approver, feedRoot }) => {
+        const tools = [...createBuiltinTools(), ...extensions.tools];
+        const systemPrompt = extensions.promptSection
+          ? `${SYSTEM_PROMPT}\n${extensions.promptSection}`
+          : SYSTEM_PROMPT;
+        const pipelineOptions: PermissionPipelineOptions = {
+          rules: [],
+          approver,
+          // plan 模式放行的只读工具集合（Tool.isReadOnly 收集；list_agents 为协作工具中的只读项，
 // 只能在 Agent 内部经 deps 构造、TUI 侧显式并入，需与 collab.ts 的 isReadOnly 保持同步）
-        readOnlyTools: new Set<string>([
-          ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
-          "list_agents",
-        ]),
-        // mode 用 getter 活读 modeBox：Shift+Tab 切换即时作用于后续工具审批
-        get mode() {
-          return permissionModeBox.value;
-        },
-      };
-      const { agent, team } = createSessionAgent({
-        modelClient: models,
-        modelId,
-        systemPrompt: SYSTEM_PROMPT,
-        tools,
-        initialMessages: session.getMessages(),
-        agents,
-        hooks,
-        compactConfig,
-        // 思考等级活引用：/@/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
-        thinkingLevelRef: () => thinkingLevelBox.value,
-        // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
-        onRootEvent: feedRoot,
-        // 工具权限走用户审批：approver 渲染弹块等键盘决策（允许本次/全部/拒绝）
-        permission: new PermissionPipeline(pipelineOptions),
-        // checkpoint（同 CLI）：工具副作用前把已产生消息落盘
-        checkpoint: async (messages) => {
-          const newOnes = messages.slice(session.getMessages().length);
-          for (const message of newOnes) {
-            await store.appendMessage(session, message);
-          }
-          await store.flush();
-        },
-      });
-      return { agent, team };
-    },
-  });
+          readOnlyTools: new Set<string>([
+            ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
+            "list_agents",
+          ]),
+          // mode 用 getter 活读 modeBox：Shift+Tab 切换即时作用于后续工具审批
+          get mode() {
+            return permissionModeBox.value;
+          },
+        };
+        const { agent, team } = createSessionAgent({
+          modelClient: models,
+          modelId,
+          systemPrompt,
+          tools,
+          initialMessages: session.getMessages(),
+          agents,
+          hooks,
+          compactConfig,
+          // 思考等级活引用：/@/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
+          thinkingLevelRef: () => thinkingLevelBox.value,
+          // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
+          onRootEvent: feedRoot,
+          // 工具权限走用户审批：approver 渲染弹块等键盘决策（允许本次/全部/拒绝）
+          permission: new PermissionPipeline(pipelineOptions),
+          // checkpoint（同 CLI）：工具副作用前把已产生消息落盘
+          checkpoint: async (messages) => {
+            const newOnes = messages.slice(session.getMessages().length);
+            for (const message of newOnes) {
+              await store.appendMessage(session, message);
+            }
+            await store.flush();
+          },
+        });
+        return { agent, team };
+      },
+    });
+  } finally {
+    // 会话结束（退出/切换/reconfigure 都经此）：停掉本会话的 MCP server，按进程树杀防孤儿
+    extensions.mcpManager?.stopAll();
+  }
 }
 
 /** 从 cwd/.env 加载环境变量注入 process.env（已存在不覆盖）；TUI 独立启动时保证 API key 可用 */
