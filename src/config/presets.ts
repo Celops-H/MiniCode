@@ -34,19 +34,39 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
   {
     id: "deepseek",
-    name: "DeepSeek",
+    name: "DeepSeek（OpenAI 兼容）",
     baseUrl: "https://api.deepseek.com/v1",
     apiKeyEnv: "DEEPSEEK_API_KEY",
     models: ["deepseek-chat", "deepseek-reasoner"],
     defaultModel: "deepseek-chat",
   },
   {
+    // DeepSeek 官方 Anthropic 兼容端点（api-docs.deepseek.com/guides/anthropic_api）
+    id: "deepseek-anthropic",
+    name: "DeepSeek（Anthropic 兼容）",
+    baseUrl: "https://api.deepseek.com/anthropic",
+    apiKeyEnv: "DEEPSEEK_API_KEY",
+    protocol: "anthropic-messages",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+    defaultModel: "deepseek-chat",
+  },
+  {
     id: "moonshot",
-    name: "Moonshot（Kimi）",
+    name: "Moonshot（Kimi，OpenAI 兼容）",
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "MOONSHOT_API_KEY",
     models: ["moonshot-v1-8k", "moonshot-v1-32k"],
     defaultModel: "moonshot-v1-32k",
+  },
+  {
+    // Kimi 官方 Anthropic 兼容端点（platform.kimi.com/docs/guide/claude-code-kimi）
+    id: "moonshot-anthropic",
+    name: "Moonshot（Kimi，Anthropic 兼容）",
+    baseUrl: "https://api.moonshot.cn/anthropic",
+    apiKeyEnv: "MOONSHOT_API_KEY",
+    protocol: "anthropic-messages",
+    models: ["kimi-k3", "kimi-k2.7-code"],
+    defaultModel: "kimi-k3",
   },
   {
     id: "qwen",
@@ -57,12 +77,23 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "qwen-plus",
   },
   {
+    // 计费 API（按 token 计费；编码套餐过期后用资源包也走这个端点）
     id: "zhipu",
-    name: "智谱清言（GLM）",
+    name: "智谱 GLM（计费 API）",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     apiKeyEnv: "ZHIPU_API_KEY",
     models: ["glm-4-plus", "glm-4-flash"],
     defaultModel: "glm-4-plus",
+  },
+  {
+    // GLM Coding Plan 订阅（Anthropic 兼容端点，docs.bigmodel.cn/cn/guide/develop/claude）
+    id: "zhipu-coding",
+    name: "智谱 GLM Coding Plan（Anthropic 兼容）",
+    baseUrl: "https://open.bigmodel.cn/api/anthropic",
+    apiKeyEnv: "ZHIPU_API_KEY",
+    protocol: "anthropic-messages",
+    models: ["glm-5.3", "glm-5.3-flash"],
+    defaultModel: "glm-5.3",
   },
   {
     id: "google",
