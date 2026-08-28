@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { mapKey } from "../../src/tui/keymap.js";
-import { buildMcpRows, buildSkillRows, setMcpServerEnabled, setSkillDisabled } from "../../src/tui/extensions.js";
+import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled } from "../../src/tui/extensions.js";
 import type { McpServerStatus } from "../../src/mcp/index.js";
 import type { SkillInfo } from "../../src/skills/index.js";
 
@@ -110,6 +110,56 @@ describe("setMcpServerEnabled / setSkillDisabled（写回定义层）", () => {
     await setSkillDisabled("deploy", true, "user", paths);
     expect(read(paths.projectConfigFile).skills).toEqual({ disabled: [] });
     expect(read(paths.globalConfigFile).skills).toEqual({ disabled: ["old", "deploy"] });
+  });
+
+  it("启用操作清两层名单（任一层旧标记都会让启用无效，跨层关闭场景）", async () => {
+    // 用户层技能被项目名单关闭（团队共享配置的典型场景）；全局文件不存在
+    const paths = setup(undefined, { skills: { disabled: ["deploy"] } });
+    await setSkillDisabled("deploy", false, "user", paths);
+    expect(read(paths.projectConfigFile).skills).toEqual({ disabled: [] });
+    // 全局文件原本不存在：启用操作不创建文件（名单里本就没有它）
+    expect(existsSync(paths.globalConfigFile)).toBe(false);
+
+    // 反向：项目技能被全局名单关闭，启用同样清两层
+    const paths2 = setup({ skills: { disabled: ["review"] } });
+    await setSkillDisabled("review", false, "project", paths2);
+    expect(read(paths2.globalConfigFile).skills).toEqual({ disabled: [] });
+  });
+
+  it("目标文件不存在时新建（用户技能关闭且全局配置缺文件）", async () => {
+    const paths = setup();
+    await setSkillDisabled("deploy", true, "user", paths);
+    expect(existsSync(paths.globalConfigFile)).toBe(true);
+    expect(read(paths.globalConfigFile).skills).toEqual({ disabled: ["deploy"] });
+  });
+
+  it("skills.disabled 形状非法（非数组）时抛错不静默重写", async () => {
+    const paths = setup({ skills: { disabled: "oops" } });
+    await expect(setSkillDisabled("deploy", true, "user", paths)).rejects.toThrow("skills.disabled 配置非法");
+    // 抛错即不落盘：原样保留
+    expect(read(paths.globalConfigFile).skills).toEqual({ disabled: "oops" });
+  });
+
+  it("坏 JSON 配置文件抛错不静默重置", async () => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "minicode-ext-"));
+    const globalConfigFile = path.join(tmpDir, "bad", "config.json");
+    mkdirSync(path.dirname(globalConfigFile), { recursive: true });
+    writeFileSync(globalConfigFile, "{ not json");
+    await expect(setSkillDisabled("a", true, "user", { globalConfigFile })).rejects.toThrow();
+    expect(readFileSync(globalConfigFile, "utf8")).toBe("{ not json");
+  });
+
+  it("diffExtensionRows：按 id 比对启用态出改动行，基线外的新行不算改动", () => {
+    const baseline = [
+      { id: "a", enabled: true },
+      { id: "b", enabled: false },
+    ];
+    const rows = [
+      { id: "a", label: "a", detail: "", enabled: true },
+      { id: "b", label: "b", detail: "", enabled: true },
+      { id: "new", label: "new", detail: "", enabled: true },
+    ];
+    expect(diffExtensionRows(baseline, rows).map((r) => r.id)).toEqual(["b"]);
   });
 });
 

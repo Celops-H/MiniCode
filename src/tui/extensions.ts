@@ -12,7 +12,7 @@ import { resolveConfigPaths } from "../config/paths.js";
 import type { McpServerStatus } from "../mcp/index.js";
 import type { SkillInfo } from "../skills/index.js";
 
-/** 扩展面板行（state.ts 的 ExtensionsModalState.rows 用） */
+/** 扩展面板行（state.ts 的 McpModalState/SkillModalState.rows 用） */
 export interface ExtensionRow {
   /** mcp=服务名 / skill=技能名（回写定位键） */
   id: string;
@@ -89,8 +89,10 @@ export async function setMcpServerEnabled(name: string, enabled: boolean, opts: 
 }
 
 /**
- * 切换技能启用状态并写回来源层配置的 skills.disabled 名单：项目技能写项目配置、
- * 用户技能写全局配置。名单合并去重；关闭即加入名单、启用即移出。
+ * 切换技能启用状态并写回配置的 skills.disabled 名单（BACKEND §20 回写规则）：
+ * 关闭按来源落层——项目技能写项目配置、用户技能写全局配置（关闭标记跟技能本体同层）；
+ * 启用从两层名单同时移出——名单合并语义是「任一层关闭即生效」，只清来源层时另一层
+ * 的旧标记会让启用静默无效。目标文件不存在时新建。
  */
 export async function setSkillDisabled(
   name: string,
@@ -101,17 +103,36 @@ export async function setSkillDisabled(
   const paths = resolveConfigPaths();
   const globalFile = opts.globalConfigFile ?? paths.globalConfigFile;
   const projectFile = opts.projectConfigFile ?? paths.projectConfigFile;
-  const file = source === "project" ? projectFile : globalFile;
-  const raw = await readConfigRaw(file);
-  const skills = asRecord(raw.skills) ?? {};
-  // 名单里的非字符串项保留原样透传（strict 校验报错，不静默吞配置错误）
-  const current = Array.isArray(skills.disabled) ? (skills.disabled as unknown[]) : [];
-  const next = disabled
-    ? current.includes(name)
-      ? current
-      : [...current, name]
-    : current.filter((n) => n !== name);
-  await writeConfigRaw(file, { ...raw, skills: { ...skills, disabled: next } });
+  const files = disabled ? [source === "project" ? projectFile : globalFile] : [projectFile, globalFile];
+  for (const file of files) {
+    const raw = await readConfigRaw(file);
+    const skills = asRecord(raw.skills) ?? {};
+    // 名单只接受字符串数组：存在其它形状是配置错误，抛错不静默重写（不静默吞）
+    if (skills.disabled !== undefined && !Array.isArray(skills.disabled)) {
+      throw new Error(`skills.disabled 配置非法（应为字符串数组）：${file}`);
+    }
+    const current = skills.disabled as unknown[] | undefined;
+    if (disabled) {
+      // 名单内的非字符串项保留原样透传（strict 校验报错，不静默吞配置错误）
+      if (current?.includes(name)) continue; // 已在名单：无需重写
+      await writeConfigRaw(file, { ...raw, skills: { ...skills, disabled: [...(current ?? []), name] } });
+    } else {
+      if (current === undefined || !current.includes(name)) continue; // 不在名单：无需重写
+      await writeConfigRaw(file, {
+        ...raw,
+        skills: { ...skills, disabled: current.filter((n) => n !== name) },
+      });
+    }
+  }
+}
+
+/** 基线比对出改动行（面板 Enter 应用用；纯函数便于测试）：按 id 比对启用态 */
+export function diffExtensionRows(
+  baseline: Array<{ id: string; enabled: boolean }>,
+  rows: ExtensionRow[],
+): ExtensionRow[] {
+  const base = new Map(baseline.map((r) => [r.id, r.enabled]));
+  return rows.filter((r) => base.get(r.id) !== undefined && base.get(r.id) !== r.enabled);
 }
 
 /** 读 config 原始 JSON；文件不存在返回 {}，解析失败抛错（坏配置不该被静默重置） */

@@ -301,9 +301,10 @@ function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "sk
   const dims = useTerminalDimensions();
   const rows = createMemo(() => {
     const total = b.rows.length;
-    // 高度预算同 ModelModal：终端高减 9（输入 5+状态 2+agent/通知 2），行高 1 行/条
+    // 高度预算同 ModelModal（avail - 8）少思考等级行：终端高减 9（输入 5+状态 2+agent/通知 2）
+    // 再减边框/内边距/提示行共 7，行高 1 行/条
     const avail = Math.max(10, (dims().height ?? 20) - 9);
-    const visible = Math.max(1, Math.min(Math.max(total, 1), avail - 5));
+    const visible = Math.max(1, Math.min(Math.max(total, 1), avail - 7));
     const selPos = Math.max(0, Math.min(b.selected, total - 1));
     const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), Math.max(0, total - visible)));
     const items: JSX.Element[] = [];

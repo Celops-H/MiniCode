@@ -13,7 +13,7 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
-import { buildMcpRows, buildSkillRows, setMcpServerEnabled, setSkillDisabled, type ExtensionRow } from "./extensions.js";
+import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, type ExtensionRow } from "./extensions.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
@@ -216,7 +216,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       return;
     }
     if (command === "/help") {
-      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /model 模型 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /model 模型 · /mcp 服务 · /skill 技能 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
@@ -389,36 +389,45 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
    *  skill 行现扫技能目录（打开时新鲜扫描，改技能目录无需重开会话即可见） */
   const openExtensionsModal = async (kind: "mcp" | "skill"): Promise<void> => {
     let rows: ExtensionRow[];
-    if (kind === "mcp") {
-      rows = buildMcpRows(options.mcpServers ?? {}, options.getMcpStatuses?.() ?? []);
-    } else {
-      rows = buildSkillRows(await scanSkills(), options.skillsDisabled ?? []);
+    try {
+      rows = kind === "mcp"
+        ? buildMcpRows(options.mcpServers ?? {}, options.getMcpStatuses?.() ?? [])
+        : buildSkillRows(await scanSkills(), options.skillsDisabled ?? []);
+    } catch (err) {
+      showToast(`打开面板失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
     }
     // 基线快照：Enter 应用时按 id 比对，只把改动行写回配置
     extensionsBaseline[kind] = rows.map((r) => ({ id: r.id, enabled: r.enabled }));
     commit({ ...state, modal: { kind, rows, selected: 0 } });
   };
 
+  /** 扩展面板写盘进行中（防重入：连按 Enter 并发写同一配置文件会 read-modify-write 互相覆盖，同 /connect 的 connecting） */
+  let applyingExtensions = false;
+
   /** 扩展面板 Enter 应用：改动行按「写回定义层」规则落配置（BACKEND §19/§20 回写规则），
-   *  成功即重装配（当前会话立即生效）；无改动仅关闭面板 */
-  const applyExtensions = (modal: { kind: "mcp" | "skill"; rows: ExtensionRow[] }): void => {
-    const baseline = new Map((extensionsBaseline[modal.kind] ?? []).map((r) => [r.id, r.enabled]));
-    const changed = modal.rows.filter((r) => baseline.get(r.id) !== undefined && baseline.get(r.id) !== r.enabled);
+   *  成功即重装配（当前会话立即生效）；无改动仅关闭 */
+  const applyExtensions = (kind: "mcp" | "skill", rows: ExtensionRow[]): void => {
+    const changed = diffExtensionRows(extensionsBaseline[kind] ?? [], rows);
     if (changed.length === 0) {
       showToast("未做改动");
       return;
     }
+    if (applyingExtensions) return;
+    applyingExtensions = true;
     void (async () => {
       try {
         for (const row of changed) {
-          if (modal.kind === "mcp") await setMcpServerEnabled(row.id, row.enabled);
+          if (kind === "mcp") await setMcpServerEnabled(row.id, row.enabled);
           else await setSkillDisabled(row.id, !row.enabled, row.source ?? "project");
         }
-        showToast(modal.kind === "mcp" ? "MCP 服务配置已写入，正在重装配…" : "技能配置已写入，正在重装配…");
+        showToast(kind === "mcp" ? "MCP 服务配置已写入，正在重装配…" : "技能配置已写入，正在重装配…");
         pendingReconfigure = true;
         exitLoop();
       } catch (err) {
         showToast(`写入配置失败：${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        applyingExtensions = false;
       }
     })();
   };
@@ -532,12 +541,16 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
               showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
             }
           } else if (state.modal.kind === "mcp") {
-            // 应用扩展面板：写回定义层配置并重装配（无改动仅关闭）
+            // 应用扩展面板：写回定义层配置并重装配（无改动仅关闭）。
+            // 先取 rows 再 commit：solid reconcile 会把 undefined 键从 store 清掉，
+            // commit 之后再读 state.modal 是 undefined（P0 教训，同 Modal.tsx 文件头陷阱注记）
+            const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
-            applyExtensions({ kind: "mcp", rows: state.modal.rows });
+            applyExtensions("mcp", rows);
           } else if (state.modal.kind === "skill") {
+            const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
-            applyExtensions({ kind: "skill", rows: state.modal.rows });
+            applyExtensions("skill", rows);
           } else {
             // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表。
             // selected 0=新建会话、1..n=会话（P6-4 新建置顶，索引映射见 sessionModalTarget）
