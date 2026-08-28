@@ -22,6 +22,8 @@ export interface ProviderPreset {
  * 同厂商多种接入方式 = 多条预设、id 不同，名称标清接入方式与协议；anthropic 兼容
  * 端点条目带 protocol: "anthropic-messages"（缺省 openai-chat-completions）。
  * 端点与协议逐一对照厂商官方文档核实（连通性归真机验证）。
+ * 模型 id 会随厂商更新而过期（厂商常以下线旧名的方式切换型号），接入报「模型不存在」
+ * 时先对照厂商文档核实模型 id，再更新本表（最近核对：2026-08-29）。
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
@@ -37,8 +39,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "DeepSeek（OpenAI 兼容）",
     baseUrl: "https://api.deepseek.com/v1",
     apiKeyEnv: "DEEPSEEK_API_KEY",
-    models: ["deepseek-chat", "deepseek-reasoner"],
-    defaultModel: "deepseek-chat",
+    // V4 起不再分对话/推理两条线：pro 旗舰（复杂分析与 Agent 任务）、flash 高速双模式；
+    // 旧名 deepseek-chat/deepseek-reasoner 已于 2026-07-24 停用
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    defaultModel: "deepseek-v4-pro",
   },
   {
     // DeepSeek 官方 Anthropic 兼容端点（api-docs.deepseek.com/guides/anthropic_api）
@@ -47,8 +51,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://api.deepseek.com/anthropic",
     apiKeyEnv: "DEEPSEEK_API_KEY",
     protocol: "anthropic-messages",
-    models: ["deepseek-chat", "deepseek-reasoner"],
-    defaultModel: "deepseek-chat",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    defaultModel: "deepseek-v4-pro",
   },
   {
     id: "moonshot",
@@ -92,7 +96,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://open.bigmodel.cn/api/anthropic",
     apiKeyEnv: "ZHIPU_API_KEY",
     protocol: "anthropic-messages",
-    models: ["glm-5.3", "glm-5.3-flash"],
+    models: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flash[1m]"],
     defaultModel: "glm-5.3",
   },
   {
