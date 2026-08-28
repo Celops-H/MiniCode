@@ -44,6 +44,7 @@ export class McpClient {
   private readonly config: McpServerConfig;
   private child: ChildProcess | null = null;
   private nextId = 1;
+  private tools: McpToolInfo[] = [];
   private readonly pending = new Map<number, PendingEntry>();
   /** stdout 行缓冲：按 \n 切分出完整 JSON-RPC 消息 */
   private buffer = "";
@@ -61,6 +62,11 @@ export class McpClient {
   /** server 进程是否仍在运行 */
   get alive(): boolean {
     return !this.exited;
+  }
+
+  /** 握手时拿到的工具清单（未启动为空） */
+  listTools(): McpToolInfo[] {
+    return this.tools;
   }
 
   /**
@@ -106,7 +112,8 @@ export class McpClient {
       }, HANDSHAKE_TIMEOUT_MS);
       this.notify("notifications/initialized");
       const listed = await this.request<{ tools?: McpToolInfo[] }>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);
-      return (listed.tools ?? []).filter((t): t is McpToolInfo => typeof t?.name === "string");
+      this.tools = (listed.tools ?? []).filter((t): t is McpToolInfo => typeof t?.name === "string");
+      return this.tools;
     })();
 
     // 握手成功与「进程先退出」赛跑：谁先到算谁，输的一方被吞掉即可
