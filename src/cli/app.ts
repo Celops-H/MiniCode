@@ -6,6 +6,7 @@ import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
 import { McpManager, killAllMcpServers } from "../mcp/index.js";
@@ -213,10 +214,15 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
   // M5 扩展生态装配（BACKEND §19/§20）：MCP server 工具与技能并入会话；失败 server 错误行输出
   const extensions = await assembleSessionExtensions(config);
   for (const line of extensions.mcpErrors) console.error(line);
+  // 指令文件加载（BACKEND §21）：用户级 ~/.minicode/AGENTS.md + 项目侧根→cwd 逐级，
+  // 全部拼接进系统提示词；无文件为空段不占位
+  const instructionsSection = buildInstructionsPrompt(await loadInstructionFiles());
   const { agent, team } = createSessionAgent({
     modelClient: models,
     modelId: session.meta.model,
-    systemPrompt: extensions.promptSection ? `${SYSTEM_PROMPT}\n${extensions.promptSection}` : SYSTEM_PROMPT,
+    systemPrompt: [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
+      .filter((s) => s.length > 0)
+      .join("\n"),
     tools: [...createBuiltinTools(), ...extensions.tools],
     initialMessages: session.getMessages(),
     agents,

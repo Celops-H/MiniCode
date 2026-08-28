@@ -1,3 +1,5 @@
+import { readInstructionFile, buildInitPrompt } from "../context/index.js";
+import path from "node:path";
 import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import type { HookBus } from "../hooks/index.js";
@@ -46,23 +48,29 @@ export interface InteractOptions {
   onEvent?: (event: StreamEvent) => void;
   /** Hook 总线（宿主触发会话级事件的通道，DESIGN 13.3）；缺省不触发 */
   hooks?: HookBus;
+  /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
+  projectAgentsFile?: string;
 }
 
 /**
  * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
  * 展示工具结果 → 消息持久化。
- * 会话内命令（统一 / 前缀，DESIGN 15）：/exit 退出、/compact 强制压缩并重写落盘、
- * /help 列出命令；UserPromptSubmit 由宿主（本函数）在每次输入后触发（DESIGN 13.3）。
+ * 会话内命令（统一 / 前缀，DESIGN 15）：/exit 退出、/compact [指导] 强制压缩并重写落盘、
+ * /init 生成/改进项目根 AGENTS.md、/help 列出命令；UserPromptSubmit 由宿主（本函数）
+ * 在每次输入后触发（DESIGN 13.3）。
  * @param options 交互选项（agent / store / session / inputs / write / hooks）
  */
 export async function interact(options: InteractOptions): Promise<void> {
   const { agent, store, session, inputs, write, hooks } = options;
+  const projectAgentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
   const render = options.onEvent ?? ((event: StreamEvent): void => renderStreamEvent(write, event));
   // 已落盘游标 = session 内存消息数（appendMessage 会同步 append 到 session 内存；
   // checkpoint 回调在工具执行前已把 user+assistant 入队，轮末只补 tool_result）
   for await (const line of inputs) {
     const input = line.trim();
     if (!input) continue;
+    // 本轮真正发给模型的输入：/init 等命令会生成提示词顶替原输入走正常回合
+    let turnInput: string | null = null;
     if (input.startsWith("/")) {
       // 会话内命令（统一 / 前缀，DESIGN 15）
       if (input === "/exit") break;
@@ -79,14 +87,22 @@ export async function interact(options: InteractOptions): Promise<void> {
         }
         continue;
       }
-      if (input === "/help") {
-        write("\n可用命令：/exit 退出；/compact [指导] 压缩会话历史（可附侧重指导）；/help 帮助\n");
+      if (input === "/init") {
+        // 分析代码库生成/改进项目根 AGENTS.md：生成 init 提示词当作用户输入走正常回合
+        // （模型用 write 工具落盘）；已存在时提示词要求不覆盖、先建议改进
+        const existing = await readInstructionFile(projectAgentsFile);
+        write(existing ? "\n[init] 已存在 AGENTS.md，将分析并在其基础上建议改进（不覆盖）。\n" : "\n[init] 开始分析代码库，生成项目根 AGENTS.md。\n");
+        turnInput = buildInitPrompt(existing);
+      } else if (input === "/help") {
+        write("\n可用命令：/exit 退出；/compact [指导] 压缩会话历史（可附侧重指导）；/init 生成项目 AGENTS.md；/help 帮助\n");
+        continue;
+      } else {
+        write(`\n[未知命令] ${input}（/help 查看可用命令）\n`);
         continue;
       }
-      write(`\n[未知命令] ${input}（/help 查看可用命令）\n`);
-      continue;
     }
-    await hooks?.emit({ type: "UserPromptSubmit", input });
+    const prompt = turnInput ?? input;
+    await hooks?.emit({ type: "UserPromptSubmit", input: prompt });
     // 后台续跑活跃（子 agent 完成唤醒 root 正在跑）时等它结束再开新轮——
     // 此时 start 会复位中断信号污染后台轮、run() 因防重入空返回导致落盘游标错位；
     // 后台轮有看门狗/超时兜底必然收尾，用户输入在此排队不丢
@@ -95,7 +111,7 @@ export async function interact(options: InteractOptions): Promise<void> {
     }
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
-    agent.start(input);
+    agent.start(prompt);
     // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，此前确认）
     for await (const event of agent.run()) {
       render(event);

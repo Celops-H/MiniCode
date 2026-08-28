@@ -798,3 +798,68 @@ describe("N3 环境信息进系统提示词", () => {
     expect(p).toContain(process.cwd());
   });
 });
+
+describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", () => {
+  let dir: string;
+
+  function makeCapturingAgent(): { agent: Agent; prompts: string[] } {
+    const prompts: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        const last = context.messages.at(-1);
+        if (typeof last?.content === "string") prompts.push(last.content);
+        yield { type: "text_delta", text: "已生成" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    return { agent: new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [] }), prompts };
+  }
+
+  it("无 AGENTS.md 时生成新建提示词走正常回合", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const { agent, prompts } = makeCapturingAgent();
+    const agentsFile = path.join(dir, "AGENTS.md");
+    async function* inputs(): AsyncIterable<string> {
+      yield "/init";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      projectAgentsFile: agentsFile,
+    });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("AGENTS.md");
+    expect(prompts[0]).toContain("write 工具");
+    expect(prompts[0]).not.toContain("已存在的 AGENTS.md 内容");
+  });
+
+  it("已存在 AGENTS.md 时读取其内容、要求不覆盖并建议改进", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const { agent, prompts } = makeCapturingAgent();
+    const agentsFile = path.join(dir, "AGENTS.md");
+    writeFileSync(agentsFile, "现有项目指令：pnpm test");
+    async function* inputs(): AsyncIterable<string> {
+      yield "/init";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      projectAgentsFile: agentsFile,
+    });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("不覆盖");
+    expect(prompts[0]).toContain("现有项目指令：pnpm test");
+  });
+});
