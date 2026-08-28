@@ -23,6 +23,18 @@ const globTool: Tool = {
   execute: () => "[]",
 };
 
+/** 带 inputJsonSchema 的外部工具（MCP 形态，BACKEND §19）：zod 侧 z.unknown() 放行 */
+const mcpTool: Tool = {
+  name: "mcp__fs__read_file",
+  description: "读取外部文件",
+  inputSchema: z.unknown(),
+  inputJsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  isReadOnly: false,
+  requiresUserInteraction: false,
+  maxResultSizeChars: 30000,
+  execute: () => "外部内容",
+};
+
 describe("ToolRegistry", () => {
   it("注册后可按名查找与列出", () => {
     const registry = new ToolRegistry();
@@ -54,5 +66,16 @@ describe("ToolRegistry", () => {
         path: { type: "string" },
       },
     });
+  });
+
+  it("inputJsonSchema 原样透传不经 zod 转换（MCP 外部工具）", () => {
+    const registry = new ToolRegistry();
+    registry.register(mcpTool);
+    const def = registry.definitions()[0];
+    expect(def?.inputSchema).toBe(mcpTool.inputJsonSchema);
+  });
+
+  it("z.unknown() 放行任意入参（MCP 入参正确性交给 server 自校验）", () => {
+    expect(mcpTool.inputSchema.parse({ any: ["shape", 1] })).toEqual({ any: ["shape", 1] });
   });
 });

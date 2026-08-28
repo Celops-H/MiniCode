@@ -32,14 +32,15 @@ export class ToolRegistry {
   }
 
   /**
-   * 序列化为模型可见的工具定义（zod schema 转标准 JSON Schema）。
+   * 序列化为模型可见的工具定义：有 inputJsonSchema 的（MCP 外部工具）原样透传，
+   * 其余 zod schema 转标准 JSON Schema。
    * @returns 工具定义数组
    */
   definitions(): ToolDefinition[] {
     return [...this.tools.values()].map((tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: z.toJSONSchema(tool.inputSchema) as Record<string, unknown>,
+      inputSchema: tool.inputJsonSchema ?? (z.toJSONSchema(tool.inputSchema) as Record<string, unknown>),
     }));
   }
 }

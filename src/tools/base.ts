@@ -34,6 +34,12 @@ export interface Tool {
   readonly description: string;
   /** 参数 schema（zod），Executor 校验输入 */
   readonly inputSchema: z.ZodTypeAny;
+  /**
+   * 直接透传给模型的 JSON Schema（MCP 外部工具用，BACKEND §19）：server 提供的入参 schema，
+   * registry 序列化时原样透传、不经 zod 转换；此时 inputSchema 应配 z.unknown() 放行，
+   * 入参正确性交给 server 自校验。
+   */
+  readonly inputJsonSchema?: Record<string, unknown>;
   /** 只读工具：权限快速放行 */
   readonly isReadOnly: boolean;
   /** 需要用户交互：升级审批 */
