@@ -1,13 +1,19 @@
 import type { Config } from "../config/index.js";
 import { resolveAuth } from "../llm/auth.js";
-import { ModelRouter, Models, OpenAICompatibleProvider } from "../llm/index.js";
+import {
+  AnthropicCompatibleProvider,
+  ModelRouter,
+  Models,
+  OpenAICompatibleProvider,
+} from "../llm/index.js";
 
 /** 可用厂商为零时的启动报错（无任何兜底：列表里出现的模型一定有 key，无例外） */
 export const NO_PROVIDER_ERROR =
   "未配置任何可用厂商：请 /connect 连接供应商（或配置对应 API key 环境变量），或编辑 ~/.minicode/config.json";
 
 /**
- * 按配置构建模型客户端：config 配置了 providers → 注册多厂商 Provider，
+ * 按配置构建模型客户端：config 配置了 providers → 注册多厂商 Provider（按 provider
+ * 的 protocol 选工厂，缺省 openai-chat-completions），
  * 且配置了 modelChain → 挂 ModelRouter 优先级链路由。
  * 装配期逐 provider 查 apiKeyEnv（resolveAuth）：key 已配置才注册，未配置的不进
  * 模型列表（列表里出现的模型一定有 key，无例外）；可用厂商为零直接报错，不再回退
@@ -37,25 +43,40 @@ export function buildModelClient(
     chain,
   });
   for (const provider of usable) {
-    models.register(
-      new OpenAICompatibleProvider({
-        id: provider.id,
-        name: provider.id,
-        baseUrl: provider.baseUrl,
-        apiKeyEnv: provider.apiKeyEnv,
-        // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
-        reasoningContent: provider.id === "deepseek",
-        // 仅 OpenAI 官方支持 reasoning_effort 请求参数；其余厂商发该字段可能 400，不开
-        reasoningEffort: provider.id === "openai",
-        models: provider.models.map((m) => ({
-          id: m.id,
-          name: m.name ?? m.id,
-          api: "openai-chat-completions",
-          providerId: provider.id,
-          contextWindow: m.contextWindow,
-        })),
-      }),
-    );
+    const protocol = provider.protocol ?? "openai-chat-completions";
+    const modelInfos = provider.models.map((m) => ({
+      id: m.id,
+      name: m.name ?? m.id,
+      api: protocol,
+      providerId: provider.id,
+      contextWindow: m.contextWindow,
+    }));
+    if (protocol === "anthropic-messages") {
+      // Anthropic 兼容端点：x-api-key + anthropic-version 认证头与流式解析随协议走
+      models.register(
+        new AnthropicCompatibleProvider({
+          id: provider.id,
+          name: provider.id,
+          baseUrl: provider.baseUrl,
+          apiKeyEnv: provider.apiKeyEnv,
+          models: modelInfos,
+        }),
+      );
+    } else {
+      models.register(
+        new OpenAICompatibleProvider({
+          id: provider.id,
+          name: provider.id,
+          baseUrl: provider.baseUrl,
+          apiKeyEnv: provider.apiKeyEnv,
+          // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
+          reasoningContent: provider.id === "deepseek",
+          // 仅 OpenAI 官方支持 reasoning_effort 请求参数；其余厂商发该字段可能 400，不开
+          reasoningEffort: provider.id === "openai",
+          models: modelInfos,
+        }),
+      );
+    }
   }
   // 主模型必须可解析：不在配置中则显式报错，避免会话运行时才「未知模型」崩溃
   const main = resolveMainModel(config, modelId);

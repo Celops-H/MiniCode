@@ -12,12 +12,18 @@ export const modelConfigSchema = z
   .strict();
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 
-/** 单个 Provider 配置（OpenAI 兼容厂商）；strict：拼错字段直接报错而非默认忽略 */
+/** 已实现的协议（配置可选项）；ProtocolType 预留的其余协议未接入装配，不开放配置 */
+export const PROVIDER_PROTOCOLS = ["openai-chat-completions", "anthropic-messages"] as const;
+export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
+
+/** 单个 Provider 配置（厂商接入）；strict：拼错字段直接报错而非默认忽略 */
 export const providerConfigSchema = z
   .object({
     id: z.string(),
     baseUrl: z.string().url(),
     apiKeyEnv: z.string(),
+    /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂（BACKEND §5） */
+    protocol: z.enum(PROVIDER_PROTOCOLS).optional(),
     models: z.array(modelConfigSchema),
   })
   .strict();

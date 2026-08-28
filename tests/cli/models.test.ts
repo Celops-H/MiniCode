@@ -41,6 +41,30 @@ describe("buildModelClient（按配置构建模型客户端）", () => {
     expect(() => buildModelClient(undefined, undefined, { env: KEYS })).toThrow("未配置任何可用厂商");
   });
 
+  it("protocol 为 anthropic-messages 时注册 Anthropic 协议 Provider，缺省仍走 openai 兼容", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "glm-anthropic",
+          baseUrl: "https://open.bigmodel.cn/api/anthropic",
+          apiKeyEnv: "ZHIPU_API_KEY",
+          protocol: "anthropic-messages",
+          models: [{ id: "glm-4-plus" }],
+        },
+        {
+          id: "deepseek",
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "DEEPSEEK_API_KEY",
+          models: [{ id: "deepseek-chat" }],
+        },
+      ],
+    };
+    const models = buildModelClient(config, undefined, { env: { ZHIPU_API_KEY: "k", DEEPSEEK_API_KEY: "k" } });
+    expect(models.resolve("glm-4-plus")?.model.api).toBe("anthropic-messages");
+    expect(models.resolve("deepseek-chat")?.model.api).toBe("openai-chat-completions");
+  });
+
   it("配置 modelChain 时优先级链成员都能解析到对应 provider", () => {
     const config: Config = {
       logLevel: "info",

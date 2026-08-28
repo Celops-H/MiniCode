@@ -19,6 +19,7 @@
     "test": "cross-env NODE_OPTIONS=--experimental-ffi vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
     "@opentui/core": "^0.5.8",
     "@opentui/solid": "^0.5.8",
     "commander": "^15.0.0",

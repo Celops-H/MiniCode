@@ -23,6 +23,7 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       id: p.id,
       baseUrl: p.baseUrl,
       apiKeyEnv: p.apiKeyEnv,
+      ...(p.protocol ? { protocol: p.protocol } : {}),
       models: p.models.map((id) => ({ id })),
     })),
   };

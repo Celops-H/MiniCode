@@ -150,6 +150,42 @@ describe("loadConfig", () => {
     ).rejects.toThrow();
   });
 
+  it("protocol 合法值放行、未知协议 strict 直接报错", async () => {
+    const config = await loadConfig({
+      paths: setup({
+        global: {
+          providers: [
+            {
+              id: "zhipu-anthropic",
+              baseUrl: "https://open.bigmodel.cn/api/anthropic",
+              apiKeyEnv: "ZHIPU_API_KEY",
+              protocol: "anthropic-messages",
+              models: [{ id: "glm-4-plus" }],
+            },
+          ],
+        },
+      }),
+    });
+    expect(config.providers?.[0]?.protocol).toBe("anthropic-messages");
+    await expect(
+      loadConfig({
+        paths: setup({
+          global: {
+            providers: [
+              {
+                id: "x",
+                baseUrl: "https://x.example.com",
+                apiKeyEnv: "X",
+                protocol: "gemini", // 未接入装配的协议不开放配置
+                models: [{ id: "m" }],
+              },
+            ],
+          },
+        }),
+      }),
+    ).rejects.toThrow();
+  });
+
   it("全局配置提供模型 providers 与优先级链", async () => {
     const config = await loadConfig({
       paths: setup({

@@ -1,23 +1,18 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { resolveAuth } from "../auth.js";
-import { OpenAICompletionsProtocol } from "../protocol/index.js";
+import { AnthropicMessagesProtocol } from "../protocol/index.js";
 import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
 import type { Context, StreamEvent } from "../../core/index.js";
 import type { Provider, ProviderAuth, ModelInfo } from "../types.js";
 
-// 常量自共享模块取（anthropic-compatible 同用）；此处 re-export 维持原导出路径
-export { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS };
-
-/** OpenAI 兼容 client 接口（默认官方 SDK，测试可注入 mock） */
-export interface ChatCompletionsClient {
-  chat: {
-    completions: {
-      create(request: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<AsyncIterable<unknown>>;
-    };
+/** Anthropic 兼容 client 接口（默认官方 SDK，测试可注入 mock） */
+export interface AnthropicMessagesClient {
+  messages: {
+    create(request: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<AsyncIterable<unknown>>;
   };
 }
 
-export interface OpenAICompatibleOptions {
+export interface AnthropicCompatibleOptions {
   id: string;
   name: string;
   baseUrl: string;
@@ -25,44 +20,46 @@ export interface OpenAICompatibleOptions {
   apiKeyEnv: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
-  /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
-  reasoningContent?: boolean;
-  /** 支持 reasoning_effort 请求参数的厂商（仅 OpenAI 系；其余厂商发该字段可能 400，不 emit） */
-  reasoningEffort?: boolean;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
+  /** Anthropic 请求默认 max_tokens（请求体必填，模型未定义时兜底） */
+  defaultMaxTokens?: number;
   /** 创建 client 的工厂（测试注入 mock） */
-  createClient?: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
+  createClient?: (apiKey: string, baseUrl: string) => AnthropicMessagesClient;
 }
 
-/** OpenAI 兼容厂商 Provider：复用 openai-chat-completions 协议，只改 baseUrl */
-export class OpenAICompatibleProvider implements Provider {
+/**
+ * Anthropic 兼容厂商 Provider（anthropic-messages 协议）：@anthropic-ai/sdk 客户端换
+ * baseURL 复用，认证头 x-api-key + anthropic-version 由 SDK 负责。与
+ * OpenAICompatibleProvider 同构：同一份纯数据配置、同一套流空闲超时与用户 signal
+ * 转发逻辑，只有请求体/流式解析随协议走（AnthropicMessagesProtocol）。
+ */
+export class AnthropicCompatibleProvider implements Provider {
   readonly id: string;
   readonly name: string;
   readonly baseUrl: string;
   readonly auth: ProviderAuth;
 
-  private readonly protocol: OpenAICompletionsProtocol;
+  private readonly protocol: AnthropicMessagesProtocol;
   private readonly modelList: ModelInfo[];
-  private readonly createClient: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
+  private readonly createClient: (apiKey: string, baseUrl: string) => AnthropicMessagesClient;
   private readonly streamIdleTimeoutMs: number;
+  private readonly defaultMaxTokens: number;
   private readonly apiKey?: string;
-  private client?: ChatCompletionsClient;
+  private client?: AnthropicMessagesClient;
 
-  constructor(options: OpenAICompatibleOptions) {
+  constructor(options: AnthropicCompatibleOptions) {
     this.id = options.id;
     this.name = options.name;
     this.baseUrl = options.baseUrl;
     this.modelList = options.models;
-    this.protocol = new OpenAICompletionsProtocol({
-      reasoningContent: options.reasoningContent,
-      emitReasoningEffort: options.reasoningEffort,
-    });
+    this.protocol = new AnthropicMessagesProtocol();
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
+    this.defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
-    this.createClient = options.createClient ?? defaultCreateClient;
+    this.createClient = options.createClient ?? defaultAnthropicCreateClient;
   }
 
   /**
@@ -74,7 +71,7 @@ export class OpenAICompatibleProvider implements Provider {
   }
 
   /**
-   * 流式调用模型：组装请求 → 发到 OpenAI 兼容 API → 转成统一事件流。
+   * 流式调用模型：组装请求 → 发到 Anthropic 兼容 API → 转成统一事件流。
    * @param modelId 模型 id
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流
@@ -84,12 +81,10 @@ export class OpenAICompatibleProvider implements Provider {
     context: Context,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
+    // max_tokens 是 Anthropic 请求体必填项：取模型定义值，模型未定义时兜底
+    const maxTokens = this.modelList.find((m) => m.id === modelId)?.maxTokens ?? this.defaultMaxTokens;
     const request = this.protocol.buildRequest(context);
-    // SDK 的 timeout 只覆盖响应头到达前，读流式响应体没有超时——厂商 SSE 中途静默挂起
-    // （连接保持、不再推数据、也不关闭）会无限挂起（真机「卡住不返回」根因）。这里补一个
-    // 流空闲超时：N 秒无新 chunk 主动中断底层请求并报错。
-    // 中断用合并 controller 驱动：用户 signal 转发（保持打断语义，interrupt 真正中断模型请求）
-    // + idle 超时 abort；传给 SDK 的是合并后的 signal，任一触发都会中断底层读取。
+    // 中断合并 controller 同 openai-compatible：用户 signal 转发 + idle 超时 abort 共用
     const controller = new AbortController();
     const userSignal = options?.signal;
     const forwardAbort = (): void => controller.abort();
@@ -98,10 +93,11 @@ export class OpenAICompatibleProvider implements Provider {
       else userSignal.addEventListener("abort", forwardAbort, { once: true });
     }
     try {
-      const stream = await this.getClient().chat.completions.create(
+      const stream = await this.getClient().messages.create(
         {
           ...(request as Record<string, unknown>),
           model: modelId,
+          max_tokens: maxTokens,
           stream: true,
         },
         { signal: controller.signal },
@@ -115,7 +111,7 @@ export class OpenAICompatibleProvider implements Provider {
   }
 
   /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
-  private getClient(): ChatCompletionsClient {
+  private getClient(): AnthropicMessagesClient {
     if (!this.apiKey) {
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量`);
     }
@@ -124,12 +120,20 @@ export class OpenAICompatibleProvider implements Provider {
   }
 }
 
+/** Anthropic 请求 max_tokens 兜底：模型未定义 contextWindow/maxTokens 时的输出上限 */
+export const DEFAULT_MAX_TOKENS = 8192;
+
 /**
- * 默认用官方 OpenAI SDK 创建 client（带请求超时，防厂商请求挂起无限等待）。
+ * 默认用官方 Anthropic SDK 创建 client（x-api-key + anthropic-version 认证头由 SDK
+ * 注入；带请求超时，防厂商请求挂起无限等待）。
  * @param apiKey API key
- * @param baseUrl 厂商 API 地址
- * @returns OpenAI 兼容 client
+ * @param baseUrl 厂商 API 地址（Anthropic 兼容端点）
+ * @returns Anthropic 兼容 client
  */
-export function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
-  return new OpenAI({ baseURL: baseUrl, apiKey, timeout: REQUEST_TIMEOUT_MS }) as unknown as ChatCompletionsClient;
+export function defaultAnthropicCreateClient(apiKey: string, baseUrl: string): AnthropicMessagesClient {
+  return new Anthropic({
+    baseURL: baseUrl,
+    apiKey,
+    timeout: REQUEST_TIMEOUT_MS,
+  }) as unknown as AnthropicMessagesClient;
 }

@@ -8,17 +8,20 @@
 export interface ProviderPreset {
   id: string;
   name: string;
-  /** OpenAI 兼容 API 端点 */
+  /** API 端点 */
   baseUrl: string;
   apiKeyEnv: string;
+  /** 协议（缺省 openai-chat-completions）：anthropic 兼容端点的条目须显式标注 */
+  protocol?: "openai-chat-completions" | "anthropic-messages";
   models: string[];
   defaultModel: string;
 }
 
 /**
- * 主流模型厂商预设（OpenAI 兼容 baseUrl + 各自 API Key 环境变量）。
- * 注：后端模型客户端当前只走 openai-chat-completions 协议，
- * 故只列 OpenAI 兼容接口可用的厂商；Gemini 走其官方 OpenAI 兼容端点。
+ * 主流模型厂商预设（各厂商 API 端点 + 各自 API Key 环境变量）。
+ * 同厂商多种接入方式 = 多条预设、id 不同，名称标清接入方式与协议；anthropic 兼容
+ * 端点条目带 protocol: "anthropic-messages"（缺省 openai-chat-completions）。
+ * 端点与协议逐一对照厂商官方文档核实（连通性归真机验证）。
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
