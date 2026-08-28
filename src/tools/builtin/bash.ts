@@ -8,6 +8,9 @@ import { killProcessTree, startBackgroundTask } from "./bash-background.js";
 /** 输出累积上限，与 exec 的 maxBuffer 对齐：超过即丢弃后续输出，防内存膨胀 */
 const MAX_BASH_OUTPUT_CHARS = 4 * 1024 * 1024;
 
+/** 排水窗口：进程退出后等管道关闭的宽限时长；到点销毁流强制收尾（窗口内未吐完的尾部输出会丢） */
+const DRAIN_WINDOW_MS = 1000;
+
 const schema = z.object({
   command: z.string(),
   /** 超时毫秒数，默认 30 秒 */
@@ -99,6 +102,8 @@ export const bashTool: Tool = {
  * 前台执行命令：spawn 起 shell，累积 stdout/stderr，维护 cwd 与工具上下文一致。
  * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
  * 兼容旧 exec 语义：非零退出码返回失败文本、超时/中断标记 isError。
+ * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
+ * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
  * @param command shell 命令
  * @param timeoutMs 超时毫秒数
  * @param signal 外部中止信号（用户打断当前轮时透传）
@@ -113,10 +118,20 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       cwd: currentCwd(),
       detached: process.platform !== "win32",
     });
+    // 立即关闭 stdin：工具执行是非交互语义，等待输入的命令（如裸 cat）读到 EOF 即退出，
+    // 而不是挂着直到超时被杀
+    child.stdin?.on("error", () => {});
+    child.stdin?.end();
     let output = "";
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    /** exit 事件已到（与退出码无关：信号杀时 code 为 null，不能拿 exitCode 判退出） */
+    let exited = false;
+    /** 退出码：仅用于失败文案，信号杀为 null（与旧 close 语义一致，显示「未知」） */
+    let exitCode: number | null = null;
+    let openStreams = 0;
+    let drainTimer: ReturnType<typeof setTimeout> | undefined;
 
     const kill = (): void => {
       if (child.pid) killProcessTree(child.pid);
@@ -132,6 +147,11 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       timedOut = true;
       kill();
     }, timeoutMs);
+    const cleanup = (): void => {
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
 
     const collect = (chunk: Buffer): void => {
       if (output.length >= MAX_BASH_OUTPUT_CHARS) {
@@ -140,21 +160,11 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       }
       output += chunk.toString();
     };
-    child.stdout?.on("data", collect);
-    child.stderr?.on("data", collect);
-    // spawn 本身失败（shell 不可用等罕见路径）也尽快收尾
-    child.on("error", (err) => {
+
+    const settle = (): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(`命令启动失败：${err.message}`);
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
+      cleanup();
       const details = output.trim();
       if (aborted) {
         resolve({ output: `${details ? `${details}\n` : ""}(命令已被用户打断)`, isError: true });
@@ -164,11 +174,50 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
         resolve({ output: `${details ? `${details}\n` : ""}（命令执行超时，已终止）`, isError: true });
         return;
       }
-      if (code !== 0) {
-        resolve(`命令失败：退出码 ${code ?? "未知"}${details ? `\n${details}` : ""}`);
+      if (exitCode !== 0) {
+        resolve(`命令失败：退出码 ${exitCode ?? "未知"}${details ? `\n${details}` : ""}`);
         return;
       }
       resolve(details.length > 0 ? details : "(命令无输出)");
+    };
+    const maybeSettle = (): void => {
+      if (exited && openStreams === 0) settle();
+    };
+
+    const streams = [child.stdout, child.stderr];
+    for (const stream of streams) {
+      if (!stream) continue;
+      openStreams++;
+      stream.on("data", collect);
+      stream.on("close", () => {
+        openStreams--;
+        maybeSettle();
+      });
+      // 超时/打断杀进程后管道可能断裂（EPIPE 等），输出已尽力收集，吞掉防未处理错误崩溃
+      stream.on("error", () => {});
+    }
+
+    // spawn 本身失败（shell 不可用等罕见路径）也尽快收尾
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(`命令启动失败：${err.message}`);
+    });
+
+    child.on("exit", (code) => {
+      exited = true;
+      exitCode = code;
+      // 进程退出但管道写端仍被存活进程持有（shell 经 start/& 启动的后台孙进程继承了
+      // stdout/stderr 句柄）时，流不会关闭，「close」迟迟不来导致整个调用长时间无返回
+      // （工具系统问题记录 2026-08-27 问题 2 的同类场景；若根因是 shell 本身不退出则
+      // exit 不来，仍靠超时/打断救回）：给一个排水窗口收剩余输出，到点销毁流强制收尾，
+      // 保证调用必然返回
+      drainTimer = setTimeout(() => {
+        for (const stream of streams) stream?.destroy();
+        maybeSettle();
+      }, DRAIN_WINDOW_MS);
+      maybeSettle();
     });
   });
 }
