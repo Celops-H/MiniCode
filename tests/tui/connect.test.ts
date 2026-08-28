@@ -76,6 +76,33 @@ it("writeEnvKey：新增追加、更新替换（幂等）", async () => {
   }
 });
 
+it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预设占位模型", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const globalFile = path.join(dir, "config.json");
+  const envFile = path.join(dir, ".env");
+  try {
+    let fetchCalls = 0;
+    const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "deepseek-anthropic")!;
+    const ok = await connectProvider(anthropicPreset, "sk-123", {
+      globalConfigFile: globalFile,
+      envFile,
+      fetchImpl: async () => {
+        fetchCalls++;
+        return ["should-not-be-used"];
+      },
+    });
+    expect(ok).toEqual({ ok: true });
+    expect(fetchCalls).toBe(0);
+    const config = JSON.parse(await readFile(globalFile, "utf8")) as {
+      providers: Array<{ id: string; protocol?: string; models: { id: string }[] }>;
+    };
+    expect(config.providers[0]).toMatchObject({ id: "deepseek-anthropic", protocol: "anthropic-messages" });
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(anthropicPreset.models);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 /** /models 拉取 mock：返回给定列表；rejected 用于模拟 key 无效/网络失败 */
 function fakeFetch(models: string[] | Error): typeof import("../../src/tui/connect.js").fetchProviderModels {
   return async () => {

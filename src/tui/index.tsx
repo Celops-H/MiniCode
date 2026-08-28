@@ -111,8 +111,10 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 全局配置播种（BACKEND §14）：独立启动（dev 入口）也要装配配置前检测；
   // minicode tui 经 CLI main() 已播种，此处 wx/EEXIST 幂等
   await ensureGlobalConfigSeed();
-  let config: Config = await loadConfig();
+  // .env 注入须先于 loadConfig：项目 .env 里的 MINICODE_* 配置经环境变量层进入
+  // 合并链（与 CLI main 顺序一致），后加载会漏读
   await loadDotEnv();
+  let config: Config = await loadConfig();
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
   let models: Models = buildModelClient(config);
   let modelId: string = resolveMainModel(config);
@@ -125,8 +127,9 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
     // reconfigure（/connect 或 /model）重建配置链：重读 config + .env、重建模型客户端；
     // switchTo 无值时保持当前会话续跑（connect 不切会话、/model 同会话切模型）
     if (result.reconfigure) {
-      config = await loadConfig();
+      // .env 先注入再读配置（同启动顺序：reconfigure 后 MINICODE_* 变量层不漏读）
       await loadDotEnv();
+      config = await loadConfig();
       models = buildModelClient(config);
       modelId = resolveMainModel(config);
       // switchTo===NEW_SESSION_ID 分支实际不可达（/model 带自身 id、/connect 不带 switchTo），

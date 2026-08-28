@@ -101,17 +101,21 @@ export async function connectProvider(
     const globalFile = opts.globalConfigFile ?? paths.globalConfigFile;
     const envFile = opts.envFile ?? path.join(process.cwd(), ".env");
     // 先拉全量模型（10s 超时）：拉到即用真实列表写配置；key 无效/网络失败仅回落预设占位，
-    // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）
+    // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）。
+    // anthropic 协议端点无 OpenAI /models 拉取约定（Bearer + {data:[{id}]}），直接用
+    // 预设占位，不空耗一次注定失败的请求
     let models = preset.models;
     let fetchedModels: number | undefined;
-    try {
-      const fetched = await (opts.fetchImpl ?? fetchProviderModels)(preset.baseUrl, trimmed);
-      if (fetched.length > 0) {
-        models = fetched;
-        fetchedModels = fetched.length;
+    if (preset.protocol !== "anthropic-messages") {
+      try {
+        const fetched = await (opts.fetchImpl ?? fetchProviderModels)(preset.baseUrl, trimmed);
+        if (fetched.length > 0) {
+          models = fetched;
+          fetchedModels = fetched.length;
+        }
+      } catch {
+        // 拉取失败用预设占位，静默（不 toast 干扰：连接本身成功）
       }
-    } catch {
-      // 拉取失败用预设占位，静默（不 toast 干扰：连接本身成功）
     }
     await writeGlobalConfig(globalFile, { ...preset, models });
     await writeEnvKey(envFile, preset.apiKeyEnv, trimmed);

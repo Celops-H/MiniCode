@@ -217,7 +217,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       }
       const guidance = command === "/compact" ? undefined : command.slice("/compact ".length).trim() || undefined;
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      void compactAsync(guidance).catch(() => undefined);
+      void compactAsync(guidance).catch((err) => showToast(`压缩失败：${err instanceof Error ? err.message : String(err)}`));
       return;
     }
     if (command === "/init") {
