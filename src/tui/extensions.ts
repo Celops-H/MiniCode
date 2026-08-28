@@ -24,7 +24,7 @@ export interface ExtensionRow {
   source?: "project" | "user";
 }
 
-/** /mcp 面板行：配置 enabled 与 manager 装配状态合并（状态列：已连接/未启动/启动失败原因） */
+/** /mcp 面板行：配置 enabled 与 manager 装配状态合并（状态列：已连接/未启动/进程已退出/启动失败原因） */
 export function buildMcpRows(servers: Record<string, McpServerConfig>, statuses: McpServerStatus[]): ExtensionRow[] {
   return Object.entries(servers).map(([name, cfg]) => {
     const enabled = cfg.enabled !== false;
@@ -32,6 +32,7 @@ export function buildMcpRows(servers: Record<string, McpServerConfig>, statuses:
     let detail: string;
     if (!enabled) detail = "未启动";
     else if (status?.started) detail = `已连接 · ${status.toolCount} 个工具`;
+    else if (status?.exited) detail = "进程已退出（重开会话重拉）";
     else if (status?.error) detail = `启动失败：${truncate(status.error, 60)}`;
     else detail = "未启动";
     return { id: name, label: name, detail, enabled };

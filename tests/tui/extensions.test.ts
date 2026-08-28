@@ -13,17 +13,20 @@ describe("buildMcpRows / buildSkillRows（面板行构造）", () => {
       fs: { command: "npx" },
       git: { command: "npx", enabled: false },
       bad: { command: "nope" },
+      crashed: { command: "npx" },
     };
     const statuses: McpServerStatus[] = [
       { name: "fs", enabled: true, started: true, toolCount: 2 },
       { name: "bad", enabled: true, started: false, toolCount: 0, error: "握手超时（initialize，10000ms）" },
+      { name: "crashed", enabled: true, started: false, exited: true, toolCount: 2 },
     ];
     const rows = buildMcpRows(servers, statuses);
-    expect(rows.map((r) => r.id)).toEqual(["fs", "git", "bad"]);
+    expect(rows.map((r) => r.id)).toEqual(["fs", "git", "bad", "crashed"]);
     expect(rows[0]).toMatchObject({ enabled: true, detail: "已连接 · 2 个工具" });
     expect(rows[1]).toMatchObject({ enabled: false, detail: "未启动" });
     // 失败原因截断到 60 字符防面板爆行
     expect(rows[2]!.detail).toBe("启动失败：握手超时（initialize，10000ms）");
+    expect(rows[3]!.detail).toBe("进程已退出（重开会话重拉）");
   });
 
   it("skill 行按 disabled 名单标启用态并带来源层", () => {
