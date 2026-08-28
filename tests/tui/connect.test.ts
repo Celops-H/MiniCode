@@ -42,6 +42,25 @@ it("writeGlobalConfig：重复连接同厂商不产生重复 provider（按 id �
   }
 });
 
+it("writeGlobalConfig：Anthropic 协议预设写入 protocol 字段，OpenAI 预设不写", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const file = path.join(dir, "config.json");
+  try {
+    const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "zhipu-coding")!;
+    await writeGlobalConfig(file, anthropicPreset);
+    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: Array<{ id: string; protocol?: string }> };
+    expect(parsed.providers[0]).toMatchObject({ id: "zhipu-coding", protocol: "anthropic-messages" });
+
+    const file2 = path.join(dir, "config2.json");
+    await writeGlobalConfig(file2, deepseek);
+    const parsed2 = JSON.parse(await readFile(file2, "utf8")) as { providers: Array<{ id: string; protocol?: string }> };
+    expect(parsed2.providers[0]?.id).toBe("deepseek");
+    expect(parsed2.providers[0]?.protocol).toBeUndefined();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("writeEnvKey：新增追加、更新替换（幂等）", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-env-"));
   const env = path.join(dir, ".env");

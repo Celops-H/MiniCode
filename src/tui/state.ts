@@ -222,7 +222,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/mcp", "/model", "/rename", "/session", "/skill"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/skill"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];

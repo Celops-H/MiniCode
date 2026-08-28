@@ -6,10 +6,12 @@
  */
 import { createStore, reconcile } from "solid-js/store";
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
+import { buildInitPrompt, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
@@ -91,6 +93,8 @@ export interface TuiLoopOptions {
   skillsDisabled?: string[];
   /** 会话启动通知（MCP 启动失败错误行等）：挂载后 toast 一次，完整状态在 /mcp 面板 */
   startupNotices?: string[];
+  /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
+  projectAgentsFile?: string;
 }
 
 /** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
@@ -205,18 +209,41 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       exitLoop();
       return;
     }
-    if (command === "/compact") {
+    if (command === "/compact" || command.startsWith("/compact ")) {
       if (state.status === "running") {
         showToast("运行中不可压缩，等本轮结束后再试");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
+      const guidance = command === "/compact" ? undefined : command.slice("/compact ".length).trim() || undefined;
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      void compactAsync().catch(() => undefined);
+      void compactAsync(guidance).catch(() => undefined);
+      return;
+    }
+    if (command === "/init") {
+      // 分析代码库生成/改进项目根 AGENTS.md（BACKEND §21）：读现有文件生成 init 提示词，
+      // 走正常回合让模型用 write 工具落盘；已存在时提示词要求不覆盖、先建议改进
+      if (state.status === "running") {
+        showToast("运行中不可执行 /init，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+        return;
+      }
+      const agentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
+      void (async () => {
+        try {
+          const existing = await readInstructionFile(agentsFile);
+          pendingInputs.push(buildInitPrompt(existing));
+          wake?.();
+          showToast(existing ? "已存在 AGENTS.md：开始分析并建议改进（不覆盖）" : "开始分析代码库，生成项目根 AGENTS.md");
+        } catch (err) {
+          showToast(`读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
     if (command === "/help") {
-      showToast("命令：/exit 退出 · /compact 压缩 · /session 切换 · /connect 连接 · /model 模型 · /mcp 服务 · /skill 技能 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact [指导] 压缩 · /init 生成 AGENTS.md · /session 切换 · /connect 连接 · /model 模型 · /mcp 服务 · /skill 技能 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
@@ -355,13 +382,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
   };
 
-  /** /compact：强制压缩 + 历史重写落盘（F-1=56 toast 带压缩后条数，压缩有痕迹） */
-  const compactAsync = async (): Promise<void> => {
-    if (await agent.compactNow()) {
+  /** /compact：强制压缩 + 历史重写落盘（F-1=56 toast 带压缩后条数，压缩有痕迹）；
+   *  带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径 */
+  const compactAsync = async (guidance?: string): Promise<void> => {
+    if (await agent.compactNow(guidance)) {
       await store.rewriteMessages(session, agent.getMessages());
       agent.consumeHistoryRewritten();
       const n = agent.getMessages().length;
-      showToast(`会话历史已压缩：当前 ${n} 条消息，关键上下文已保留`);
+      showToast(`会话历史已压缩${guidance ? "（按压缩指导）" : ""}：当前 ${n} 条消息，关键上下文已保留`);
     } else {
       showToast("未配置压缩或摘要不可用");
     }

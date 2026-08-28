@@ -36,6 +36,7 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset): P
       id: preset.id,
       baseUrl: preset.baseUrl,
       apiKeyEnv: preset.apiKeyEnv,
+      ...(preset.protocol ? { protocol: preset.protocol } : {}),
       models: preset.models.map((id) => ({ id })),
     },
   ];

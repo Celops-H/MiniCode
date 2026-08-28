@@ -3,7 +3,8 @@
  * 通道（approver/feedRoot/hooks）由 runTui 就绪后回调，这里用它 createSessionAgent；
  * /session 切换的会话重建循环也在此完成（装配层）。
  */
-import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Session, SessionStore } from "../storage/index.js";
@@ -107,6 +108,9 @@ export async function reloadOrDraftSession(store: SessionStore, current: Session
 
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
+  // 全局配置播种（BACKEND §14）：独立启动（dev 入口）也要装配配置前检测；
+  // minicode tui 经 CLI main() 已播种，此处 wx/EEXIST 幂等
+  await ensureGlobalConfigSeed();
   let config: Config = await loadConfig();
   await loadDotEnv();
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
@@ -168,6 +172,8 @@ async function runTuiSession(
   // M5 扩展生态装配（BACKEND §19/§20，与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
   // 启动失败的 server 已跳过，错误行 toast 一次提示、完整状态在 /mcp 面板
   const extensions = await assembleSessionExtensions(config);
+  // 指令文件加载（BACKEND §21，与 CLI 同套）：用户级 + 项目侧逐级拼接进系统提示词
+  const instructionsSection = buildInstructionsPrompt(await loadInstructionFiles());
   try {
     return await runTui({
       store,
@@ -184,9 +190,9 @@ async function runTuiSession(
       startupNotices: extensions.mcpErrors,
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
-        const systemPrompt = extensions.promptSection
-          ? `${SYSTEM_PROMPT}\n${extensions.promptSection}`
-          : SYSTEM_PROMPT;
+        const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
+          .filter((s) => s.length > 0)
+          .join("\n");
         const pipelineOptions: PermissionPipelineOptions = {
           rules: [],
           approver,
