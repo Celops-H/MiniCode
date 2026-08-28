@@ -23,6 +23,13 @@ function isBlackFg(rgba: { toInts: () => number[] } | null | undefined): boolean
   return r === 0x10 && g === 0x10 && b === 0x13;
 }
 
+/** 取 span 前景的 hex（fg 为 null 时返回 undefined） */
+function fgHex(rgba: { toInts: () => number[] } | null | undefined): string | undefined {
+  if (!rgba) return undefined;
+  const [r, g, b] = rgba.toInts();
+  return `#${[r, g, b].map((v) => (v ?? 0).toString(16).padStart(2, "0")).join("")}`;
+}
+
 it("权限弹块：工具名/参数/三决策与选中高亮", async () => {
   const modal: ModalState = {
     kind: "permission",
@@ -268,7 +275,7 @@ it("/connect 选中供应商：浅蓝背景块黑字（P6 与权限/新建会话
   expect(other[0] && !isAccentBg(other[0].bg)).toBe(true);
 });
 
-it("/model 选中模型：浅蓝背景块黑字（P6 统一选中观感）", async () => {
+it("/model 选中模型：白字 + ▸、未选中灰字、无背景块（2026-08-28 用户定论，不用反色块）", async () => {
   const modal: ModalState = {
     kind: "model",
     models: [
@@ -280,14 +287,16 @@ it("/model 选中模型：浅蓝背景块黑字（P6 统一选中观感）", asy
   };
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
   await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  // 选中行：▸ 标记 + 白字（text #ececf0）；未选中行：灰字（textMuted #8f9096）
+  expect(frame).toContain("▸ gpt-5-mini");
   const spans = setup.captureSpans().lines.flatMap((l) => l.spans);
-  const sel = spans.find((s) => isAccentBg(s.bg));
-  expect(sel).toBeDefined();
-  expect(sel!.text).toContain("gpt-5-mini");
-  expect(isBlackFg(sel!.fg)).toBe(true);
-  // 未选中的模型行不带浅蓝背景
-  const other = spans.filter((s) => s.text.includes("gpt-4o"));
-  expect(other[0] && !isAccentBg(other[0].bg)).toBe(true);
+  const sel = spans.find((s) => s.text.includes("gpt-5-mini"));
+  expect(fgHex(sel?.fg)).toBe("#ececf0");
+  const other = spans.find((s) => s.text.includes("gpt-4o"));
+  expect(fgHex(other?.fg)).toBe("#8f9096");
+  // 整个 /model 面板不出现浅蓝反色块（选中不再用背景块）
+  expect(spans.find((s) => isAccentBg(s.bg))).toBeUndefined();
 });
 
 it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致（P6 审查补）", async () => {
@@ -336,17 +345,16 @@ it("/model 选中高亮随导航移动（P6 审查补：createMemo 响应式，�
   const [modal, setModal] = createStore<ModalState>({ kind: "model", models, selected: 0, thinkingLevel: undefined });
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
   await setup.waitForVisualIdle();
+  // 白字选中态在 gpt-4o 行（灰字未选中行的 fg 是 textMuted，可区分）
   const spans0 = setup.captureSpans().lines.flatMap((l) => l.spans);
-  const sel0 = spans0.find((s) => isAccentBg(s.bg));
-  expect(sel0).toBeDefined();
-  expect(sel0!.text).toContain("gpt-4o");
-  // 下移到第二个模型：反色块跟着挪
+  const sel0 = spans0.find((s) => s.text.includes("gpt-4o"));
+  expect(fgHex(sel0?.fg)).toBe("#ececf0");
+  // 下移到第二个模型：白字跟着挪、原行变灰
   setModal({ kind: "model", models, selected: 1, thinkingLevel: undefined });
   await setup.waitForVisualIdle();
   const spans1 = setup.captureSpans().lines.flatMap((l) => l.spans);
-  const sel1 = spans1.find((s) => isAccentBg(s.bg));
-  expect(sel1).toBeDefined();
-  expect(sel1!.text).toContain("gpt-5-mini");
+  expect(fgHex(spans1.find((s) => s.text.includes("gpt-5-mini"))?.fg)).toBe("#ececf0");
+  expect(fgHex(spans1.find((s) => s.text.includes("gpt-4o"))?.fg)).toBe("#8f9096");
 });
 
 it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普通会话白字条目区分）", async () => {

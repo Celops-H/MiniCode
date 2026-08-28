@@ -3,7 +3,8 @@
  * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
  * 框线风格与消息区工具卡一体：rounded 边框 + 边框内标题，分区（标题/参数/选项/键位提示）。
  * 线条统一黑白灰阶（边框/标题/分隔，P6-3 修正 C 组过犹不及：文字也黑白不染色）——
- * 仅「选中项」用浅蓝背景块（foregroundAccent 底 + 黑字）做高亮，一眼可辨且与普通文字区分。
+ * 「选中项」用浅蓝背景块（foregroundAccent 底 + 黑字）做高亮，一眼可辨且与普通文字区分；
+ * 例外是 /model 模型行（2026-08-28 用户定论）：行数多、反色块过重，改选中白字 + ▸、未选中灰字，无背景块。
  * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）。
  * 键位：权限三决策 1/2/3 或 ←→ 选择 Enter 确认 Esc 拒绝；会话列表 ↑↓ 选择 Enter 切换 Esc 取消。
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
@@ -254,15 +255,14 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
           ● {d.name}
         </text>
       ) : d.index === b.selected ? (
-        // 选中模型浅蓝背景块黑字（P6 审查修正，与权限/新建会话/connect 统一）；缩进保持 4+标记 与未选中同列
-        <text>
-          <span style={{ bg: theme.foregroundAccent, fg: theme.background }}>
-            {"    ▸ "}
-            {b.models[d.index]!.id}
-          </span>
+        // 选中模型白字 + ▸ 标记（2026-08-28 用户定论：模型行数多，浅蓝反色块过重，
+        // 改与未选中灰字以色彩区分、不用背景块）；缩进保持 4+标记 与未选中同列
+        <text fg={theme.text}>
+          {"    ▸ "}
+          {b.models[d.index]!.id}
         </text>
       ) : (
-        <text fg={theme.text}>
+        <text fg={theme.textMuted}>
           {"    "}
           {`  ${b.models[d.index]!.id}`}
         </text>
