@@ -26,9 +26,9 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 块来源 → 首行圆点标记的颜色（你/模型=浅蓝、工具/思考/子agent=灰、通知=红警示） */
+/** 块来源 → 首行圆点标记的颜色（你=绿、模型=浅蓝、工具/思考/子agent=灰、通知=红警示） */
 function markerFor(b: BlockView): string {
-  if (b.kind === "message") return b.role === "user" ? theme.foregroundAccent : theme.modelColor;
+  if (b.kind === "message") return b.role === "user" ? theme.success : theme.modelColor;
   if (b.kind === "tool") return theme.textMuted;
   if (b.kind === "notice") return theme.warning;
   return theme.textMuted;
@@ -124,7 +124,7 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
     <box flexDirection="column">
       <text fg={theme.textMuted}>
         {props.b.isError ? <span style={{ fg: theme.error }}>⚠ </span> : null}
-        <span style={{ fg: props.b.role === "user" ? theme.foregroundAccent : theme.modelColor }}>
+        <span style={{ fg: props.b.role === "user" ? theme.success : theme.modelColor }}>
           {label}
         </span>{" "}
         {props.b.time ?? ""}

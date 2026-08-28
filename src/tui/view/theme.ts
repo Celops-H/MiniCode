@@ -1,7 +1,7 @@
 /**
  * 主题配色（P4-5 色板重映射：灰/黑/白/绿/浅蓝/红 + running 黄为进行中语义新增的第七色，E-2）。
- * 语义与 UI-SPEC 对齐：text(白正文)/textMuted(灰思考/工具)/error(红=严重/警示)/success(绿成功)/
- * foregroundAccent(浅蓝=强调：选中、用户圆点、子 agent 标点)/running(黄=进行中，状态行运行中、
+ * 语义与 UI-SPEC 对齐：text(白正文)/textMuted(灰思考/工具)/error(红=严重/警示)/success(绿=成功、用户消息圆点与「你」标签)/
+ * foregroundAccent(浅蓝=强调：弹窗选中反色块、模型圆点、子 agent 标点)/running(黄=进行中，状态行运行中、
  * 工具执行 spinner)。原橙黄不在色板内——warning 并入红（警示/严重语义）、accent 由紫改浅蓝。
  * 弹框与主区背景统一更深黑（用户：弹窗块和消息历史背景同色），hover 抬高一档。
  */

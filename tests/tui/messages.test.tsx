@@ -27,14 +27,18 @@ function spanFgOf(spans: { lines: Array<{ spans: Array<{ text: string; fg?: unkn
   return undefined;
 }
 
-it("用户消息带头部与文本", async () => {
+it("用户消息带头部与文本；「你」标签与圆点为绿、模型标签为浅蓝（2026-08-28 用户定论）", async () => {
   const setup = await app([
     { kind: "message", id: "u1", role: "user", text: "重构 partition 逻辑", time: "14:00:01", thinkingCollapsed: true },
+    { kind: "message", id: "a1", role: "assistant", text: "好的", thinkingCollapsed: true },
   ]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("你");
   expect(frame).toContain("重构 partition 逻辑");
+  // 「你」标签绿（success #7fd88f）、模型标签浅蓝（modelColor #61afef），与 UI-SPEC §11 色板一致
+  expect(spanFgOf(setup.captureSpans(), "你")).toBe("#7fd88f");
+  expect(spanFgOf(setup.captureSpans(), "test-model")).toBe("#61afef");
 });
 
 it("助手消息带思考折叠（收起显示「思考」）", async () => {
@@ -304,7 +308,7 @@ function textFg(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknow
   return undefined;
 }
 
-it("圆点配色：你=紫、模型=蓝、工具/思考=灰、通知=橙", async () => {
+it("圆点配色：你=绿、模型=蓝、工具/思考=灰、通知=红（2026-08-28 用户改色）", async () => {
   const setup = await testRender(
     () => (
       <Messages
@@ -321,13 +325,13 @@ it("圆点配色：你=紫、模型=蓝、工具/思考=灰、通知=橙", async
   );
   await setup.waitForVisualIdle();
   const colors = dotColors(setup.captureSpans());
-  expect(colors[0]).toBe("#61afef"); // 你=强调色浅蓝（P4-5 色板去紫）
+  expect(colors[0]).toBe("#7fd88f"); // 你=绿（success，2026-08-28 用户定论：与模型蓝区分）
   expect(colors[1]).toBe("#61afef"); // 模型=蓝
   expect(colors[2]).toBe("#8f9096"); // 工具=灰
   expect(colors[3]).toBe("#e06c75"); // 通知=警示红（P4-5 色板：红色承担严重/警告语义）
 });
 
-it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧「你」用强调色浅蓝", async () => {
+it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧「你」为绿", async () => {
   const setup = await app([
     { kind: "message", id: "u1", role: "user", text: "hi", thinkingCollapsed: true },
     { kind: "message", id: "a1", role: "assistant", text: "hello", thinkingCollapsed: true },
@@ -335,7 +339,7 @@ it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧�
   await setup.waitForVisualIdle();
   const spans = setup.captureSpans();
   expect(textFg(spans, "test-model")).toBe("#61afef"); // 模型名=蓝
-  expect(textFg(spans, "你")).toBe("#61afef"); // 你=强调色浅蓝（P4-5 色板去紫）
+  expect(textFg(spans, "你")).toBe("#7fd88f"); // 你=绿（success，与模型蓝区分）
 });
 
 it("思考/工具展开后内容保持灰色（与折叠提示同灰调，用户复核反馈）", async () => {
