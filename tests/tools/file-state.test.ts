@@ -187,4 +187,79 @@ describe("文件写冲突防护（DESIGN 7.6 per-agent 快照）", () => {
     expect(out).toBe(`已写入 ${file}`);
     expect(await readFile(file, "utf8")).toBe("x");
   });
+
+  it("read 后文件被外部删除：assertWritable 清快照放行，write 按新建成功（不再抛 ENOENT）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "v1");
+    const state = new FileState();
+    await withFileState(state, () => readTool.execute({ path: file }));
+    expect(state.getVersion(file)).toBeDefined();
+
+    rmSync(file);
+    expect(await state.assertWritable(file)).toBeNull();
+    expect(state.getVersion(file)).toBeUndefined();
+    const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v2" }));
+    expect(out).toBe(`已写入 ${file}`);
+    expect(await readFile(file, "utf8")).toBe("v2");
+  });
+
+  it("read 后整个目录被外部删除再重建：write 同路径正常（对齐真实故障现场）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "v1");
+    const state = new FileState();
+    await withFileState(state, () => readTool.execute({ path: file }));
+
+    rmSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true });
+    const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v2" }));
+    expect(out).toBe(`已写入 ${file}`);
+    expect(await readFile(file, "utf8")).toBe("v2");
+  });
+
+  it("外部删除后文件又被外部以新内容重建：write 仍拒绝（ENOENT 清快照不绕过 CAS）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "v1");
+    const state = new FileState();
+    await withFileState(state, () => readTool.execute({ path: file }));
+
+    rmSync(file);
+    writeFileSync(file, "外部重建的新内容");
+    const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v2" }));
+    expect(out).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
+    expect(await readFile(file, "utf8")).toBe("外部重建的新内容");
+  });
+
+  it("外部删除后 A 清快照写入成功，B 仍持旧快照被拒（清快照只影响本 agent）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "v1");
+    const stateA = new FileState();
+    const stateB = new FileState();
+    await withFileState(stateA, () => readTool.execute({ path: file }));
+    await withFileState(stateB, () => readTool.execute({ path: file }));
+
+    rmSync(file);
+    const outA = await withFileState(stateA, () => writeTool.execute({ path: file, content: "A 写入的比较长的新版本" }));
+    expect(outA).toBe(`已写入 ${file}`);
+    const outB = await withFileState(stateB, () => writeTool.execute({ path: file, content: "B" }));
+    expect(outB).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
+    expect(await readFile(file, "utf8")).toBe("A 写入的比较长的新版本");
+  });
+
+  it("read 后文件被外部删除，edit 报文件不存在（不创建文件，维持原语义）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "v1");
+    const state = new FileState();
+    await withFileState(state, () => readTool.execute({ path: file }));
+
+    rmSync(file);
+    await expect(
+      withFileState(state, () => editTool.execute({ path: file, oldString: "v1", newString: "v2" })),
+    ).rejects.toThrow();
+    expect(await state.assertWritable(file)).toBeNull();
+  });
 });

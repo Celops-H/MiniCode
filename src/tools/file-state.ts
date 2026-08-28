@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -72,6 +73,7 @@ export class FileState {
    * - 无快照（从未读过）：新建/覆盖语义，可写
    * - mtime+size 未变：可写
    * - mtime 变但 size 一致且完整读 hash 一致：抖动（编辑器 touched、杀软扫描）兜底放行
+   * - 有快照但文件已不存在（被外部删除）：清掉本 agent 该路径快照，按新建放行
    * - 其余：文件已被修改，拒绝
    * @param p 文件路径
    * @returns 拒绝原因；null 表示可写
@@ -79,7 +81,18 @@ export class FileState {
   async assertWritable(p: string): Promise<string | null> {
     const version = this.getVersion(p);
     if (!version) return null;
-    const disk = await stat(this.normalize(p));
+    let disk: Stats;
+    try {
+      disk = await stat(this.normalize(p));
+    } catch (err) {
+      // 有快照但磁盘文件已被外部删除（如整个目录被 rmdir 后重建）：文件不存在即无内容
+      // 可保护，清掉旧快照按新建放行；不捕获会把 stat 的 ENOENT 穿透成工具失败
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        this.versions.delete(this.normalize(p));
+        return null;
+      }
+      throw err;
+    }
     if (disk.mtimeMs === version.mtimeMs && disk.size === version.size) return null;
     if (disk.size === version.size && version.contentHash !== undefined) {
       const content = await readFile(this.normalize(p), "utf8");
