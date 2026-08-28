@@ -97,11 +97,13 @@ export class OpenAICompatibleProvider implements Provider {
       if (userSignal.aborted) controller.abort();
       else userSignal.addEventListener("abort", forwardAbort, { once: true });
     }
+    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）
+    const vendorModelId = this.modelList.find((m) => m.id === modelId)?.vendorId ?? modelId;
     try {
       const stream = await this.getClient().chat.completions.create(
         {
           ...(request as Record<string, unknown>),
-          model: modelId,
+          model: vendorModelId,
           stream: true,
         },
         { signal: controller.signal },

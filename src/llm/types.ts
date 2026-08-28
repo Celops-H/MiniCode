@@ -16,6 +16,8 @@ export interface ProviderAuth {
 /** 模型定义（纯数据、可序列化） */
 export interface ModelInfo {
   id: string;
+  /** 厂商侧真实模型 id：跨厂商模型 id 撞车时 id 用「模型id@厂商id」限定名区分，请求仍发此原始 id；缺省与 id 相同 */
+  vendorId?: string;
   name: string;
   api: ProtocolType;
   providerId: string;

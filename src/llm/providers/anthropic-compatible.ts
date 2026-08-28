@@ -82,7 +82,10 @@ export class AnthropicCompatibleProvider implements Provider {
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
     // max_tokens 是 Anthropic 请求体必填项：取模型定义值，模型未定义时兜底
-    const maxTokens = this.modelList.find((m) => m.id === modelId)?.maxTokens ?? this.defaultMaxTokens;
+    const info = this.modelList.find((m) => m.id === modelId);
+    const maxTokens = info?.maxTokens ?? this.defaultMaxTokens;
+    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）
+    const vendorModelId = info?.vendorId ?? modelId;
     const request = this.protocol.buildRequest(context);
     // 中断合并 controller 同 openai-compatible：用户 signal 转发 + idle 超时 abort 共用
     const controller = new AbortController();
@@ -96,7 +99,7 @@ export class AnthropicCompatibleProvider implements Provider {
       const stream = await this.getClient().messages.create(
         {
           ...(request as Record<string, unknown>),
-          model: modelId,
+          model: vendorModelId,
           max_tokens: maxTokens,
           stream: true,
         },

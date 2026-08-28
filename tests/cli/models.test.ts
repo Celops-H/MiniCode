@@ -95,13 +95,44 @@ describe("resolveMainModel（主模型解析）", () => {
       ],
     };
     const models = buildModelClient(config, undefined, { env: KEYS });
-    expect(resolveMainModel(config)).toBe("a-1");
-    expect(models.resolve(resolveMainModel(config))).toBeDefined();
+    expect(resolveMainModel(config, undefined, { env: KEYS })).toBe("a-1");
+    expect(models.resolve(resolveMainModel(config, undefined, { env: KEYS }))).toBeDefined();
   });
 
   it("无 -m、无 modelChain、无 providers 时报错（无默认模型兜底）", () => {
     expect(() => resolveMainModel(undefined)).toThrow("未配置任何可用厂商");
     expect(() => resolveMainModel({ logLevel: "info" })).toThrow("未配置任何可用厂商");
+  });
+
+  it("首位厂商无 key 时主模型回落 key 就绪厂商的首个模型（播种后只配一个 key 的常见路径）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "openai", baseUrl: "https://a.example.com", apiKeyEnv: "OPENAI_API_KEY", models: [{ id: "gpt-4o" }] },
+        { id: "deepseek", baseUrl: "https://b.example.com", apiKeyEnv: "DEEPSEEK_API_KEY", models: [{ id: "deepseek-chat" }] },
+      ],
+    };
+    // 只配了 DEEPSEEK_API_KEY：主模型必须是 deepseek-chat 而非未注册的 gpt-4o
+    expect(resolveMainModel(config, undefined, { env: { DEEPSEEK_API_KEY: "k" } })).toBe("deepseek-chat");
+    const models = buildModelClient(config, undefined, { env: { DEEPSEEK_API_KEY: "k" } });
+    expect(models.resolve(resolveMainModel(config, undefined, { env: { DEEPSEEK_API_KEY: "k" } }))).toBeDefined();
+  });
+
+  it("跨厂商同 id 模型：先注册者用原始 id，后注册者以「模型id@厂商id」限定名区分，各自路由正确", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "deepseek", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "deepseek-chat" }] },
+        { id: "deepseek-anthropic", baseUrl: "https://b.example.com", apiKeyEnv: "A", protocol: "anthropic-messages", models: [{ id: "deepseek-chat" }] },
+      ],
+    };
+    const env = { A: "k" };
+    const models = buildModelClient(config, undefined, { env });
+    const ids = models.listModels().map((m) => m.id);
+    expect(ids).toContain("deepseek-chat");
+    expect(ids).toContain("deepseek-chat@deepseek-anthropic");
+    expect(models.resolve("deepseek-chat")?.provider.id).toBe("deepseek");
+    expect(models.resolve("deepseek-chat@deepseek-anthropic")?.provider.id).toBe("deepseek-anthropic");
   });
 
   it("-m 指定配置之外的模型时显式报错，不静默忽略", () => {
@@ -112,7 +143,7 @@ describe("resolveMainModel（主模型解析）", () => {
       ],
       modelChain: ["a-1"],
     };
-    expect(() => buildModelClient(config, "outside-model", { env: KEYS })).toThrow("未在配置的 providers 中");
+    expect(() => buildModelClient(config, "outside-model", { env: KEYS })).toThrow("模型 outside-model 不可用");
   });
 
   it("-m 指定配置内的模型时可用，并作为主模型", () => {

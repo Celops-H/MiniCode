@@ -89,10 +89,15 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
       if (input === "/init") {
         // 分析代码库生成/改进项目根 AGENTS.md：生成 init 提示词当作用户输入走正常回合
-        // （模型用 write 工具落盘）；已存在时提示词要求不覆盖、先建议改进
-        const existing = await readInstructionFile(projectAgentsFile);
-        write(existing ? "\n[init] 已存在 AGENTS.md，将分析并在其基础上建议改进（不覆盖）。\n" : "\n[init] 开始分析代码库，生成项目根 AGENTS.md。\n");
-        turnInput = buildInitPrompt(existing);
+        // （模型用 write 工具落盘）；已存在时提示词要求不覆盖、先建议改进。
+        // 读文件失败（权限等）只报错不终止会话——命令失败不该带崩交互循环
+        try {
+          const existing = await readInstructionFile(projectAgentsFile);
+          write(existing ? "\n[init] 已存在 AGENTS.md，将分析并在其基础上建议改进（不覆盖）。\n" : "\n[init] 开始分析代码库，生成项目根 AGENTS.md。\n");
+          turnInput = buildInitPrompt(existing);
+        } catch (err) {
+          write(`\n[init] 读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}\n`);
+        }
       } else if (input === "/help") {
         write("\n可用命令：/exit 退出；/compact [指导] 压缩会话历史（可附侧重指导）；/init 生成项目 AGENTS.md；/help 帮助\n");
         continue;

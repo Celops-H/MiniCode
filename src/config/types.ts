@@ -8,6 +8,8 @@ export const modelConfigSchema = z
     id: z.string(),
     name: z.string().optional(),
     contextWindow: z.number().optional(),
+    /** 厂商单次回复输出上限（anthropic-messages 协议请求体必填 max_tokens，取此值兜底 8192） */
+    maxTokens: z.number().optional(),
   })
   .strict();
 export type ModelConfig = z.infer<typeof modelConfigSchema>;

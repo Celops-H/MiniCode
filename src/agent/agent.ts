@@ -513,12 +513,13 @@ export class Agent {
 
   /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败 */
   private async doCompact(instructions?: string): Promise<boolean> {
-    // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要
+    // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要。
+    // 带压缩指导时不短路：指导必须经现场摘要生效（DESIGN 9.8），裁剪达标也继续摘要
     const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
       this.messages = pruned;
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
-      if (!needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
+      if (!instructions && !needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
     }
     // ② 压缩：带指导走现场摘要（DESIGN 9.8）；无指导且有会话记忆时用记忆替代
     // 现场摘要（DESIGN 9.7，省压缩时模型调用）；否则增量合并（已有旧摘要）或全量总结

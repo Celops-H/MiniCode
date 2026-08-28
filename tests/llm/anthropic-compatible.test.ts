@@ -82,6 +82,32 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(getRequest()).toMatchObject({ max_tokens: 4096 });
   });
 
+  it("限定名模型（id 带厂商后缀）请求发原始 vendorId", async () => {
+    let lastRequest: Record<string, unknown> | undefined;
+    const client: AnthropicMessagesClient = {
+      messages: {
+        async create(request) {
+          lastRequest = request;
+          return chunkGen(...RAW_CHUNKS);
+        },
+      },
+    };
+    const provider = new AnthropicCompatibleProvider({
+      id: "deepseek-anthropic",
+      name: "DeepSeek（Anthropic 兼容）",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      env: { DEEPSEEK_API_KEY: "sk" },
+      models: [{ id: "deepseek-chat@deepseek-anthropic", vendorId: "deepseek-chat", name: "deepseek-chat", api: "anthropic-messages", providerId: "deepseek-anthropic" }],
+      createClient: () => client,
+    });
+    for await (const _ of provider.stream("deepseek-chat@deepseek-anthropic", createContext("s"))) {
+      // 消费流
+    }
+    // 全局限定名不发给厂商：请求 model 是原始 id
+    expect(lastRequest).toMatchObject({ model: "deepseek-chat" });
+  });
+
   it("未配置认证时抛错", async () => {
     const { provider } = makeProvider({});
     const gen = provider.stream("claude-sonnet-4-5", createContext("s"));

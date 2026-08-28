@@ -939,6 +939,52 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages()).toHaveLength(1);
   });
 
+  it("compactNow：带指导时裁剪达标也不短路，仍走现场摘要让指导生效（DESIGN 9.8）", async () => {
+    let summaryCalled = false;
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          summaryCalled = true;
+          yield { type: "text_delta", text: "现场摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const longResults: Message[] = Array.from({ length: 10 }, (_, i) =>
+      toolResultMessage(`c${i}`, "read", "x".repeat(100)),
+    );
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: longResults,
+      // 裁剪全部旧工具输出后远低于窗口：无指导时短路返回，不再调摘要
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0 },
+    });
+    // 无指导：裁剪即达标，短路（省一次模型调用）
+    expect(await agent.compactNow()).toBe(true);
+    expect(summaryCalled).toBe(false);
+
+    // 重置历史后再带指导压缩：指导必须经现场摘要生效，即使裁剪已达标
+    const agent2 = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: longResults,
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0 },
+    });
+    expect(await agent2.compactNow("侧重保留命令输出")).toBe(true);
+    expect(summaryCalled).toBe(true);
+    expect(agent2.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("现场摘要"),
+    });
+  });
+
   it("compactNow：摘要一次失败后显式请求仍可重试（绕过失败保护，撞线仍受保护）", async () => {
     // 摘要调用（消息含摘要请求）第一次抛错，之后成功；撞线自动压缩在此场景不触发
     let summaryCalls = 0;
