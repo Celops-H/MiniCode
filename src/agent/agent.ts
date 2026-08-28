@@ -499,17 +499,20 @@ export class Agent {
   /**
    * 用户主动压缩（/compact，DESIGN 15）：无视撞线判断强制走分层压缩
    * （裁剪旧工具输出 → 摘要替换），返回是否发生压缩（供宿主反馈）。
+   * 带压缩指导时（DESIGN 9.8）跳过会话记忆替代路径、改走现场摘要——记忆是现成
+   * 文本，指导无从生效；无指导保留记忆替代省调用路径。
    * 显式请求可绕过 compactDisabled 失败保护重试（撞线自动压缩仍受保护）。
    * 压缩替换消息后，宿主需把新消息落盘并与持久化游标联动。
+   * @param instructions 压缩指导（可省略）：以 Additional Instructions 段追加摘要提示词末尾
    * @returns 是否成功压缩（未配置压缩或摘要失败时 false）
    */
-  async compactNow(): Promise<boolean> {
+  async compactNow(instructions?: string): Promise<boolean> {
     if (!this.compactConfig) return false;
-    return this.doCompact();
+    return this.doCompact(instructions);
   }
 
   /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败 */
-  private async doCompact(): Promise<boolean> {
+  private async doCompact(instructions?: string): Promise<boolean> {
     // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要
     const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
@@ -517,13 +520,22 @@ export class Agent {
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
       if (!needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
     }
-    // ② 压缩：有会话记忆时用记忆替代现场摘要（DESIGN 9.7，省压缩时模型调用）；
-    // 否则增量合并（已有旧摘要）或全量总结
+    // ② 压缩：带指导走现场摘要（DESIGN 9.8）；无指导且有会话记忆时用记忆替代
+    // 现场摘要（DESIGN 9.7，省压缩时模型调用）；否则增量合并（已有旧摘要）或全量总结
     try {
       const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
       let summary: string;
       let inFlight: Message[] = [];
-      if (this.memoryEnabled && this.memory.trim().length > 0) {
+      if (instructions) {
+        // 现场摘要：指导随 Additional Instructions 段生效
+        summary = await generateSummary(
+          this.modelClient,
+          this.modelId,
+          this.messages,
+          instructions,
+          this.interruptController.signal,
+        );
+      } else if (this.memoryEnabled && this.memory.trim().length > 0) {
         // 记忆替代现场摘要（DESIGN 9.7，省压缩时模型调用）；但记忆只覆盖到上次 Stop，
         // 其后的在途消息（本次输入与工具回合）保留原文，不能静默丢弃
         summary = this.memory;

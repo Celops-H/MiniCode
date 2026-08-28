@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
-import { PRUNED_MARKER } from "../../src/context/index.js";
+import { PRUNED_MARKER, MEMORY_REQUEST_MARKER } from "../../src/context/index.js";
 import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage, type Context, type ThinkingLevel } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
@@ -859,6 +859,68 @@ describe("Agent 主循环：模型对话闭环", () => {
       // 消费
     }
     expect(agent.getMessages().at(-1)).toMatchObject({ role: "assistant" });
+  });
+
+  it("compactNow：带压缩指导时跳过记忆替代走现场摘要，指导入摘要提示词末尾（DESIGN 9.8）", async () => {
+    const isMemoryRequest = (context: Context): boolean =>
+      context.messages.some(
+        (m) => typeof m.content === "string" && m.content.includes(MEMORY_REQUEST_MARKER),
+      );
+    let summaryRequestContent = "";
+    let liveSummaryCalled = false;
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          // 记忆更新请求：沉淀记忆内容（若压缩走记忆替代，摘要会等于这段文本）
+          yield { type: "text_delta", text: "记忆沉淀的目标" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        if (context.tools.length === 0) {
+          // 现场摘要请求：捕获请求末尾，验证指导已追加
+          liveSummaryCalled = true;
+          const last = context.messages.at(-1);
+          summaryRequestContent = typeof last?.content === "string" ? last.content : "";
+          yield { type: "text_delta", text: "现场摘要正文" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("第一问")],
+      tools: [{
+        name: "echo",
+        description: "回显",
+        inputSchema: z.object({}),
+        isReadOnly: false,
+        requiresUserInteraction: false,
+        maxResultSizeChars: 1000,
+        execute: () => "回显",
+      }],
+      memory: true, // 开启记忆：无指导时压缩会走记忆替代；带指导必须改走现场摘要
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+    agent.start("先跑一轮沉淀记忆");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(await agent.compactNow("侧重保留命令与输出")).toBe(true);
+    // 走了现场摘要而非记忆替代，指导以 Additional Instructions 段收尾
+    expect(liveSummaryCalled).toBe(true);
+    expect(summaryRequestContent.endsWith("Additional Instructions：\n侧重保留命令与输出")).toBe(true);
+    // 摘要消息来自现场摘要正文，不是记忆内容
+    const messages = agent.getMessages();
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("现场摘要正文"),
+    });
   });
 
   it("compactNow：未配置压缩时返回 false，不动消息", async () => {

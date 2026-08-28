@@ -66,19 +66,21 @@ export async function interact(options: InteractOptions): Promise<void> {
     if (input.startsWith("/")) {
       // 会话内命令（统一 / 前缀，DESIGN 15）
       if (input === "/exit") break;
-      if (input === "/compact") {
-        // 强制压缩：替换消息后重写整份落盘（压缩是重写不是追加，session 内存随之整体替换）
-        if (await agent.compactNow()) {
+      if (input === "/compact" || input.startsWith("/compact ")) {
+        // 强制压缩：替换消息后重写整份落盘（压缩是重写不是追加，session 内存随之整体替换）；
+        // 带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径
+        const guidance = input === "/compact" ? undefined : input.slice("/compact ".length).trim() || undefined;
+        if (await agent.compactNow(guidance)) {
           await store.rewriteMessages(session, agent.getMessages());
           agent.consumeHistoryRewritten(); // 消费压缩置位的历史改写标记，防下轮误报重写
-          write("\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
+          write(guidance ? `\n[已压缩] 已按压缩指导重新摘要会话历史。\n` : "\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
         } else {
           write("\n[未压缩] 未配置压缩或摘要不可用。\n");
         }
         continue;
       }
       if (input === "/help") {
-        write("\n可用命令：/exit 退出；/compact 压缩会话历史；/help 帮助\n");
+        write("\n可用命令：/exit 退出；/compact [指导] 压缩会话历史（可附侧重指导）；/help 帮助\n");
         continue;
       }
       write(`\n[未知命令] ${input}（/help 查看可用命令）\n`);
