@@ -8,6 +8,8 @@ import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
+import { McpManager } from "../mcp/index.js";
+import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills/index.js";
 import { SessionStore } from "../storage/index.js";
 import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
 import type { Tool } from "../tools/index.js";
@@ -204,11 +206,14 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
   const write = (text: string): void => {
     process.stdout.write(text);
   };
+  // M5 扩展生态装配（BACKEND §19/§20）：MCP server 工具与技能并入会话；失败 server 错误行输出
+  const extensions = await assembleSessionExtensions(config);
+  for (const line of extensions.mcpErrors) console.error(line);
   const { agent, team } = createSessionAgent({
     modelClient: models,
     modelId: session.meta.model,
-    systemPrompt: SYSTEM_PROMPT,
-    tools: createBuiltinTools(),
+    systemPrompt: extensions.promptSection ? `${SYSTEM_PROMPT}\n${extensions.promptSection}` : SYSTEM_PROMPT,
+    tools: [...createBuiltinTools(), ...extensions.tools],
     initialMessages: session.getMessages(),
     agents,
     hooks,
@@ -246,8 +251,58 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     await hooks?.emit({ type: "SessionEnd" });
     // 会话收尾清理团队：中断活跃子 agent、清空注册表（防后台 resume 循环吊住进程、成员残留）
     team?.clear();
+    // 会话结束停掉 MCP server：按进程树杀，防孤儿进程（BACKEND §19）
+    extensions.mcpManager?.stopAll();
   }
   rl.close();
+}
+
+/** 会话扩展生态装配结果（BACKEND §19/§20）：需并入会话的工具与系统提示词段落 */
+export interface SessionExtensions {
+  /** 追加到内置工具之后的工具（MCP 工具 + skill 工具） */
+  tools: Tool[];
+  /** 追加到主系统提示词之后的段落（技能清单）；空串表示无 */
+  promptSection: string;
+  /** MCP 管理器：会话结束调用 stopAll 按进程树杀 server 防孤儿进程；未配置 MCP 时为 null */
+  mcpManager: McpManager | null;
+  /** MCP 启动失败错误行（宿主输出给用户；失败的 server 已跳过） */
+  mcpErrors: string[];
+}
+
+/**
+ * 会话扩展生态装配（BACKEND §19/§20，CLI/TUI 共用）：启动全部已启用 MCP server（失败的跳过
+ * 并记录错误行，不阻断会话）、扫描技能目录；技能非空时产出 skill 工具与「可用技能」提示词段
+ * （工具与提示词同进退）。
+ * @param config 已加载配置（取 mcpServers 与 skills.disabled）
+ * @param opts 技能目录覆盖（测试注入；缺省项目 <cwd>/.minicode/skills、用户 ~/.minicode/skills）
+ */
+export async function assembleSessionExtensions(
+  config: Pick<Config, "mcpServers" | "skills">,
+  opts: { projectSkillsDir?: string; userSkillsDir?: string } = {},
+): Promise<SessionExtensions> {
+  const tools: Tool[] = [];
+  let promptSection = "";
+  let mcpManager: McpManager | null = null;
+  let mcpErrors: string[] = [];
+
+  const servers = config.mcpServers ?? {};
+  if (Object.keys(servers).length > 0) {
+    mcpManager = new McpManager(servers);
+    tools.push(...(await mcpManager.startAll()));
+    mcpErrors = mcpManager.errors();
+  }
+
+  const skills = await scanSkills({
+    projectDir: opts.projectSkillsDir,
+    userDir: opts.userSkillsDir,
+    disabled: config.skills?.disabled,
+  });
+  if (skills.length > 0) {
+    tools.push(createSkillTool(skills));
+    promptSection = buildSkillsPromptSection(skills);
+  }
+
+  return { tools, promptSection, mcpManager, mcpErrors };
 }
 
 /**
