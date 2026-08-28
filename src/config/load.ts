@@ -79,11 +79,10 @@ function mergeConfigLayers(layers: Array<Record<string, unknown> | null>): Recor
     const skills = layer.skills;
     if (isPlainObject(skills)) {
       const disabled = skills.disabled;
-      if (disabled === undefined) {
-        // skills 只有 disabled 一个合法键；出现其他键即拼错字段，透传给 schema 报错（不静默吞）
-        if (Object.keys(skills).length > 0 && skillsInvalid === undefined) {
-          skillsInvalid = skills;
-        }
+      // skills 只有 disabled 一个合法键；出现其他键（可与合法 disabled 共存）即拼错字段，
+      // 整层透传给 schema 报错（不静默吞）
+      if (Object.keys(skills).some((k) => k !== "disabled")) {
+        if (skillsInvalid === undefined) skillsInvalid = skills;
       } else if (Array.isArray(disabled)) {
         // 已有非法 skills 层时同 providers：停止归并，非法值整体透传
         if (skillsInvalid === undefined) {

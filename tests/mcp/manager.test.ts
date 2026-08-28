@@ -109,6 +109,20 @@ describe("McpManager（生命周期与工具接入）", () => {
     }
   });
 
+  it("mcp__ 拼接撞名的工具丢弃后者并记错误行（不无声覆盖）", async () => {
+    // 服务 a 声明工具 b__c、服务 a__b 声明工具 c：都拼成 mcp__a__b__c
+    const manager = new McpManager({
+      a: { ...fakeConfig(), env: { FAKE_TOOLS: JSON.stringify([{ name: "b__c" }]) } },
+      "a__b": { ...fakeConfig(), env: { FAKE_TOOLS: JSON.stringify([{ name: "c" }]) } },
+    });
+    managers.push(manager);
+    const tools = await manager.startAll();
+    expect(tools.map((t) => t.name)).toEqual(["mcp__a__b__c"]);
+    expect(manager.errors()).toEqual([
+      expect.stringMatching(/^MCP 工具重名：mcp__a__b__c（服务 a__b 与 a 撞名，保留 a 的）$/),
+    ]);
+  });
+
   it("z.unknown() 校验放行任意入参（入参正确性交给 server 自校验）", async () => {
     const manager = new McpManager({ fs: fakeConfig() });
     managers.push(manager);

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import type { McpServerConfig } from "../config/index.js";
 import { killProcessTree } from "../tools/index.js";
 
@@ -48,6 +49,9 @@ export class McpClient {
   private readonly pending = new Map<number, PendingEntry>();
   /** stdout 行缓冲：按 \n 切分出完整 JSON-RPC 消息 */
   private buffer = "";
+  /** 流式 UTF-8 解码：管道 chunk 边界可能落在多字节字符中间，直接 toString 会静默产生乱码 */
+  private readonly stdoutDecoder = new StringDecoder("utf8");
+  private readonly stderrDecoder = new StringDecoder("utf8");
   /** stderr 尾部：启动失败时附在错误信息里 */
   private stderrTail = "";
   /** 进程已退出（退出后拒绝全部新请求） */
@@ -94,6 +98,8 @@ export class McpClient {
 
     const exitedPrematurely = new Promise<never>((_, reject) => {
       child.once("exit", (code, signal) => {
+        // markExited 内部拒绝全部在途请求：稳态调用期 server 崩溃时，在途 tools/call
+        // 立即失败而非挂到超时（错误信息误导且白等满 timeoutMs）
         this.markExited(`进程退出（${code !== null ? `code ${code}` : `信号 ${signal}`}）`);
         reject(new Error(`MCP 服务 ${this.name} 在握手完成前退出${this.stderrSuffix()}`));
       });
@@ -140,16 +146,19 @@ export class McpClient {
   }
 
   /**
-   * 停止 server：按进程树强杀（防 shell 包装层或孙进程残留），拒绝全部在途请求。
+   * 停止 server：按进程树强杀（防 shell 包装层或孙进程残留），在途请求随 markExited 拒绝。
+   * 已退出的进程不再杀树：pid 可能已被 OS 复用，taskkill 会误杀无关进程。
    */
   stop(): void {
-    if (this.child && this.child.pid !== undefined) killProcessTree(this.child.pid);
+    if (!this.exited && this.child && this.child.pid !== undefined) killProcessTree(this.child.pid);
     this.child = null;
     if (!this.exited) this.markExited("已停止");
-    this.rejectAllPending(new Error(`MCP 服务 ${this.name} 已停止`));
   }
 
-  /** Windows 经 shell 启动时 Node 不给命令与参数加引号，含空格/引号的命令与参数在此处理 */
+  /**
+   * Windows 经 shell 启动时 Node 不给命令与参数加引号，含空格/引号的命令与参数在此处理。
+   * 注意 shell 拼接不设防 cmd 元字符（& | ^ %VAR%）：配置由用户自管，含元字符的参数行为未定义。
+   */
   private quoteCommand(): string {
     const command = this.config.command;
     if (process.platform !== "win32") return command;
@@ -162,10 +171,14 @@ export class McpClient {
     return args.map((arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '""')}"` : arg));
   }
 
-  /** 标记进程退出：后续请求直接拒绝（不自动重启，重开会话重拉） */
+  /**
+   * 标记进程退出：后续新请求直接拒绝（不自动重启，重开会话重拉）；
+   * 在途请求同时拒绝（server 已死不可能再回包，挂到超时只会白等且错误误导）。
+   */
   private markExited(reason: string): void {
     this.exited = true;
     this.exitError = reason;
+    this.rejectAllPending(new Error(`MCP 服务 ${this.name} ${reason}，在途请求已终止`));
   }
 
   /** 发送请求并等待对应 id 的响应；超时/中止/进程退出都会拒绝 */
@@ -226,7 +239,7 @@ export class McpClient {
 
   /** 收 stdout：行缓冲切分、逐行解析分发（解析失败的行丢弃——不把半截日志当协议消息） */
   private handleStdout(chunk: Buffer): void {
-    this.buffer += chunk.toString();
+    this.buffer += this.stdoutDecoder.write(chunk);
     for (;;) {
       const idx = this.buffer.indexOf("\n");
       if (idx < 0) break;
@@ -252,7 +265,7 @@ export class McpClient {
   }
 
   private appendStderr(chunk: Buffer): void {
-    this.stderrTail = (this.stderrTail + chunk.toString()).slice(-MAX_STDERR_TAIL);
+    this.stderrTail = (this.stderrTail + this.stderrDecoder.write(chunk)).slice(-MAX_STDERR_TAIL);
   }
 
   private stderrSuffix(): string {

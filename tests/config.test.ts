@@ -274,6 +274,12 @@ describe("loadConfig", () => {
     await expect(loadConfig({ paths: setup({ global: { skills: "oops" } }) })).rejects.toThrow();
   });
 
+  it("skills 合法 disabled 与拼错键共存时整层透传报错（拼错键不静默丢弃）", async () => {
+    await expect(
+      loadConfig({ paths: setup({ global: { skills: { disabled: ["a"], diabeld: ["b"] } } }) }),
+    ).rejects.toThrow();
+  });
+
   it("skills 拼错字段直接报错（strict）", async () => {
     await expect(loadConfig({ paths: setup({ global: { skills: { enabled: true } } }) })).rejects.toThrow();
   });

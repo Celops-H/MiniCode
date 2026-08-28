@@ -79,23 +79,20 @@ async function scanOneDir(source: SkillInfo["source"], dir: string): Promise<Ski
  * @returns 属性表（CRLF 归一后解析）与正文（frontmatter 之后的全部内容）
  */
 export function parseFrontmatter(text: string): { attrs: Record<string, string>; body: string } {
-  const normalized = text.replace(/\r\n/g, "\n");
-  if (!normalized.startsWith("---\n")) return { attrs: {}, body: normalized };
-  // 从 3 起搜收尾分隔线：兼容空 frontmatter（---\n---）——开头的 \n 即收尾行所在
-  const end = normalized.indexOf("\n---", 3);
-  if (end < 0) return { attrs: {}, body: normalized };
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  if (lines[0] !== "---") return { attrs: {}, body: lines.join("\n") };
+  // 收尾分隔线须整行恰为 ---（---- 、---abc 等是普通行，不当收尾）
+  const close = lines.indexOf("---", 1);
+  if (close < 0) return { attrs: {}, body: lines.join("\n") };
   const attrs: Record<string, string> = {};
-  for (const line of normalized.slice(4, end).split("\n")) {
+  for (const line of lines.slice(1, close)) {
     const idx = line.indexOf(":");
     if (idx <= 0) continue;
     const key = line.slice(0, idx).trim();
     const value = line.slice(idx + 1).trim();
     if (key) attrs[key] = value;
   }
-  // 收尾 --- 行之后是正文；收尾行是文件最后一行（无换行）时正文为空
-  const bodyStart = normalized.indexOf("\n", end + 1);
-  const body = bodyStart >= 0 ? normalized.slice(bodyStart + 1) : "";
-  return { attrs, body };
+  return { attrs, body: lines.slice(close + 1).join("\n") };
 }
 
 /** 正文首个非空行（description 缺省回退） */

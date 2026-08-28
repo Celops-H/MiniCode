@@ -44,6 +44,12 @@ describe("parseFrontmatter（frontmatter 两行子集解析）", () => {
     const { attrs } = parseFrontmatter("---\nname: a\nversion: 2\n  description :  带空格  \n---\nb");
     expect(attrs).toEqual({ name: "a", version: "2", description: "带空格" });
   });
+
+  it("---- 等近似行不当收尾分隔线（须整行恰为 ---）", () => {
+    const { attrs, body } = parseFrontmatter("---\nname: a\n----\nstill: header\n---\n正文");
+    expect(attrs).toEqual({ name: "a", still: "header" });
+    expect(body).toBe("正文");
+  });
 });
 
 describe("scanSkills（目录扫描）", () => {

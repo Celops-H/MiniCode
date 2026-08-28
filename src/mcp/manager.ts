@@ -27,6 +27,8 @@ export class McpManager {
   private readonly clients = new Map<string, McpClient>();
   private readonly failure = new Map<string, string>();
   private readonly toolCount = new Map<string, number>();
+  /** 工具重名丢弃告警行（mcp__ 前缀拼接可能撞名） */
+  private readonly collisions: string[] = [];
   private readonly configs: Record<string, McpServerConfig>;
 
   constructor(servers: Record<string, McpServerConfig>) {
@@ -40,7 +42,25 @@ export class McpManager {
   async startAll(): Promise<Tool[]> {
     const names = Object.entries(this.configs).filter(([, cfg]) => cfg.enabled !== false);
     await Promise.all(names.map(([name, cfg]) => this.startOne(name, cfg)));
-    return [...this.clients.values()].flatMap((client) => this.toolsOf(client));
+    // 按配置键序收工具（并发启动完成序不定，重名「保留先到」需确定序）；
+    // mcp__服务__工具 拼接可能撞名（服务 a+工具 b__c ≡ 服务 a__b+工具 c），同名覆盖会让
+    // 工具无声消失，丢弃后者并记错误行
+    const seen = new Map<string, string>();
+    const result: Tool[] = [];
+    for (const [name] of Object.entries(this.configs)) {
+      const client = this.clients.get(name);
+      if (!client) continue;
+      for (const tool of this.toolsOf(client)) {
+        const prev = seen.get(tool.name);
+        if (prev !== undefined) {
+          this.collisions.push(`MCP 工具重名：${tool.name}（服务 ${name} 与 ${prev} 撞名，保留 ${prev} 的）`);
+          continue;
+        }
+        seen.set(tool.name, name);
+        result.push(tool);
+      }
+    }
+    return result;
   }
 
   /** 全部 server 的装配状态（含 enabled=false 与失败项，供面板展示） */
@@ -58,9 +78,12 @@ export class McpManager {
     });
   }
 
-  /** 启动失败错误行（宿主装配后输出给用户） */
+  /** 启动失败与工具重名错误行（宿主装配后输出给用户） */
   errors(): string[] {
-    return [...this.failure.entries()].map(([name, err]) => `MCP 服务 ${name} 启动失败：${err}`);
+    return [
+      ...[...this.failure.entries()].map(([name, err]) => `MCP 服务 ${name} 启动失败：${err}`),
+      ...this.collisions,
+    ];
   }
 
   /** 会话结束统一停止：按进程树杀全部 server，防孤儿进程 */

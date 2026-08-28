@@ -81,6 +81,24 @@ describe("McpClient（stdio JSON-RPC）", () => {
     await expect(client.callTool("echo", {})).rejects.toThrow(/进程退出.*无法处理 tools\/call/);
   });
 
+  it("握手完成后 server 退出：在途请求立即被拒（不挂到超时）", async () => {
+    // crash-on-call：收到 tools/call 即退出不回复——请求发出后进程死掉，在途请求必须立即失败
+    const client = makeClient("crash-on-call");
+    clients.push(client);
+    await client.start();
+    const pending = client.callTool("echo", {});
+    await expect(pending).rejects.toThrow(/进程退出.*在途请求已终止/);
+  }, 10_000);
+
+  it("多字节字符跨 chunk 边界不被截碎（流式 UTF-8 解码）", async () => {
+    const client = makeClient("bigtext");
+    clients.push(client);
+    await client.start();
+    const result = await client.callTool("echo", {});
+    // 7 万汉字约 210KB，必然跨多个管道 chunk；断言无 U+FFFD 且长度完整
+    expect(result.output).toBe("汉".repeat(70000));
+  }, 10_000);
+
   it("命令不存在时 start 报启动失败", async () => {
     const client = new McpClient("bad", { command: "minicode-definitely-not-a-command-xyz" });
     await expect(client.start()).rejects.toThrow(/启动失败|握手完成前退出/);
