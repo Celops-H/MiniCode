@@ -197,6 +197,12 @@ it("新建会话选中时无会话带 ▸，↓ 到会话才出现（P3：选中
   setModal({ kind: "session", sessions, selected: 1 });
   await setup.waitForVisualIdle();
   expect(setup.captureCharFrame()).toContain("▸ 重构");
+  // 反向 1→0：箭头从会话行收回、回到新建行（真机报告的「新建会话选中时第一个会话残留
+  // 箭头」经查为过期构建产物——源码自 a469136 起行为正确，此处钉住双向不残留）
+  setModal({ kind: "session", sessions, selected: 0 });
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).not.toContain("▸ 重构");
+  expect(setup.captureCharFrame()).toContain("▸ ＋ 新建会话");
 });
 
 it("会话面板副行与主行标题起始列一致（P4：text 水平 padding 在 opentui 无效，改字面空格缩进）", async () => {
