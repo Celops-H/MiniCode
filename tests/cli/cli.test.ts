@@ -35,13 +35,21 @@ function mockTextClient(text: string): ModelClient {
 }
 
 describe("CLI 模型组装", () => {
-  it("buildModelClient 注册默认 DeepSeek 模型", () => {
-    const models = buildModelClient();
-    expect(models.resolve("deepseek-chat")).toBeDefined();
+  it("可用厂商为零时报错，不再有硬编码兜底模型", () => {
+    expect(() => buildModelClient(undefined, undefined, { env: {} })).toThrow("未配置任何可用厂商");
   });
 
-  it("可覆盖模型 id", () => {
-    const models = buildModelClient(undefined, "qwen-plus");
+  it("配置了 providers 且 key 就绪时按配置注册", () => {
+    const models = buildModelClient(
+      {
+        logLevel: "info",
+        providers: [
+          { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "qwen-plus" }] },
+        ],
+      },
+      undefined,
+      { env: { A_API_KEY: "k" } },
+    );
     expect(models.resolve("qwen-plus")).toBeDefined();
   });
 });

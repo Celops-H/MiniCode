@@ -5,3 +5,6 @@ export type { LoadConfigOptions } from "./load.js";
 export { resolveConfigPaths, resolveSessionsDir } from "./paths.js";
 export type { ConfigPaths, ResolvePathsOptions } from "./paths.js";
 export { parseEnvFile, loadEnvFile } from "./env.js";
+export { PROVIDER_PRESETS } from "./presets.js";
+export type { ProviderPreset } from "./presets.js";
+export { ensureGlobalConfigSeed } from "./seed.js";

@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent, Team, type CompactConfig } from "../agent/index.js";
-import { loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
 import { McpManager, killAllMcpServers } from "../mcp/index.js";
@@ -176,6 +176,8 @@ export async function main(): Promise<void> {
     killAllBackgroundTasks();
     killAllMcpServers();
   });
+  // 全局配置播种（BACKEND §14）：任一入口装配配置前检测，config.json 缺失才按预设写种子
+  await ensureGlobalConfigSeed();
   await loadDotEnv();
   // 顶层 TUI 快捷入口在 commander 前手动接管（见 topLevelTui）；其余交 commander 分派子命令
   if (await tryTopLevelTui(process.argv.slice(2))) return;
