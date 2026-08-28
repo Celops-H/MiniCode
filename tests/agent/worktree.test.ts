@@ -280,7 +280,8 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     expect(await readFile(path.join(dir, "from-b.txt"), "utf8")).toBe("B 后续数据");
     expect(existsSync(b.worktree.dir)).toBe(false);
     expect(team.resolveAgent(b.childPath)?.worktree).toBeUndefined();
-  });
+    // 全量并发负载下真实 git 合并链条偶发超 5s 默认超时（E11）：单独跑稳定 ~1s，放宽到 20s
+  }, 20_000);
 
   it("子 agent 无改动：判空分支直接清理（不误报合并）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
