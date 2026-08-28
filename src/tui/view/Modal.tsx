@@ -294,6 +294,57 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
   );
 }
 
+/** /mcp 与 /skill 扩展面板（UI-SPEC §8b）：行 = ▸/空格 标记 + 名称 + 启用/关闭 + 详情；
+ *  选中白字 + ▸、未选中灰字，无背景块（同 /model 定论）；空列表显示占位行 */
+function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "skill" }> }): JSX.Element {
+  const b = props.modal;
+  const dims = useTerminalDimensions();
+  const rows = createMemo(() => {
+    const total = b.rows.length;
+    // 高度预算同 ModelModal：终端高减 9（输入 5+状态 2+agent/通知 2），行高 1 行/条
+    const avail = Math.max(10, (dims().height ?? 20) - 9);
+    const visible = Math.max(1, Math.min(Math.max(total, 1), avail - 5));
+    const selPos = Math.max(0, Math.min(b.selected, total - 1));
+    const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), Math.max(0, total - visible)));
+    const items: JSX.Element[] = [];
+    if (total === 0) {
+      items.push(
+        <text fg={theme.textMuted}>
+          {b.kind === "mcp" ? "无已配置 MCP 服务（配置 mcpServers 后重开会话）" : "无可用技能（.minicode/skills/ 目录）"}
+        </text>,
+      );
+    } else {
+      for (let i = start; i < Math.min(start + visible, total); i++) {
+        const row = b.rows[i]!;
+        const line = `${row.label}  ${row.enabled ? "启用" : "关闭"} · ${row.detail}`;
+        items.push(
+          i === b.selected ? (
+            <text fg={theme.text}>{"▸ "}{line}</text>
+          ) : (
+            <text fg={theme.textMuted}>{"  "}{line}</text>
+          ),
+        );
+      }
+    }
+    const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
+    items.push(
+      <text fg={theme.textMuted} paddingY={1}>
+        ↑↓ 选择 · ←→ 启用/关闭 · Enter 应用 · Esc 取消{overflow}
+      </text>,
+    );
+    return items;
+  });
+  return (
+    <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
+      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0}
+        backgroundColor={theme.backgroundPanel} width={modalWidth(dims())}
+        title={b.kind === "mcp" ? "MCP 服务" : "技能"} titleColor={theme.textMuted}>
+        {rows()}
+      </box>
+    </box>
+  );
+}
+
 export function ModalView(props: { modal: ModalState }): JSX.Element {
   // 直接 if 分支返回，不包 createMemo：createMemo 返回「组件元素」在 @opentui 下不刷新
   //（真机 connect 选供应商后界面卡在列表的根因）。connect 两阶段统一 ConnectFlowModal——
@@ -303,5 +354,7 @@ export function ModalView(props: { modal: ModalState }): JSX.Element {
   if (props.modal.kind === "connect" || props.modal.kind === "connect-key")
     return <ConnectFlowModal modal={props.modal} />;
   if (props.modal.kind === "model") return <ModelModal modal={props.modal} />;
+  if (props.modal.kind === "mcp") return <ExtensionsModal modal={props.modal} />;
+  if (props.modal.kind === "skill") return <ExtensionsModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

@@ -13,6 +13,10 @@ import type { StreamEvent } from "../core/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
+import { buildMcpRows, buildSkillRows, setMcpServerEnabled, setSkillDisabled, type ExtensionRow } from "./extensions.js";
+import { scanSkills } from "../skills/index.js";
+import type { McpServerConfig } from "../config/index.js";
+import type { McpServerStatus } from "../mcp/index.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
@@ -79,6 +83,14 @@ export interface TuiLoopOptions {
   thinkingLevel?: { value: ThinkingLevel | undefined };
   /** 全部配置模型列表（/@/model 弹窗数据源） */
   modelList?: Array<{ id: string }>;
+  /** 已配置 MCP 服务（/mcp 面板数据源，BACKEND §19） */
+  mcpServers?: Record<string, McpServerConfig>;
+  /** MCP 装配状态活读取（/mcp 面板连接状态列；随会话装配注入） */
+  getMcpStatuses?: () => McpServerStatus[];
+  /** 技能关闭名单（config.skills.disabled 全局/项目并集，/skill 面板行启用态用） */
+  skillsDisabled?: string[];
+  /** 会话启动通知（MCP 启动失败错误行等）：挂载后 toast 一次，完整状态在 /mcp 面板 */
+  startupNotices?: string[];
 }
 
 /** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
@@ -100,6 +112,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   let pendingSwitch: string | undefined;
   /** /connect 成功后请求装配层重读配置并重建会话（reconfigure 信号） */
   let pendingReconfigure = false;
+  /** /mcp /skill 面板打开时的行启用态基线（Enter 应用时按 id 比对出改动行，只写改动） */
+  let extensionsBaseline: Partial<Record<"mcp" | "skill", Array<{ id: string; enabled: boolean }>>> = {};
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
@@ -256,6 +270,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
       });
       return;
     }
+    if (command === "/mcp" || command === "/skill") {
+      // 扩展面板（UI-SPEC §8b）：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配
+      // （BACKEND §19/§20）；重装配会重建 agent，运行中拒绝（同 /model 守卫）
+      if (state.status === "running") {
+        showToast(command === "/mcp" ? "运行中不可管理 MCP 服务，等本轮结束后再试" : "运行中不可管理技能，等本轮结束后再试");
+        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+        return;
+      }
+      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      void openExtensionsModal(command === "/mcp" ? "mcp" : "skill").catch(() => undefined);
+      return;
+    }
     if (command === "/rename" || command.startsWith("/rename ")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化），
       // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）
@@ -357,6 +383,44 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         action: "enter",
       },
     });
+  };
+
+  /** 打开 /mcp 或 /skill 扩展面板（UI-SPEC §8b）：mcp 行来自配置+manager 装配状态，
+   *  skill 行现扫技能目录（打开时新鲜扫描，改技能目录无需重开会话即可见） */
+  const openExtensionsModal = async (kind: "mcp" | "skill"): Promise<void> => {
+    let rows: ExtensionRow[];
+    if (kind === "mcp") {
+      rows = buildMcpRows(options.mcpServers ?? {}, options.getMcpStatuses?.() ?? []);
+    } else {
+      rows = buildSkillRows(await scanSkills(), options.skillsDisabled ?? []);
+    }
+    // 基线快照：Enter 应用时按 id 比对，只把改动行写回配置
+    extensionsBaseline[kind] = rows.map((r) => ({ id: r.id, enabled: r.enabled }));
+    commit({ ...state, modal: { kind, rows, selected: 0 } });
+  };
+
+  /** 扩展面板 Enter 应用：改动行按「写回定义层」规则落配置（BACKEND §19/§20 回写规则），
+   *  成功即重装配（当前会话立即生效）；无改动仅关闭面板 */
+  const applyExtensions = (modal: { kind: "mcp" | "skill"; rows: ExtensionRow[] }): void => {
+    const baseline = new Map((extensionsBaseline[modal.kind] ?? []).map((r) => [r.id, r.enabled]));
+    const changed = modal.rows.filter((r) => baseline.get(r.id) !== undefined && baseline.get(r.id) !== r.enabled);
+    if (changed.length === 0) {
+      showToast("未做改动");
+      return;
+    }
+    void (async () => {
+      try {
+        for (const row of changed) {
+          if (modal.kind === "mcp") await setMcpServerEnabled(row.id, row.enabled);
+          else await setSkillDisabled(row.id, !row.enabled, row.source ?? "project");
+        }
+        showToast(modal.kind === "mcp" ? "MCP 服务配置已写入，正在重装配…" : "技能配置已写入，正在重装配…");
+        pendingReconfigure = true;
+        exitLoop();
+      } catch (err) {
+        showToast(`写入配置失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
   };
 
   const exitLoop = (): void => {
@@ -467,6 +531,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
             } else {
               showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
             }
+          } else if (state.modal.kind === "mcp") {
+            // 应用扩展面板：写回定义层配置并重装配（无改动仅关闭）
+            commit({ ...state, modal: undefined });
+            applyExtensions({ kind: "mcp", rows: state.modal.rows });
+          } else if (state.modal.kind === "skill") {
+            commit({ ...state, modal: undefined });
+            applyExtensions({ kind: "skill", rows: state.modal.rows });
           } else {
             // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表。
             // selected 0=新建会话、1..n=会话（P6-4 新建置顶，索引映射见 sessionModalTarget）
@@ -525,6 +596,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
           } else if (state.modal.kind === "model") {
             const max = state.modal.models.length - 1;
+            commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
+          } else if (state.modal.kind === "mcp") {
+            const max = state.modal.rows.length - 1;
+            commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
+          } else if (state.modal.kind === "skill") {
+            const max = state.modal.rows.length - 1;
             commit({ ...state, modal: { ...state.modal, selected: Math.max(0, Math.min(max, state.modal.selected + action.dir)) } });
           } else if (state.modal.kind === "connect-key") {
             // key 输入态无列表导航（mapModalKey 已把方向键映射为 noop，这里是类型收尾）
@@ -624,6 +701,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
         commit({ ...state, modal: { ...state.modal, thinkingLevel: next } });
         return;
       }
+      case "extensions-toggle": {
+        // /mcp /skill 面板 ←→：只改弹窗内候选启用态（Enter 应用才写配置，Esc 取消不改——同 /model 语义）
+        const extModal = state.modal;
+        if (extModal?.kind !== "mcp" && extModal?.kind !== "skill") return;
+        const rows = extModal.rows.map((r, i) => (i === extModal.selected ? { ...r, enabled: !r.enabled } : r));
+        commit({ ...state, modal: { ...extModal, rows } });
+        return;
+      }
       case "fold-at": {
         // 折叠点击（鼠标 onMouseUp 触发）：同时清除应用内选区——点击在可选中文本上会留单点/拖选高亮
         //（问题 34），折叠交互不需要选区，清掉避免误以为选中文字
@@ -654,6 +739,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     useKittyKeyboard: {},
   });
   win32DisableProcessedInput();
+
+  // 装配通知（MCP 启动失败错误行等）：toast 一次提示去向（/mcp 面板有完整连接状态），不打断进入
+  if (options.startupNotices?.length) showToast(options.startupNotices.join("；"));
 
   await render(
     () => <App state={state} model={modelLabel} onAction={handleAction} />,

@@ -383,3 +383,44 @@ it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普�
   expect(sel!.text).toContain("＋ 新建会话");
   expect(isBlackFg(sel!.fg)).toBe(true); // 黑字（background #101013）
 });
+
+it("/mcp 面板：服务行启用/关闭与 ▸ 选中标记、键位提示", async () => {
+  const modal: ModalState = {
+    kind: "mcp",
+    rows: [
+      { id: "fs", label: "fs", detail: "已连接 · 2 个工具", enabled: true },
+      { id: "git", label: "git", detail: "未启动", enabled: false },
+    ],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("MCP 服务");
+  expect(frame).toContain("▸ fs  启用 · 已连接 · 2 个工具");
+  expect(frame).toContain("git  关闭 · 未启动");
+  expect(frame).toContain("←→ 启用/关闭 · Enter 应用 · Esc 取消");
+  // 选中行白字（theme.text #ececf0）、未选中灰字（#8f9096）——同 /model 无背景块
+  const spans = setup.captureSpans().lines.flatMap((l) => l.spans);
+  expect(fgHex(spans.find((s) => s.text.includes("fs  启用"))?.fg)).toBe("#ececf0");
+  expect(fgHex(spans.find((s) => s.text.includes("git  关闭"))?.fg)).toBe("#8f9096");
+});
+
+it("/skill 面板：标题与技能行描述；空列表显示占位行", async () => {
+  const modal: ModalState = {
+    kind: "skill",
+    rows: [{ id: "review", label: "review", detail: "审查代码", enabled: true, source: "project" }],
+    selected: 0,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
+  await setup.waitForVisualIdle();
+  let frame = setup.captureCharFrame();
+  expect(frame).toContain("技能");
+  expect(frame).toContain("review  启用 · 审查代码");
+
+  const empty: ModalState = { kind: "skill", rows: [], selected: 0 };
+  const setup2 = await testRender(() => <ModalView modal={empty} />, { width: 60, height: 10 });
+  await setup2.waitForVisualIdle();
+  frame = setup2.captureCharFrame();
+  expect(frame).toContain("无可用技能");
+});

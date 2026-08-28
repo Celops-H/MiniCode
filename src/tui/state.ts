@@ -151,6 +151,32 @@ export interface ModelModalState {
   thinkingLevel: ThinkingLevel | undefined;
 }
 
+/** /mcp 与 /skill 扩展面板（UI-SPEC §8b）：行内启用/关闭 ←→ 切换（只改弹窗内候选，Esc 取消不改），
+ *  Enter 应用——按「写回定义层」规则写配置并重装配，当前会话立即生效（BACKEND §19/§20 回写规则）。
+ *  拆成两个单字面量 kind 变体（与各弹窗一致）：联合判别字段在 TS 取反分支不收窄，会污染 session 分支。 */
+export interface ExtensionModalRow {
+  /** mcp=服务名 / skill=技能名（回写定位键） */
+  id: string;
+  label: string;
+  /** 副列：mcp=连接状态，skill=描述 */
+  detail: string;
+  enabled: boolean;
+  /** skill 行来源层（回写落层用）；mcp 行不带 */
+  source?: "project" | "user";
+}
+
+export interface McpModalState {
+  kind: "mcp";
+  rows: ExtensionModalRow[];
+  selected: number;
+}
+
+export interface SkillModalState {
+  kind: "skill";
+  rows: ExtensionModalRow[];
+  selected: number;
+}
+
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
 
@@ -178,13 +204,15 @@ export function thinkingLevelLabel(level: ThinkingLevel | undefined): string {
   return level ?? "默认";
 }
 
-/** 嵌入弹层：权限确认 / 会话切换 / /connect 选供应商与输 key / /model 选模型 */
+/** 嵌入弹层：权限确认 / 会话切换 / /connect 选供应商与输 key / /model 选模型 / /mcp 与 /skill 扩展面板 */
 export type ModalState =
   | PermissionModalState
   | SessionModalState
   | ConnectPickModalState
   | ConnectKeyModalState
-  | ModelModalState;
+  | ModelModalState
+  | McpModalState
+  | SkillModalState;
 
 /** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
@@ -194,7 +222,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/model", "/rename", "/session"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/mcp", "/model", "/rename", "/session", "/skill"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
@@ -903,6 +931,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "mode-cycle":
     case "thinking-adjust":
     case "session-action-toggle":
+    case "extensions-toggle":
     case "copy":
     case "noop":
       return state;

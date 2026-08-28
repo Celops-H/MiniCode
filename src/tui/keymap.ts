@@ -30,6 +30,8 @@ export type TuiAction =
   | { type: "session-action-toggle" }
   /** /model 弹窗左右调整思考等级 */
   | { type: "thinking-adjust"; dir: 1 | -1 }
+  /** /mcp 与 /skill 面板切换当前行启用/关闭（←→ 触发，UI-SPEC §8b） */
+  | { type: "extensions-toggle" }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
   | { type: "toggle-focus" }
@@ -49,8 +51,9 @@ export type TuiAction =
 export interface KeymapContext {
   /** 输入弹层：slash 候选 / 权限或会话 modal（弹层时 Enter/↑↓/Tab 不落输入框） */
   popup?: "candidate" | "modal";
-  /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级；/connect key 弹窗里键入字符进 key 缓冲） */
-  modalKind?: "permission" | "session" | "connect" | "connect-key" | "model";
+  /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级；/connect key 弹窗里键入字符进 key 缓冲；
+   *  /mcp /skill 弹窗里 ←→ 切启用/关闭） */
+  modalKind?: "permission" | "session" | "connect" | "connect-key" | "model" | "mcp" | "skill";
   /** 输入框是否为空（空时 ↑↓ 回溯历史；非空在框内移光标） */
   inputEmpty?: boolean;
   /** 是否正在浏览历史（已按 ↑ 载入条目后继续 ↑↓ 在历史间移动） */
@@ -142,8 +145,9 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
   }
 }
 
-/** modal 态（权限确认 / 会话面板 / /connect / /model）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
+/** modal 态（权限确认 / 会话面板 / /connect / /model / /mcp /skill）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
  *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
+ *  /mcp /skill 弹窗里 ←→ 切当前行启用/关闭（extensions-toggle）；
  *  /connect key 弹窗里字符键输 API Key、Backspace 删、Enter 确认；
  *  Ctrl+D 保留退出；Ctrl+C 复制应用内选区（B-1，打断语义由 Esc 承担）。 */
 function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiAction {
@@ -197,6 +201,27 @@ function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiActio
       case "right":
         // 左右切当前行操作态：进入 ↔ 删除（P4-2；模型弹窗 ←→ 是思考等级，这里不冲突）
         return { type: "session-action-toggle" };
+      case "enter":
+        return { type: "modal-confirm" };
+      case "esc":
+        return { type: "cancel" };
+      case "ctrl-c":
+        return { type: "noop" };
+      case "ctrl-d":
+        return { type: "exit" };
+      default:
+        return { type: "noop" };
+    }
+  }
+  if (modalKind === "mcp" || modalKind === "skill") {
+    switch (key.kind) {
+      case "up":
+      case "down":
+        return { type: "modal-nav", dir: key.kind === "up" ? -1 : 1 };
+      case "left":
+      case "right":
+        // ←→ 切当前行启用/关闭（只改弹窗内候选，Enter 应用才写配置——同 /model 语义）
+        return { type: "extensions-toggle" };
       case "enter":
         return { type: "modal-confirm" };
       case "esc":
