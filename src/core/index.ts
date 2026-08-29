@@ -1,4 +1,5 @@
 export {
+  COMMAND_MARKER,
   userMessage,
   assistantMessage,
   toolResultMessage,

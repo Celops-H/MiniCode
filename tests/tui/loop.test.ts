@@ -6,6 +6,7 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
+import { COMMAND_MARKER, userMessage } from "../../src/core/index.js";
 import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, sessionModalTarget, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
@@ -243,5 +244,18 @@ describe("输入编辑（D-2 Ctrl+U 连续删 / D-3 一键清空）", () => {
     expect(s.prompt.curLine).toBe(0);
     expect(s.prompt.curCol).toBe(0);
     expect(s.prompt.sel).toBeNull();
+  });
+});
+
+describe("命令消息重演（E24）", () => {
+  it("initState 把 source=command 的用户消息重演为命令块（剥掉标记前缀）", () => {
+    const state = initState([
+      userMessage(`${COMMAND_MARKER}/init`, "command"),
+      userMessage("普通输入"),
+    ]);
+    const command = state.blocks.find((b) => b.kind === "command");
+    expect(command).toMatchObject({ kind: "command", text: "/init" });
+    // 普通输入仍是消息块
+    expect(state.blocks.some((b) => b.kind === "message" && b.text === "普通输入")).toBe(true);
   });
 });

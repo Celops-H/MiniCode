@@ -9,7 +9,7 @@
  */
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "@opentui/solid";
-import type { BlockView, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
+import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { theme } from "./theme.js";
 
 /** 状态图标/颜色：进行中 spinner（黄=进行中，E-2/3 语义统一）、成功绿、失败红、待执行暗 */
@@ -296,6 +296,16 @@ function NoticeView(props: { b: NoticeBlock }): JSX.Element {
   return <text fg={theme.warning}>{props.b.text}</text>;
 }
 
+/** 命令块（E24）：一条命令一行，弱化展示——执行过程不铺屏，命令本身有痕迹可循 */
+function CommandView(props: { b: CommandBlock }): JSX.Element {
+  return (
+    <text fg={theme.textMuted}>
+      <span style={{ fg: theme.foregroundAccent }}>› </span>
+      {props.b.text}
+    </text>
+  );
+}
+
 /** 流式尾：思考与文本增量累积（state.streaming） */
 function StreamingView(props: { s: Streaming }): JSX.Element {
   return (
@@ -314,6 +324,7 @@ function blockView(b: BlockView, modelLabel: string, onFold: () => void): JSX.El
   if (b.kind === "message") return <MessageView b={b} modelLabel={modelLabel} onFold={onFold} />;
   if (b.kind === "tool") return <ToolView b={b} onFold={onFold} />;
   if (b.kind === "notice") return <NoticeView b={b} />;
+  if (b.kind === "command") return <CommandView b={b} />;
   return <AgentView b={b} onFold={onFold} />;
 }
 

@@ -68,12 +68,13 @@ export function createChannel(initialMessages: Message[]): TuiChannel {
 const TOAST_MS = 5000;
 
 export interface TuiLoopOptions {
-  /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent（多 agent 时带 team，供级联中断/收尾清理） */
+  /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent（多 agent 时带 team，供级联中断/收尾清理）；
+   *  返回的 initPolicyBox 供 /init 过程免审批置位（E24，装配层据此活读 autoApprove） */
   assemble: (channel: {
     approver: PermissionApprover;
     feedRoot: (event: StreamEvent) => void;
     hooks: HookBusType;
-  }) => { agent: Agent; team?: Team };
+  }) => { agent: Agent; team?: Team; initPolicyBox?: { value: boolean } };
   store: SessionStore;
   session: Session;
   hooks?: HookBusType;
@@ -190,6 +191,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let extensionsBaseline: Partial<Record<"mcp" | "skill", Array<{ id: string; enabled: boolean }>>> = {};
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
+  /** 命令过程免铺屏（E24）：/init 等命令执行期间置位，内容增量不进消息区；
+   *  错误仍经 interact catch 直显，收尾（Stop/打断/出错）复位 */
+  let suppressStream = false;
+  /** 压缩执行中（E38）：期间 Esc 打断压缩而非退出/打断回合 */
+  let compacting = false;
+  /** 压缩被用户打断（Esc 置位，compactAsync 据此区分「未配置」与「已打断」） */
+  let compactInterrupted = false;
+  /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位；E24） */
+  let initPolicyBox: { value: boolean } | undefined;
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
   const ESC_EXIT_WINDOW_MS = 800;
   let lastEscAt = 0;
@@ -223,7 +233,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 流式事件 → reducer（用户输入驱动 + root 后台驱动都经此，双渲染流两侧都接） */
   const feedEvent = (event: StreamEvent): void => {
     if (
-      ignoreStream &&
+      (ignoreStream || suppressStream) &&
       (event.type === "text_delta" || event.type === "thinking_delta" || event.type.startsWith("toolcall"))
     ) {
       return;
@@ -290,26 +300,39 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       void compactAsync(guidance).catch((err) => showToast(`压缩失败：${err instanceof Error ? err.message : String(err)}`));
       return;
     }
-    if (command === "/init") {
+    if (command === "/init" || command.startsWith("/init ")) {
       // 分析代码库生成/改进项目根 AGENTS.md（BACKEND §21）：读现有文件生成 init 提示词，
-      // 走正常回合让模型用 write 工具落盘；已存在时提示词要求不覆盖、先建议改进
+      // 走正常回合让模型用 write 工具落盘；已存在时提示词要求不覆盖、先建议改进。
+      // E24/E42：命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
+      // 过程中只读工具与写项目根 AGENTS.md 免审批（initPolicyBox 置位，收尾复位）
       if (state.status === "running") {
         showToast("运行中不可执行 /init，等本轮结束后再试");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
+      const guidance = command.slice("/init".length).trim();
       const agentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
       void (async () => {
         try {
           const existing = await readInstructionFile(agentsFile);
-          pendingInputs.push(buildInitPrompt(existing));
+          const prompt = buildInitPrompt(existing);
+          const full = guidance ? `${prompt}\n\n用户附加指导：\n${guidance}` : prompt;
+          agent.appendCommand(command);
+          initPolicyBox && (initPolicyBox.value = true);
+          suppressStream = true;
+          commit({
+            ...state,
+            blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
+            prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
+            candidate: undefined,
+          });
+          pendingInputs.push(full);
           wake?.();
-          showToast(existing ? "已存在 AGENTS.md：开始分析并建议改进（不覆盖）" : "开始分析代码库，生成项目根 AGENTS.md");
+          showToast(existing ? "已存在 AGENTS.md：开始分析并建议改进（不覆盖）" : "开始分析代码库，生成项目根 AGENTS.md（过程不铺屏）");
         } catch (err) {
           showToast(`读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}`);
         }
       })();
-      commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
     if (command === "/help") {
@@ -455,13 +478,33 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** /compact：强制压缩 + 历史重写落盘（F-1=56 toast 带压缩后条数，压缩有痕迹）；
    *  带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径 */
   const compactAsync = async (guidance?: string): Promise<void> => {
-    if (await agent.compactNow(guidance)) {
-      await store.rewriteMessages(session, agent.getMessages());
-      agent.consumeHistoryRewritten();
-      const n = agent.getMessages().length;
-      showToast(`会话历史已压缩${guidance ? "（按压缩指导）" : ""}：当前 ${n} 条消息，关键上下文已保留`);
-    } else {
-      showToast("未配置压缩或摘要不可用");
+    if (compacting) return;
+    compacting = true;
+    try {
+      const ok = await agent.compactNow(guidance);
+      // 打断的压缩：不提示「未配置」（compactNow 对取消同样返回 false），Esc 已即时提示
+      if (!ok && compactInterrupted) {
+        compactInterrupted = false;
+        return;
+      }
+      if (ok) {
+        // 命令痕迹（E24）：压缩成功后落一条命令消息——退出/切换后再回来显示「/compact + 其后对话」；
+        // 摘要在前命令在后（追加语义），持久化随 rewriteMessages 一并落盘
+        const command = guidance ? `/compact ${guidance}` : "/compact";
+        agent.appendCommand(command);
+        await store.rewriteMessages(session, agent.getMessages());
+        agent.consumeHistoryRewritten();
+        const n = agent.getMessages().length;
+        commit({
+          ...state,
+          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
+        });
+        showToast(`会话历史已压缩${guidance ? "（按压缩指导）" : ""}：当前 ${n} 条消息，关键上下文已保留`);
+      } else {
+        showToast("未配置压缩或摘要不可用");
+      }
+    } finally {
+      compacting = false;
     }
   };
 
@@ -542,6 +585,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     else agent.interrupt();
     resolvePermission("deny", "用户打断");
     ignoreStream = true;
+    // /init 打断收尾（E24）：复位免铺屏与免审批
+    suppressStream = false;
+    if (initPolicyBox) initPolicyBox.value = false;
     commit(interruptTurn(state));
     lastEscAt = 0;
   };
@@ -752,6 +798,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "esc": {
+        // 压缩中 Esc：打断压缩本身（E38 支持打断），不走回合打断/双击退出判定
+        if (compacting) {
+          agent.interrupt();
+          compactInterrupted = true;
+          showToast("已打断压缩");
+          return;
+        }
         // Esc：有折叠聚焦先取消聚焦；运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
         // 子 agent 活跃时主状态可能非 running（主 agent 在等结论）——判定并入 agent 树运行态，
         // 否则 Esc 会被 arm 成双击退出、按两次才打断（P8）
@@ -859,21 +912,43 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   );
 
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
-  ({ agent, team } = options.assemble({ approver, feedRoot, hooks }));
+  ({ agent, team, initPolicyBox } = options.assemble({ approver, feedRoot, hooks }));
 
   // 订阅 Hook 事件渲染（会话/工具/子 agent）都进同一 reducer
   const unsubscribeHooks = [
     hooks.on("UserPromptSubmit", (e) => {
       ignoreStream = false;
-      commit(reduceHook(state, e));
+      // 命令过程免铺屏（E24）：init 提示词不以用户消息块上屏，命令块已代为留痕
+      if (!suppressStream) commit(reduceHook(state, e));
     }),
-    hooks.on("PreToolUse", (e) => commit(reduceHook(state, e))),
-    hooks.on("PostToolUse", (e) => commit(reduceHook(state, e))),
-    hooks.on("PostToolUseFailure", (e) => commit(reduceHook(state, e))),
+    hooks.on("PreToolUse", (e) => {
+      if (!suppressStream) commit(reduceHook(state, e));
+    }),
+    hooks.on("PostToolUse", (e) => {
+      if (!suppressStream) commit(reduceHook(state, e));
+    }),
+    hooks.on("PostToolUseFailure", (e) => {
+      if (!suppressStream) commit(reduceHook(state, e));
+    }),
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
     hooks.on("AgentCompleted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
     hooks.on("AgentInterrupted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
-    hooks.on("Stop", (e) => commit(reduceHook(state, e))),
+    hooks.on("Stop", (e) => {
+      // /init 收尾（E24）：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。
+      // 只认 root 的 Stop——子 agent 回合收尾不应提前结束命令过程
+      if (suppressStream && (e.agentPath === undefined || e.agentPath === "/root")) {
+        suppressStream = false;
+        if (initPolicyBox) initPolicyBox.value = false;
+        commit({
+          ...state,
+          blocks: [
+            ...state.blocks,
+            { kind: "notice", id: `init_done_${Date.now()}`, text: "/init 完成：AGENTS.md 已生成/更新（过程不铺屏）" },
+          ],
+        });
+      }
+      commit(reduceHook(state, e));
+    }),
   ];
 
   // 会话级事件由宿主触发：全部订阅就绪后发会话开始
@@ -888,6 +963,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         ignoreStream = false;
+        // 命令过程出错同样收尾（E24）：复位免铺屏与免审批，错误块直显可见
+        suppressStream = false;
+        if (initPolicyBox) initPolicyBox.value = false;
         commit({
           ...state,
           blocks: [

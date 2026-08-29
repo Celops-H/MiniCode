@@ -3,7 +3,7 @@
  * 消息区由有序「块」组成（消息/工具卡片/子 agent 活动）；输入框多行编辑（上限 20 行）、
  * 历史回溯、slash 命令候选；帧生成（resolve）只读这些状态。
  */
-import type { Message } from "../core/index.js";
+import { COMMAND_MARKER, type Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -15,7 +15,7 @@ export interface MessageBlock {
   kind: "message";
   id: string;
   role: "user" | "assistant";
-  source?: "human" | "system";
+  source?: "human" | "system" | "command";
   text: string;
   thinking?: string;
   thinkingCollapsed: boolean;
@@ -58,7 +58,16 @@ export interface NoticeBlock {
   time?: string;
 }
 
-export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock;
+/** 命令块（E24）：/init /compact 等命令的痕迹，一条命令一行——执行过程不铺屏，会话重演时按块还原 */
+export interface CommandBlock {
+  kind: "command";
+  id: string;
+  /** 命令原文（含参数，如 "/compact 侧重保留命令输出"） */
+  text: string;
+  time?: string;
+}
+
+export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock | CommandBlock;
 
 /** agent 树节点：路径 + 运行/完成状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），
  *  完成条目在底栏树展示 10s 后消失，耗时 = completedAt - spawnedAt */
@@ -350,6 +359,18 @@ export function initState(messages: Message[], title = ""): TuiState {
   };
   for (const message of messages) {
     if (message.role === "user") {
+      // 命令消息重演为命令块（E24）：正文剥掉标记前缀，一条命令一行
+      if (message.source === "command") {
+        blocks.push({
+          kind: "command",
+          id: message.id,
+          text: message.content.startsWith(COMMAND_MARKER)
+            ? message.content.slice(COMMAND_MARKER.length)
+            : message.content,
+          time: msgTime(message),
+        });
+        continue;
+      }
       blocks.push({
         kind: "message",
         id: message.id,

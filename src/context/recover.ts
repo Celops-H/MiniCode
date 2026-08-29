@@ -55,12 +55,13 @@ export function extractRecoveryContext(
     }
   }
 
-  // 活跃任务：最近的用户请求（排除摘要/恢复上下文等系统注入消息，避免连续压缩自我放大）；
-  // 单条截断到 MAX_REQUEST_CHARS，防大输入被完整带回
+  // 活跃任务：最近的用户请求（排除摘要/恢复上下文等系统注入消息，避免连续压缩自我放大；
+  // 命令痕迹【命令】/init 等不是用户请求，同样排除）。单条截断到 MAX_REQUEST_CHARS，
+  // 防大输入被完整带回
   const recentRequests: string[] = [];
   for (let i = messages.length - 1; i >= 0 && recentRequests.length < maxRequests; i--) {
     const message = messages[i]!; // 循环边界保证 i 不越界
-    if (message.role === "user" && message.source !== "system") {
+    if (message.role === "user" && (message.source ?? "human") === "human") {
       recentRequests.push(truncateRequest(message.content));
     }
   }

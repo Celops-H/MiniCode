@@ -15,7 +15,7 @@ export interface PermissionRequest {
 export interface PermissionResult {
   allowed: boolean;
   reason?: string;
-  source: "rule" | "cache" | "hook" | "approver" | "dangerous" | "mode";
+  source: "rule" | "cache" | "hook" | "approver" | "dangerous" | "mode" | "auto";
 }
 
 export type PermissionDecision =
@@ -38,6 +38,9 @@ export interface PermissionPipelineOptions {
   mode?: PermissionMode;
   /** plan 模式放行的只读工具集合（宿主从 Tool.isReadOnly 收集） */
   readOnlyTools?: Set<string>;
+  /** 作用域内免审批判定（E24 /init 只读过程）：命中直接放行不弹审批块；宿主活读提供（/init 过程置位）。
+   *  置于 Hook 之后、用户审批之前——保留 Hook 拦截语义，危险命令检查与规则层不受影响 */
+  autoApprove?: (request: PermissionRequest) => boolean;
 }
 
 /**
@@ -102,6 +105,11 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
       const hookVerdict = await effectiveHook(request);
       if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
       if (hookVerdict === "allow") return { allowed: true, source: "hook" };
+    }
+
+    // 作用域内免审批（E24）：宿主判定命中直接放行（/init 只读工具 + 目标写入）
+    if (this.options.autoApprove?.(request)) {
+      return { allowed: true, source: "auto" };
     }
 
     // 用户审批

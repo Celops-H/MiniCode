@@ -55,6 +55,8 @@ export interface RunTuiEntryOptions {
   /** -c 无参数：继续最近活跃会话（listSessions 倒序首个）；无最近会话回落启动草稿态 */
   continueRecent?: boolean;
   agents?: boolean;
+  /** 项目根 AGENTS.md 路径（/init 免审批判定与生成目标；缺省 <cwd>/AGENTS.md） */
+  projectAgentsFile?: string;
 }
 
 /** 初始会话解析（P6-1/2）：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
@@ -159,6 +161,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         startupConnect: startup.needsConnect,
         carryState: carry,
         terminal,
+        projectAgentsFile: options.projectAgentsFile,
       });
       if (!result) break;
       carry = result.state;
@@ -209,6 +212,8 @@ async function runTuiSession(opts: {
   carryState?: TuiState;
   /** 共享终端（E19，入口层创建一次） */
   terminal?: TuiTerminal;
+  /** 项目根 AGENTS.md 路径（/init 免审批判定与生成目标；缺省 <cwd>/AGENTS.md） */
+  projectAgentsFile?: string;
 }): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState } | undefined> {
   const { store, models, config, session, agents, thinkingLevelBox } = opts;
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
@@ -223,6 +228,9 @@ async function runTuiSession(opts: {
   };
   // 权限模式盒子：Shift+Tab 在 loop 侧改这里，PermissionPipeline 经 options.mode getter 活读（plan/auto 即时生效）
   const permissionModeBox: { value: PermissionMode } = { value: "default" };
+  // /init 过程免审批盒子（E24）：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
+  const initPolicyBox: { value: boolean } = { value: false };
+  const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
   // M5 扩展生态装配（BACKEND §19/§20，与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
   // 启动失败的 server 已跳过，错误行 toast 一次提示、完整状态在 /mcp 面板
   const extensions = await assembleSessionExtensions(config);
@@ -245,23 +253,37 @@ async function runTuiSession(opts: {
       startupConnect: opts.startupConnect,
       carryState: opts.carryState,
       terminal: opts.terminal,
+      projectAgentsFile: opts.projectAgentsFile,
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
           .filter((s) => s.length > 0)
           .join("\n");
+        const readOnlyNames = new Set<string>([
+          ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
+          // list_agents 为协作工具中的只读项，只能在 Agent 内部经 deps 构造、TUI 侧显式并入，
+          // 需与 collab.ts 的 isReadOnly 保持同步
+          "list_agents",
+        ]);
         const pipelineOptions: PermissionPipelineOptions = {
           rules: [],
           approver,
-          // plan 模式放行的只读工具集合（Tool.isReadOnly 收集；list_agents 为协作工具中的只读项，
-// 只能在 Agent 内部经 deps 构造、TUI 侧显式并入，需与 collab.ts 的 isReadOnly 保持同步）
-          readOnlyTools: new Set<string>([
-            ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
-            "list_agents",
-          ]),
+          // plan 模式放行的只读工具集合（Tool.isReadOnly 收集）
+          readOnlyTools: readOnlyNames,
           // mode 用 getter 活读 modeBox：Shift+Tab 切换即时作用于后续工具审批
           get mode() {
             return permissionModeBox.value;
+          },
+          // /init 过程免审批（E24）：只读工具 + 写项目根 AGENTS.md 自动放行，
+          // 其余工具（bash、写其他路径等）仍走正常审批
+          autoApprove: (request) => {
+            if (!initPolicyBox.value) return false;
+            if (readOnlyNames.has(request.toolName)) return true;
+            if (request.toolName === "write") {
+              const target = request.input?.path;
+              return typeof target === "string" && path.resolve(target) === path.resolve(agentsFile);
+            }
+            return false;
           },
         };
         const { agent, team } = createSessionAgent({
@@ -288,7 +310,7 @@ async function runTuiSession(opts: {
             await store.flush();
           },
         });
-        return { agent, team };
+        return { agent, team, initPolicyBox };
       },
     });
   } finally {

@@ -1,5 +1,6 @@
 import {
   assembleAssistantMessage,
+  COMMAND_MARKER,
   createContext,
   type ThinkingLevel,
   toolCallsOf,
@@ -251,6 +252,16 @@ export class Agent {
    *  防下一轮 start() 把旧历史连同新输入一起回灌模型并重写会话文件 */
   resetHistory(): void {
     this.messages = [];
+  }
+
+  /**
+   * 追加一条命令消息（E24 命令痕迹）：/init /compact 等命令的持久化记录，退出/切换
+   * 会话再回来时据此重演「命令 + 其后对话」。消息带 source: "command"，回灌模型时
+   * 作为普通 user 消息（模型可感知命令发生过），不触发回合。
+   * @param text 命令原文（如 "/compact 侧重保留命令输出"）
+   */
+  appendCommand(text: string): void {
+    this.messages.push(userMessage(`${COMMAND_MARKER}${text}`, "command"));
   }
 
   /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2；Team 创建 worktree 时读取） */

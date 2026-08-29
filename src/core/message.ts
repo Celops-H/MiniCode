@@ -40,8 +40,11 @@ export interface AssistantMeta {
   stopReason?: string;
 }
 
-/** 消息来源：human 真实用户输入；system 系统注入（摘要/恢复上下文等合成消息） */
-export type MessageSource = "human" | "system";
+/** 消息来源：human 真实用户输入；system 系统注入（摘要/恢复上下文等合成消息）；command 用户命令痕迹（/init /compact 等命令消息，E24） */
+export type MessageSource = "human" | "system" | "command";
+
+/** 命令消息的文本前缀（持久化与重演时识别命令痕迹） */
+export const COMMAND_MARKER = "【命令】";
 
 /** 用户输入 */
 export interface UserMessage {
@@ -49,7 +52,7 @@ export interface UserMessage {
   /** 稳定 id：压缩裁剪旧消息、会话重放、排查定位时精确指认消息 */
   id: string;
   content: string;
-  /** 消息来源，缺省 human；系统注入的合成消息标 "system"，让模型区分背景信息与用户指令 */
+  /** 消息来源，缺省 human；系统注入的合成消息标 "system"，让模型区分背景信息与用户指令；命令痕迹标 "command" */
   source?: MessageSource;
   /** 消息创建时间（ISO）：会话恢复时展示用；旧数据可能缺失 */
   timestamp?: string;

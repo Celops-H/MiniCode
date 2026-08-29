@@ -160,3 +160,27 @@ describe("权限模式", () => {
     expect(result).toMatchObject({ allowed: true, source: "approver" });
   });
 });
+
+describe("作用域内免审批 autoApprove（E24 /init 只读过程）", () => {
+  it("判定命中直接放行（source=auto），不进用户审批", async () => {
+    const approver = vi.fn(async () => ({ action: "allow" as const }));
+    const pipeline = new PermissionPipeline({
+      rules: [],
+      approver,
+      autoApprove: (request) => request.toolName === "read",
+    });
+    expect(await pipeline.check({ toolName: "read" })).toMatchObject({ allowed: true, source: "auto" });
+    // 未命中走正常审批
+    expect(await pipeline.check({ toolName: "bash", content: "git status" })).toMatchObject({ allowed: true, source: "approver" });
+    expect(approver).toHaveBeenCalledTimes(1);
+  });
+
+  it("不越过危险命令检查：bash 危险命令仍拒绝", async () => {
+    const pipeline = new PermissionPipeline({
+      rules: [],
+      approver: async () => ({ action: "allow" }),
+      autoApprove: () => true,
+    });
+    expect(await pipeline.check({ toolName: "bash", content: "echo $(id)" })).toMatchObject({ allowed: false, source: "dangerous" });
+  });
+});
