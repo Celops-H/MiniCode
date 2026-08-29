@@ -1,7 +1,7 @@
 export { OpenAICompletionsProtocol, AnthropicMessagesProtocol } from "./protocol/index.js";
 export { Models } from "./models.js";
 export type { ModelsOptions } from "./models.js";
-export { OpenAICompatibleProvider, defaultCreateClient, AnthropicCompatibleProvider, defaultAnthropicCreateClient, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS } from "./providers/index.js";
+export { OpenAICompatibleProvider, defaultCreateClient, AnthropicCompatibleProvider, defaultAnthropicCreateClient, DEFAULT_MAX_TOKENS, anthropicThinkingParam, REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS } from "./providers/index.js";
 export type { ChatCompletionsClient, OpenAICompatibleOptions, AnthropicMessagesClient, AnthropicCompatibleOptions } from "./providers/index.js";
 export { isSwitchableError, ModelRouter } from "./router.js";
 export type { RouterOptions } from "./router.js";

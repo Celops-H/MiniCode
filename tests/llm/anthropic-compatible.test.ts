@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createContext, userMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
-import { AnthropicCompatibleProvider, defaultAnthropicCreateClient, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
+import { anthropicThinkingParam, AnthropicCompatibleProvider, defaultAnthropicCreateClient, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
 import type { AnthropicMessagesClient, ModelInfo } from "../../src/llm/index.js";
 
 async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
@@ -162,5 +162,37 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(events[0]).toEqual({ type: "text_delta", text: "hi" });
     expect(events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("模型响应超时") });
     expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it("思考等级随请求下发为 thinking 预算（E17）", async () => {
+    const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    // 缺省 maxTokens 8192：high 基础预算 8192 被钳制到 maxTokens-1024=7168
+    for await (const _ of provider.stream("claude-sonnet-4-5", createContext("s", [userMessage("q")], [], "high"))) {
+      // 消费流
+    }
+    expect(getRequest()).toMatchObject({ thinking: { type: "enabled", budget_tokens: 7168 } });
+    const { provider: p2, getRequest: getRequest2 } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    for await (const _ of p2.stream("claude-sonnet-4-5", createContext("s", [userMessage("q")], [], "low"))) {
+      // 消费流
+    }
+    expect(getRequest2()).toMatchObject({ thinking: { type: "enabled", budget_tokens: 2048 } });
+  });
+
+  it("思考预算按模型 maxTokens 钳制，maxTokens 承载不了时不发", async () => {
+    // big-context 定义 maxTokens 4096：high 钳制到 3072
+    const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    for await (const _ of provider.stream("big-context", createContext("s", [userMessage("q")], [], "high"))) {
+      // 消费流
+    }
+    expect(getRequest()).toMatchObject({ thinking: { type: "enabled", budget_tokens: 3072 } });
+    // 未设思考等级：不带 thinking 字段
+    const { provider: p2, getRequest: getRequest2 } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    for await (const _ of p2.stream("claude-sonnet-4-5", createContext("s", [userMessage("q")]))) {
+      // 消费流
+    }
+    expect(getRequest2()).not.toHaveProperty("thinking");
+    // 纯函数边界：maxTokens 2048 → 预算压到下限 1024；maxTokens 1024 → 承载不了返回 undefined
+    expect(anthropicThinkingParam("low", 2048)).toEqual({ type: "enabled", budget_tokens: 1024 });
+    expect(anthropicThinkingParam("high", 1024)).toBeUndefined();
   });
 });

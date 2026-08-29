@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { resolveAuth } from "../auth.js";
 import { AnthropicMessagesProtocol } from "../protocol/index.js";
 import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
-import type { Context, StreamEvent } from "../../core/index.js";
+import type { Context, StreamEvent, ThinkingLevel } from "../../core/index.js";
 import type { Provider, ProviderAuth, ModelInfo } from "../types.js";
 
 /** Anthropic 兼容 client 接口（默认官方 SDK，测试可注入 mock） */
@@ -87,6 +87,10 @@ export class AnthropicCompatibleProvider implements Provider {
     // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）
     const vendorModelId = info?.vendorId ?? modelId;
     const request = this.protocol.buildRequest(context);
+    // 思考等级（E17）：anthropic 协议以 thinking 预算表达；maxTokens 决定预算上限
+    const thinking = context.thinkingLevel
+      ? anthropicThinkingParam(context.thinkingLevel, maxTokens)
+      : undefined;
     // 中断合并 controller 同 openai-compatible：用户 signal 转发 + idle 超时 abort 共用
     const controller = new AbortController();
     const userSignal = options?.signal;
@@ -101,6 +105,8 @@ export class AnthropicCompatibleProvider implements Provider {
           ...(request as Record<string, unknown>),
           model: vendorModelId,
           max_tokens: maxTokens,
+          // 未设等级或 maxTokens 承载不了思考时为 undefined：不带该字段，退回厂商默认
+          ...(thinking ? { thinking } : {}),
           stream: true,
         },
         { signal: controller.signal },
@@ -127,6 +133,26 @@ export class AnthropicCompatibleProvider implements Provider {
 
 /** Anthropic 请求 max_tokens 兜底：模型未定义 contextWindow/maxTokens 时的输出上限 */
 export const DEFAULT_MAX_TOKENS = 8192;
+
+/** 思考等级 → thinking 预算（budget_tokens）的基础映射（E17） */
+const THINKING_BUDGETS: Record<ThinkingLevel, number> = { low: 2048, medium: 4096, high: 8192 };
+
+/**
+ * 思考等级 → Anthropic 请求体 thinking 参数。
+ * Anthropic 规定 budget_tokens ≥1024 且 < max_tokens：按 maxTokens 钳制（留 1024
+ * 输出头寸）；maxTokens ≤2048 时承载不了思考，返回 undefined（不发，退回厂商默认）。
+ * @param level 思考等级
+ * @param maxTokens 请求 max_tokens（模型定义值或缺省兜底）
+ * @returns thinking 参数；等级无法承载时 undefined
+ */
+export function anthropicThinkingParam(
+  level: ThinkingLevel,
+  maxTokens: number,
+): { type: "enabled"; budget_tokens: number } | undefined {
+  const cap = maxTokens - 1024;
+  if (cap < 1024) return undefined;
+  return { type: "enabled", budget_tokens: Math.min(THINKING_BUDGETS[level], cap) };
+}
 
 /**
  * 默认用官方 Anthropic SDK 创建 client（x-api-key + anthropic-version 认证头由 SDK
