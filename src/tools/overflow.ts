@@ -37,8 +37,8 @@ export function spillOutput(
   }
   try {
     const file = path.join(outputDir, `tool-${Date.now()}-${randomUUID().slice(0, 8)}.txt`);
-    mkdirSync(outputDir, { recursive: true });
-    writeFileSync(file, content, "utf8");
+    mkdirSync(outputDir, { recursive: true, mode: 0o700 });
+    writeFileSync(file, content, { mode: 0o600, encoding: "utf8" });
     return {
       content:
         `${truncated.content}\n` +

@@ -27,9 +27,11 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       models: p.models.map((id) => ({ id })),
     })),
   };
-  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   try {
-    await fsp.writeFile(file, JSON.stringify(seed, null, 2) + "\n", { flag: "wx" });
+    // POSIX 权限：目录 700 / 配置 600——配置随后会被 /connect 写入 API key，
+    // 不应对同机其他用户可读（Windows 忽略 mode，无副作用）
+    await fsp.writeFile(file, JSON.stringify(seed, null, 2) + "\n", { flag: "wx", mode: 0o600 });
   } catch (err) {
     // wx 独占冲突 = 并发首启的另一方已落盘：文件已在，不再动
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;

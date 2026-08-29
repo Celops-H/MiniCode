@@ -35,6 +35,6 @@ export async function readJsonl<T>(file: string): Promise<T[]> {
  */
 export async function appendJsonlBatch<T>(file: string, items: T[]): Promise<void> {
   if (items.length === 0) return;
-  await mkdir(path.dirname(file), { recursive: true });
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await appendFile(file, items.map((item) => `${JSON.stringify(item)}\n`).join(""), "utf8");
 }

@@ -74,3 +74,24 @@ describe("ensureGlobalConfigSeed（全局配置播种）", () => {
     );
   });
 });
+
+describe("播种跨平台权限（E32）", () => {
+  it.runIf(process.platform !== "win32")("新建目录 0o700、配置文件 0o600（Windows 忽略 mode 跳过）", async () => {
+    const paths = tempPaths();
+    await ensureGlobalConfigSeed(paths);
+    const { statSync } = await import("node:fs");
+    const dirMode = statSync(path.dirname(paths.globalConfigFile)).mode & 0o777;
+    const fileMode = statSync(paths.globalConfigFile).mode & 0o777;
+    expect(dirMode).toBe(0o700);
+    expect(fileMode).toBe(0o600);
+  });
+
+  it("目录已存在：播种幂等不报错、内容不覆盖（跨平台行为一致）", async () => {
+    const paths = tempPaths();
+    mkdirSync(path.dirname(paths.globalConfigFile), { recursive: true });
+    await ensureGlobalConfigSeed(paths);
+    const before = readFileSync(paths.globalConfigFile, "utf8");
+    await ensureGlobalConfigSeed(paths);
+    expect(readFileSync(paths.globalConfigFile, "utf8")).toBe(before);
+  });
+});

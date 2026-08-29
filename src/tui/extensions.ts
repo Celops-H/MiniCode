@@ -149,8 +149,9 @@ async function readConfigRaw(file: string): Promise<Record<string, unknown>> {
 /** strict 校验后写回（沿用 connect.ts 写盘风格：缩进 2 + 尾换行）；校验失败不落盘 */
 async function writeConfigRaw(file: string, raw: Record<string, unknown>): Promise<void> {
   const validated = configSchema.parse(raw);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", "utf8");
+  // POSIX 权限同 connect.ts：目录 700 / 配置 600（配置含落盘 apiKey）
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", { mode: 0o600, encoding: "utf8" });
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

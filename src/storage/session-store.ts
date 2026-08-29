@@ -28,9 +28,9 @@ export class SessionStore {
     return path.join(this.dir, `${id}.meta.json`);
   }
 
-  /** 确保存储目录存在（写操作前调用）。 */
+  /** 确保存储目录存在（写操作前调用）。POSIX 700：会话内容属用户隐私，不向同机其他用户开放 */
   private async ensureDir(): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
   }
 
   /**

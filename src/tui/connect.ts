@@ -54,8 +54,9 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
     providers: updated,
   };
   const validated = configSchema.parse(merged);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", "utf8");
+  // POSIX 权限同 seed.ts：目录 700 / 配置 600（apiKey 落盘在此，不应对其他用户可读）
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", { mode: 0o600, encoding: "utf8" });
 }
 
 /** /models 拉取超时（ms）：厂商慢响应时不让连接卡住 */
