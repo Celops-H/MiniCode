@@ -19,16 +19,37 @@ describe("resolveConfigPaths", () => {
 });
 
 describe("resolveSessionsDir", () => {
-  it("默认解析到用户级 ~/.minicode/sessions，不随启动目录变化", () => {
-    expect(resolveSessionsDir({ homedir: "/home/tester" })).toBe(
-      path.join("/home/tester", ".minicode", "sessions"),
+  it("按启动工作目录分子目录（E46）：路径中非字母数字字符替换为「-」", () => {
+    const cwd = path.resolve(path.join(os.tmpdir(), "my proj", "app-v2"));
+    const dir = resolveSessionsDir({ homedir: "/home/tester", cwd });
+    expect(dir).toBe(
+      path.join("/home/tester", ".minicode", "sessions", cwd.replace(/[^a-zA-Z0-9]/g, "-")),
     );
   });
 
+  it("root 覆盖（config.sessionsDir）作用于根目录，子目录编码不变", () => {
+    const cwd = path.resolve(path.join(os.tmpdir(), "w"));
+    const dir = resolveSessionsDir({ homedir: "/home/tester", root: "/custom/sessions", cwd });
+    expect(dir).toBe(path.join("/custom/sessions", cwd.replace(/[^a-zA-Z0-9]/g, "-")));
+  });
+
   it("XDG_CONFIG_HOME 优先于 homedir", () => {
-    expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg" })).toBe(
-      path.join("/etc/xdg", "minicode", "sessions"),
+    const cwd = path.resolve(path.join(os.tmpdir(), "w"));
+    const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg", cwd })).toBe(
+      path.join("/etc/xdg", "minicode", "sessions", encoded),
     );
+  });
+
+  it("超长路径截断到 200 字符并追加内容哈希后缀（防截断撞名）", () => {
+    const deep = path.resolve(`/${"x".repeat(300)}`);
+    const dir = resolveSessionsDir({ homedir: "/home/tester", cwd: deep });
+    const name = dir.split(path.sep).pop()!;
+    expect(name.length).toBeLessThanOrEqual(200 + 1 + 7);
+    expect(name).toMatch(/-[0-9a-z]+$/);
+    // 内容不同的长路径哈希不同
+    const other = resolveSessionsDir({ homedir: "/home/tester", cwd: path.resolve(`/${"y".repeat(300)}`) });
+    expect(other.split(path.sep).pop()).not.toBe(name);
   });
 });
 

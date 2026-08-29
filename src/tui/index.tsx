@@ -133,7 +133,8 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 合并链（与 CLI main 顺序一致），后加载会漏读
   await loadDotEnv();
   let config: Config = await loadConfig();
-  const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
+  // 会话按启动工作目录隔离存储（E46，DESIGN 14）：各目录只看自己的会话
+  const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
   // 零可用厂商（E31）：正常启动进 /connect 引导；CLI 宿主非交互，保持报错退出
   const startup = createStartupModels(config);
   let models: Models = startup.models;

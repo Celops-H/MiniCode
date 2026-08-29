@@ -63,7 +63,7 @@ export type SkillsConfig = z.infer<typeof skillsConfigSchema>;
 export const configSchema = z
   .object({
     logLevel: z.enum(LOG_LEVELS).default("info"),
-  /** 会话存储目录（用户级固定，环境变量 MINICODE_SESSIONS_DIR 可覆盖）；缺省 ~/.minicode/sessions/ */
+  /** 会话存储根目录（按启动工作目录分子目录，DESIGN 14）；缺省 ~/.minicode/sessions/ */
   sessionsDir: z.string().optional(),
   /** 模型 Provider 列表（多厂商）；未配置回退默认单模型 */
   providers: z.array(providerConfigSchema).optional(),

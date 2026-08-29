@@ -84,7 +84,7 @@ program
   .description("列出会话")
   .action(async () => {
     const config = await loadConfig();
-    const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
+    const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
     const sessions = await store.listSessions();
     if (sessions.length === 0) {
       console.log("暂无会话");
@@ -197,7 +197,7 @@ async function loadDotEnv(): Promise<void> {
 async function startSession(modelId?: string, sessionId?: string, agents = true): Promise<void> {
   const config = await loadConfig();
   const logger = new Logger({ level: config.logLevel });
-  const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
+  const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
   const models = buildModelClient(config, modelId);
 
   const session = sessionId

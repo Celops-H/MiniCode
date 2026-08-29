@@ -333,3 +333,20 @@ describe("会话持久化与续跑", () => {
     });
   });
 });
+
+describe("会话按启动工作目录隔离（E46）", () => {
+  it("不同 cwd 的会话互相不可见（各目录只看自己的会话）", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "minicode-cwd-sessions-"));
+    try {
+      const { resolveSessionsDir } = await import("../../src/config/index.js");
+      const storeA = new SessionStore(resolveSessionsDir({ root, cwd: "/work/project-a" }));
+      const storeB = new SessionStore(resolveSessionsDir({ root, cwd: "/work/project-b" }));
+      await storeA.createSession({ model: "m", title: "A 的会话" });
+      expect((await storeA.listSessions()).map((s) => s.title)).toEqual(["A 的会话"]);
+      // B 目录列表为空：A 的会话不可见
+      expect(await storeB.listSessions()).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
