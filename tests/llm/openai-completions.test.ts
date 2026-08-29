@@ -396,3 +396,139 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(assistant.content[0]).toMatchObject({ type: "tool_call", id: "call_1", name: "read" });
   });
 });
+
+describe("parseStream：E16 五类现象", () => {
+  it("content 块数组里的思考块路由进思考管道（glm 思考+正文根因）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [
+            {
+              delta: {
+                content: [
+                  { type: "thinking", thinking: "先想" },
+                  { type: "text", text: "正文" },
+                ],
+              },
+              index: 0,
+            },
+          ],
+        },
+        { choices: [{ delta: { content: [{ reasoning_content: "再想" }, { type: "text", text: "续" }] }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "先想" },
+      { type: "text_delta", text: "正文" },
+      { type: "thinking_delta", thinking: "再想" },
+      { type: "text_delta", text: "续" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("正文累积全文下发时剥离前缀（防滚雪球重复）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "第一段" }, index: 0 }] },
+        { choices: [{ delta: { content: "第一段第二段" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "第一段" },
+      { type: "text_delta", text: "第二段" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("思考累积全文下发时同样剥离前缀", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { reasoning_content: "思考" }, index: 0 }] },
+        { choices: [{ delta: { reasoning_content: "思考续" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "思考" },
+      { type: "thinking_delta", thinking: "续" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("正文里的 <thinking> 标签转回思考事件（模型模仿历史编码格式）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "<thinking>推理</thinking>答案" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "推理" },
+      { type: "text_delta", text: "答案" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("正文里的 <tool_call> 标签转回工具调用事件，与原生工具调用不撞号", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [
+            { delta: { content: '<tool_call>{"name":"read","arguments":{"path":"a.ts"}}</tool_call>' }, index: 0 },
+          ],
+        },
+        {
+          choices: [
+            { delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "bash", arguments: "{}" } }] }, index: 0 },
+          ],
+        },
+        { choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 标签工具占序号 0（先到），原生工具调用重编号为 1：两类来源共用计数器
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "inline_0", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "toolcall_start", index: 1, id: "call_1", name: "bash" },
+      { type: "toolcall_delta", index: 1, partialJson: "{}" },
+      { type: "toolcall_end", index: 1 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("finish_reason 之后补发的正文不丢：done 延到流尾发出", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "主" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        { choices: [{ delta: { content: "补发" }, index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "主" },
+      { type: "text_delta", text: "补发" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+});

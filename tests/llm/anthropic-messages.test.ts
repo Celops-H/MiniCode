@@ -191,3 +191,125 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(thrown).toBe("连接中断");
   });
 });
+
+describe("parseStream：E16 五类现象", () => {
+  it("空 text/thinking delta 不发事件（全空流不产出空内容块）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta" } },
+        { type: "content_block_delta", index: 0, delta: { type: "thinking_delta" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([{ type: "done", stopReason: "end_turn" }]);
+  });
+
+  it("content_block_start 携带的首段内容不丢（部分兼容端点不放 delta）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "首段" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "续" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "首段" },
+      { type: "text_delta", text: "续" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("正文里的 <thinking> 标签转回思考事件", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "<thinking>推理</thinking>答案" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "推理" },
+      { type: "text_delta", text: "答案" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("正文累积全文下发时剥离前缀（防滚雪球重复）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "第一段" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "第一段第二段" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "第一段" },
+      { type: "text_delta", text: "第二段" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("映射不到块 index 的参数增量跳过（不再兜底并到工具 0 污染参数流）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 3, content_block: { type: "tool_use", id: "call_1", name: "read" } },
+        // 块 index 2 从未 start：增量无归属
+        { type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: '{"x":1}' } },
+        { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: '{"path":"a.ts"}' } },
+        { type: "content_block_stop", index: 3 },
+        { type: "message_delta", delta: { stop_reason: "tool_use" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_use" },
+    ]);
+  });
+
+  it("ping 等未知事件静默通过，不影响解析", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "ping" },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "好" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+});

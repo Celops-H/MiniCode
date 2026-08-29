@@ -22,10 +22,11 @@ export async function assembleAssistantMessage(
   for await (const event of stream) {
     switch (event.type) {
       case "text_delta":
-        textParts.push(event.text);
+        // 空片段不聚（协议层已守卫，此处兜底）：全空流不产出空内容块
+        if (event.text) textParts.push(event.text);
         break;
       case "thinking_delta":
-        thinkingParts.push(event.thinking);
+        if (event.thinking) thinkingParts.push(event.thinking);
         break;
       case "toolcall_start": {
         const entry = toolCalls.get(event.index) ?? { json: [] };
@@ -35,6 +36,7 @@ export async function assembleAssistantMessage(
         break;
       }
       case "toolcall_delta": {
+        if (!event.partialJson) break;
         const entry = toolCalls.get(event.index) ?? { json: [] };
         entry.json.push(event.partialJson);
         toolCalls.set(event.index, entry);

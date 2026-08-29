@@ -1,11 +1,12 @@
 import type { Context, Message, StreamEvent } from "../../core/index.js";
 import type { TextContent, ThinkingContent, ToolCall, ToolDefinition } from "../../core/index.js";
 import type { Protocol } from "../types.js";
+import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
 interface Choice {
   delta?: {
     /** 正文文本：OpenAI 标准为字符串；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接（P10） */
-    content?: string | Array<{ type?: string; text?: string }>;
+    content?: string | Array<ContentArrayBlock>;
     /** 推理模型思考增量（DeepSeek 等）→ 统一成 thinking_delta */
     reasoning_content?: string;
     reasoning?: string;
@@ -17,6 +18,15 @@ interface Choice {
     }>;
   };
   finish_reason?: string;
+}
+
+/** content 块数组的元素：text 块带 text，思考块带思考字段（字段名随厂商而异） */
+interface ContentArrayBlock {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  reasoning_content?: string;
+  reasoning?: string;
 }
 
 /** openai-chat-completions 协议：统一格式 ↔ OpenAI 请求体 / 流式响应 */
@@ -58,15 +68,25 @@ export class OpenAICompletionsProtocol implements Protocol {
   /**
    * 解析 OpenAI 流式响应，转成统一事件流。
    * OpenAI 每次返回一个增量片段：可能带文本，也可能带某工具调用的参数片段。
-   * 工具调用没有独立的结束标记，这里用 started 记录已开始的调用，
-   * 收到 finish_reason 时统一补发结束事件。
+   * 工具调用没有独立的结束标记，收 finish_reason 或流尾时统一补发结束事件。
+   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件）与
+   * 前缀剥离器（累积全文下发的厂商防滚雪球重复），见 tag-stream.ts。
    * @param stream OpenAI 原始流式 chunk（SSE data 解析后的对象）
    * @returns 统一事件流
    */
   async *parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent> {
+    // 厂商 index 只是分组键：统一重编号为顺序序号，与标签工具调用共用同一计数器不撞号
+    const indexByVendorIndex = new Map<number, number>();
+    // 已发过 start 的统一序号（id/name 后补时重复发 start 携带补全值，消费端取最后值）
     const started = new Set<number>();
-    // 已发送 start 携带的 id/name（id/name 后补时重复发 start 携带补全值，消费端取最后值）
     const emitted = new Map<number, { id?: string; name?: string }>();
+    // 已开始且未补发结束的工具调用（finish_reason 与流尾各 flush 一次）
+    const openTools = new Set<number>();
+    let nextToolIndex = 0;
+    const textGuard = new PrefixDeltaGuard();
+    const thinkingGuard = new PrefixDeltaGuard();
+    const tagFilter = new InlineTagFilter(() => nextToolIndex++);
+    let finishReason: string | undefined;
     try {
       for await (const chunk of stream) {
         const choice = firstChoice(chunk);
@@ -77,17 +97,29 @@ export class OpenAICompletionsProtocol implements Protocol {
         // 取首个非空（同一 chunk 多字段同内容的厂商只发一次，防重复输出）
         const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text;
         if (reasoning) {
-          yield { type: "thinking_delta", thinking: reasoning };
+          const thinking = thinkingGuard.next(reasoning);
+          if (thinking) yield { type: "thinking_delta", thinking };
         }
-        if (delta?.content) {
-          // 正文文本：字符串直接用；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接（P10）
-          const text =
-            typeof delta.content === "string"
-              ? delta.content
-              : delta.content
-                  .map((b) => (b.type === "text" || b.text != null ? (b.text ?? "") : ""))
-                  .join("");
-          if (text) yield { type: "text_delta", text };
+        if (delta?.content != null) {
+          // 正文：字符串当单个文本块；兼容厂商（glm 等）发 content 块数组（P10）——
+          // text 块进正文管道，思考块（thinking/reasoning_content/reasoning 字段）进思考
+          // 管道（此前被静默丢弃，glm 思考+正文异常的根因之一）
+          const blocks =
+            typeof delta.content === "string" ? [{ text: delta.content }] : delta.content;
+          for (const block of blocks) {
+            const blockThinking = block.thinking ?? block.reasoning_content ?? block.reasoning;
+            if (blockThinking) {
+              const thinking = thinkingGuard.next(blockThinking);
+              if (thinking) yield { type: "thinking_delta", thinking };
+              continue;
+            }
+            // 文本块只认 type 缺省或 text（其他类型块即使带 text 字段也不当正文，防标签泄漏）
+            if (block.type !== undefined && block.type !== "text") continue;
+            if (!block.text) continue;
+            for (const event of tagFilter.push(textGuard.next(block.text))) {
+              yield event;
+            }
+          }
         }
 
         // 工具调用参数分多次到达：首次带 id / name（标记开始），之后只有参数增量。
@@ -97,23 +129,29 @@ export class OpenAICompletionsProtocol implements Protocol {
         if (Array.isArray(delta?.tool_calls)) {
           for (const tc of delta.tool_calls) {
             if (tc.index === undefined) continue;
-            if (!started.has(tc.index)) {
+            let toolIndex = indexByVendorIndex.get(tc.index);
+            if (toolIndex === undefined) {
+              toolIndex = nextToolIndex++;
+              indexByVendorIndex.set(tc.index, toolIndex);
+            }
+            if (!started.has(toolIndex)) {
               yield {
                 type: "toolcall_start",
-                index: tc.index,
+                index: toolIndex,
                 id: tc.id,
                 name: tc.function?.name ?? undefined,
               };
-              started.add(tc.index);
-              emitted.set(tc.index, { id: tc.id, name: tc.function?.name ?? undefined });
+              started.add(toolIndex);
+              openTools.add(toolIndex);
+              emitted.set(toolIndex, { id: tc.id, name: tc.function?.name ?? undefined });
             } else {
-              const sent = emitted.get(tc.index)!;
+              const sent = emitted.get(toolIndex)!;
               const updatedId = tc.id !== undefined && sent.id === undefined ? tc.id : undefined;
               const updatedName = tc.function?.name && sent.name === undefined ? tc.function.name : undefined;
               if (updatedId !== undefined || updatedName !== undefined) {
                 yield {
                   type: "toolcall_start",
-                  index: tc.index,
+                  index: toolIndex,
                   id: updatedId ?? sent.id,
                   name: updatedName ?? sent.name,
                 };
@@ -122,18 +160,19 @@ export class OpenAICompletionsProtocol implements Protocol {
               }
             }
             if (tc.function?.arguments) {
-              yield { type: "toolcall_delta", index: tc.index, partialJson: tc.function.arguments };
+              yield { type: "toolcall_delta", index: toolIndex, partialJson: tc.function.arguments };
             }
           }
         }
 
-        // 流结束：为所有已开始的工具调用补发结束事件
+        // 结束标记：补发已开始工具调用的结束事件，但继续消费到流尾——
+        // 个别厂商在 finish_reason 之后还补发正文 chunk，提前 return 会丢内容
         if (choice.finish_reason) {
-          for (const index of started) {
+          finishReason ??= choice.finish_reason;
+          for (const index of openTools) {
             yield { type: "toolcall_end", index };
           }
-          yield { type: "done", stopReason: choice.finish_reason };
-          return;
+          openTools.clear();
         }
       }
     } catch (err) {
@@ -141,10 +180,18 @@ export class OpenAICompletionsProtocol implements Protocol {
       yield { type: "error", message: (err as Error).message ?? String(err) };
       throw err;
     }
-    // 迭代正常结束但无 finish_reason（如厂商提前断流）：已开始的调用补发结束，报 error
-    for (const index of started) {
+    // 流尾收尾：未闭合的标签残料按原文发出，未结束的工具调用补发结束
+    for (const event of tagFilter.flush()) {
+      yield event;
+    }
+    for (const index of openTools) {
       yield { type: "toolcall_end", index };
     }
+    if (finishReason) {
+      yield { type: "done", stopReason: finishReason };
+      return;
+    }
+    // 流尾无 finish_reason（如厂商提前断流）：已按异常轮收尾，报 error
     yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
   }
 }

@@ -1,10 +1,12 @@
 import type { Context, ContentBlock, Message, StreamEvent, ToolDefinition } from "../../core/index.js";
 import type { Protocol } from "../types.js";
+import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
 interface AnthropicChunk {
   type?: string;
   index?: number;
-  content_block?: { type?: string; id?: string; name?: string };
+  /** text/thinking 块可能把首段内容放在 start 而非 delta（部分兼容端点） */
+  content_block?: { type?: string; id?: string; name?: string; text?: string; thinking?: string };
   delta?: {
     type?: string;
     text?: string;
@@ -35,6 +37,8 @@ export class AnthropicMessagesProtocol implements Protocol {
   /**
    * 解析 Anthropic 流式响应，转成统一事件流。
    * tool_use 参数经 input_json_delta 增量到达；content_block 的 index 映射为工具调用序号。
+   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件）与前缀剥离器
+   * （累积全文下发的厂商防滚雪球重复），按 content 块生命周期各用一份，见 tag-stream.ts。
    * @param stream Anthropic 原始流式事件对象
    * @returns 统一事件流
    */
@@ -42,6 +46,48 @@ export class AnthropicMessagesProtocol implements Protocol {
     const toolIndexByBlock = new Map<number, number>();
     let nextToolIndex = 0;
     let stopReason: string | undefined;
+    // 每个 text/thinking 块各一份清洗状态（块开始新建、块结束 flush），按块 index 取用
+    const textGuards = new Map<number, PrefixDeltaGuard>();
+    const thinkingGuards = new Map<number, PrefixDeltaGuard>();
+    const tagFilters = new Map<number, InlineTagFilter>();
+    // 已开始且未 stop 的 text 块（流尾 flush 标签残料用）
+    const openTextBlocks = new Set<number>();
+
+    /** 块的正文清洗链：前缀剥离 → 标签状态机 */
+    const pushText = (blockIndex: number, text: string): StreamEvent[] => {
+      // 登记活跃 text 块：块结束与流尾时要 flush 标签残料（含无首段内容的普通块）
+      openTextBlocks.add(blockIndex);
+      let guard = textGuards.get(blockIndex);
+      if (!guard) {
+        guard = new PrefixDeltaGuard();
+        textGuards.set(blockIndex, guard);
+      }
+      let filter = tagFilters.get(blockIndex);
+      if (!filter) {
+        filter = new InlineTagFilter(() => nextToolIndex++);
+        tagFilters.set(blockIndex, filter);
+      }
+      return filter.push(guard.next(text));
+    };
+
+    /** 块的思考清洗链：前缀剥离（思考里不做过标签识别） */
+    const pushThinking = (blockIndex: number, thinking: string): StreamEvent[] => {
+      let guard = thinkingGuards.get(blockIndex);
+      if (!guard) {
+        guard = new PrefixDeltaGuard();
+        thinkingGuards.set(blockIndex, guard);
+      }
+      const out = guard.next(thinking);
+      return out ? [{ type: "thinking_delta", thinking: out }] : [];
+    };
+
+    /** 块结束后释放该块的清洗状态 */
+    const releaseBlock = (blockIndex: number): void => {
+      textGuards.delete(blockIndex);
+      thinkingGuards.delete(blockIndex);
+      tagFilters.delete(blockIndex);
+      openTextBlocks.delete(blockIndex);
+    };
 
     try {
       for await (const chunk of stream) {
@@ -50,36 +96,59 @@ export class AnthropicMessagesProtocol implements Protocol {
 
         switch (event.type) {
           case "content_block_start": {
-            const block = event.content_block;
-            if (block?.type === "tool_use") {
+            const block = event.content_block ?? {};
+            const blockIndex = event.index ?? -1;
+            if (block.type === "tool_use") {
               const toolIndex = nextToolIndex++;
-              toolIndexByBlock.set(event.index ?? -1, toolIndex);
+              toolIndexByBlock.set(blockIndex, toolIndex);
               yield {
                 type: "toolcall_start",
                 index: toolIndex,
                 id: block.id,
                 name: block.name,
               };
+              break;
+            }
+            // text/thinking 块：start 可能已携带首段内容（部分兼容端点不放 delta）
+            if (block.type === "thinking" && block.thinking) {
+              for (const out of pushThinking(blockIndex, block.thinking)) yield out;
+            } else if (block.text) {
+              for (const out of pushText(blockIndex, block.text)) yield out;
             }
             break;
           }
           case "content_block_delta": {
             const delta = event.delta;
+            const blockIndex = event.index ?? -1;
             if (delta?.type === "text_delta") {
-              yield { type: "text_delta", text: delta.text ?? "" };
+              // 字段缺失不发空事件（部分兼容端点发空 delta，全空流会产出空内容块）
+              if (delta.text) {
+                for (const out of pushText(blockIndex, delta.text)) yield out;
+              }
             } else if (delta?.type === "thinking_delta") {
-              yield { type: "thinking_delta", thinking: delta.thinking ?? "" };
+              if (delta.thinking) {
+                for (const out of pushThinking(blockIndex, delta.thinking)) yield out;
+              }
             } else if (delta?.type === "input_json_delta") {
-              const toolIndex = toolIndexByBlock.get(event.index ?? -1) ?? 0;
-              yield { type: "toolcall_delta", index: toolIndex, partialJson: delta.partial_json ?? "" };
+              // 映射不到块 index 的参数增量直接跳过：兜底并到工具 0 会污染它的参数流
+              const toolIndex = toolIndexByBlock.get(blockIndex);
+              if (toolIndex !== undefined && delta.partial_json) {
+                yield { type: "toolcall_delta", index: toolIndex, partialJson: delta.partial_json };
+              }
             }
             break;
           }
           case "content_block_stop": {
-            const toolIndex = toolIndexByBlock.get(event.index ?? -1);
+            const blockIndex = event.index ?? -1;
+            const toolIndex = toolIndexByBlock.get(blockIndex);
             if (toolIndex !== undefined) {
               yield { type: "toolcall_end", index: toolIndex };
             }
+            if (openTextBlocks.has(blockIndex)) {
+              // 块结束：该块的标签残料按原文发出
+              for (const out of tagFilters.get(blockIndex)?.flush() ?? []) yield out;
+            }
+            releaseBlock(blockIndex);
             break;
           }
           case "message_delta":
@@ -100,6 +169,10 @@ export class AnthropicMessagesProtocol implements Protocol {
       // 流中断异常：发 error 事件（观测通道）后原样抛出（控制流，剥组重试等依赖异常）
       yield { type: "error", message: (err as Error).message ?? String(err) };
       throw err;
+    }
+    // 流尾：未 stop 的 text 块 flush 标签残料
+    for (const blockIndex of openTextBlocks) {
+      for (const out of tagFilters.get(blockIndex)?.flush() ?? []) yield out;
     }
     // 迭代正常结束但未收到 message_stop（厂商提前断流）：报 error 标记异常轮
     yield { type: "error", message: "流意外结束（未收到 message_stop）" };
