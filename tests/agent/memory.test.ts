@@ -37,7 +37,8 @@ describe("会话记忆（DESIGN 9.7）", () => {
     for await (const _ of agent.run()) {
       // 消费
     }
-    // 每轮 Stop 后记忆更新一次
+    await agent.whenMemorySettled();
+    // 每轮 Stop 后记忆更新一次（后台异步，收尾后断言）
     expect(memoryCalls).toHaveLength(1);
     expect(memoryCalls[0]).toMatchObject({ hasCurrent: true });
 
@@ -46,6 +47,7 @@ describe("会话记忆（DESIGN 9.7）", () => {
     for await (const _ of agent.run()) {
       // 消费
     }
+    await agent.whenMemorySettled();
     expect(memoryCalls).toHaveLength(2);
   });
 
@@ -94,11 +96,12 @@ describe("会话记忆（DESIGN 9.7）", () => {
       memory: true,
       compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
     });
-    // 第一轮：正常对话，Stop 后记忆建立
+    // 第一轮：正常对话，Stop 后后台建立记忆（E40 异步：收尾后等待更新完成）
     agent.start("搭建脚手架");
     for await (const _ of agent.run()) {
       // 消费
     }
+    await agent.whenMemorySettled();
     // 第二轮：大输入撞线压缩——摘要直接用记忆，不调现场摘要模型
     const longInput = "很长的问题".repeat(200);
     agent.start(longInput);
@@ -139,5 +142,76 @@ describe("buildMemoryUpdateRequest", () => {
     expect(text).toContain("x".repeat(2000));
     expect(text).not.toContain("x".repeat(2001));
     expect(text).toMatch(/…$/);
+  });
+});
+describe("记忆更新后台化（E40）", () => {
+  it("回合收尾不再被记忆更新阻塞：run() 先于记忆请求完成返回", async () => {
+    let releaseMemory: (() => void) | undefined;
+    let turnDone = false;
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          // 挂住后台记忆更新，直到断言完成
+          await new Promise<void>((resolve) => (releaseMemory = resolve));
+          yield { type: "text_delta", text: "记忆" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    agent.start("你好");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    turnDone = true;
+    // 回合已结束而后台记忆更新仍被挂起：fire-and-forget 生效
+    expect(turnDone).toBe(true);
+    expect(isMemoryRequest({ messages: [] })).toBe(false);
+    releaseMemory?.();
+    await agent.whenMemorySettled();
+  });
+
+  it("跑动中多次触发合并为尾随一次：不叠加排队调用", async () => {
+    let memoryCalls = 0;
+    let notifyStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => (notifyStarted = resolve));
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryCalls++;
+          if (memoryCalls === 1) {
+            // 通知测试第一次更新已开跑（跑动中），随后挂 20ms 供后续收尾触发进来合并
+            notifyStarted?.();
+            await new Promise<void>((r) => setTimeout(r, 20));
+          }
+          yield { type: "text_delta", text: "记忆" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    agent.start("第一轮");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await firstStarted;
+    // 第一次更新跑动中再收两轮尾：第二次触发排队、第三次被合并（queued 已置位）
+    agent.start("第二轮");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    agent.start("第三轮");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 第一次 + 尾随一次 = 恰好 2 次：跑动中的两次收尾没有各自叠加成两次调用
+    expect(memoryCalls).toBe(2);
   });
 });

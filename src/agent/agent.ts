@@ -133,6 +133,10 @@ export class Agent {
   private memory = "";
   /** 记忆已覆盖的消息数（上次记忆更新时）：压缩时其后的消息为「在途」，保留原文不丢 */
   private memoryCovered = 0;
+  /** 后台记忆更新串行链（E40：fire-and-forget 的排队与收尾观察都挂在这条链上） */
+  private memoryChain: Promise<void> = Promise.resolve();
+  /** 更新跑动中又收到收尾触发的尾随标记：更新完成后按最新消息补跑一次 */
+  private memoryQueued = false;
   /** agent 邮箱（DESIGN 11.3）：其他 agent 投递的消息队列，注入上下文供模型读取 */
   private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
@@ -432,9 +436,10 @@ export class Agent {
       //（子 agent 轮次结束不应把主界面打成空闲，P8）
       this.stopped = true;
       await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
-      // 会话记忆（DESIGN 9.7）：每轮结束后增量维护记忆，压缩时用记忆替代现场摘要省模型调用
+      // 会话记忆（DESIGN 9.7）：回合收尾后台增量维护记忆——触发点对齐 cc（完整回合收尾），
+      // 更新 fire-and-forget 不阻塞回合结束（E40），更新跑动中再触发合并为尾随一次
       if (this.memoryEnabled) {
-        await this.maybeUpdateMemory();
+        this.scheduleMemoryUpdate();
       }
       return;
     }
@@ -463,10 +468,28 @@ export class Agent {
   }
 
   /**
-   * 增量维护会话记忆（DESIGN 9.7）：用模型把当前记忆 + 最近对话合入更新后的记忆。
-   * 失败静默（记忆不更新，不影响主流程）；记忆文本限制长度防无限膨胀。
+   * 调度后台记忆更新：更新串行挂在 memoryChain 上，跑动中再触发只合并为一次尾随
+   * 更新（更新完成时按最新消息补跑，不叠加排队调用）。
    */
-  private async maybeUpdateMemory(): Promise<void> {
+  private scheduleMemoryUpdate(): void {
+    if (this.memoryQueued) return;
+    this.memoryQueued = true;
+    this.memoryChain = this.memoryChain.then(async () => {
+      this.memoryQueued = false;
+      await this.updateMemoryOnce();
+    });
+  }
+
+  /** 等待后台记忆更新全部收尾（测试与宿主退出排空用；无挂起更新时立即返回） */
+  whenMemorySettled(): Promise<void> {
+    return this.memoryChain;
+  }
+
+  /** 单次记忆更新：请求带上调用时刻的消息快照，覆盖点记快照值（更新期间新到消息不算已覆盖） */
+  private async updateMemoryOnce(): Promise<void> {
+    // 覆盖点快照：更新请求基于此刻的消息集合；期间新到的消息留给下次更新，防止
+    // 后台更新与下一轮对话并发时把未入记忆的消息误标为已覆盖（压缩在途判定会漏内容）
+    const coveredAt = this.messages.length;
     try {
       const updated = await updateMemory(
         this.modelClient,
@@ -479,10 +502,10 @@ export class Agent {
       );
       if (updated.trim().length > 0) {
         this.memory = updated.trim().slice(0, MAX_MEMORY_CHARS);
-        this.memoryCovered = this.messages.length; // 当前全部消息已入记忆
+        this.memoryCovered = Math.max(this.memoryCovered, coveredAt);
       }
     } catch {
-      // 记忆更新失败不影响对话主流程
+      // 记忆更新失败不影响对话主流程（含用户打断中止）
     }
   }
 

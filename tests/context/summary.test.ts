@@ -14,17 +14,20 @@ function mockSummarizer(text: string): Summarizer {
 }
 
 describe("buildSummaryRequest（摘要请求）", () => {
-  it("包含六段结构化摘要格式与禁工具调用的前言", () => {
+  it("包含九段结构化摘要格式（对齐 cc，E41）与禁工具调用的前言", () => {
     const request = buildSummaryRequest();
     expect(request.role).toBe("user");
     const content = (request as { content: string }).content;
     expect(content).toContain("不要调用任何工具");
     expect(content).toContain("1. 目标");
-    expect(content).toContain("2. 约束");
-    expect(content).toContain("3. 进展");
-    expect(content).toContain("4. 决策");
-    expect(content).toContain("5. 下一步");
-    expect(content).toContain("6. 关键上下文");
+    expect(content).toContain("2. 关键技术概念与约束");
+    expect(content).toContain("3. 文件与代码");
+    expect(content).toContain("4. 错误与修复");
+    expect(content).toContain("5. 问题解决");
+    expect(content).toContain("6. 全部用户消息");
+    expect(content).toContain("7. 待办任务");
+    expect(content).toContain("8. 当前工作");
+    expect(content).toContain("9. 下一步");
   });
 
   it("无指导时不含 Additional Instructions 段", () => {
