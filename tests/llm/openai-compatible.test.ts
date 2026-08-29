@@ -160,8 +160,11 @@ describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
         events.push(e);
       }
     }).rejects.toThrow(/模型响应超时/);
-    // 已产出的第一个 chunk 正常到达；超时触发后底层被 abort 释放
-    expect(events).toEqual([{ type: "text_delta", text: "hi" }]);
+    // 已产出的第一个 chunk 正常到达；超时异常经协议层补发 error 事件（观测通道）后抛出
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "error", message: expect.stringContaining("模型响应超时") },
+    ]);
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 

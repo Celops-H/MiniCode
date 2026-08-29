@@ -108,8 +108,10 @@ export class OpenAICompatibleProvider implements Provider {
         },
         { signal: controller.signal },
       );
-      yield* withIdleTimeout(this.protocol.parseStream(stream), this.streamIdleTimeoutMs, () =>
-        controller.abort(),
+      // 空闲超时包在原始流外：厂商 ping、仅 role 的 chunk 等不产出事件的 chunk 也算活跃，
+      // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出
+      yield* this.protocol.parseStream(
+        withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort()),
       );
     } finally {
       if (userSignal) userSignal.removeEventListener("abort", forwardAbort);

@@ -124,4 +124,43 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     };
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
   });
+
+  it("N 秒无新 chunk 时中断底层请求并抛「模型响应超时」（空闲超时与 openai 侧一致）", async () => {
+    async function* hangingStream(signal?: AbortSignal): AsyncIterable<unknown> {
+      yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } };
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    }
+    const client: AnthropicMessagesClient = {
+      messages: {
+        async create(_request, options) {
+          return hangingStream(options?.signal);
+        },
+      },
+    };
+    const provider = new AnthropicCompatibleProvider({
+      id: "deepseek-anthropic",
+      name: "DeepSeek（Anthropic 兼容）",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50, // 测试用短超时
+      models: MODELS,
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    const t0 = Date.now();
+    await expect(async () => {
+      for await (const e of provider.stream("claude-sonnet-4-5", createContext("s"))) {
+        events.push(e);
+      }
+    }).rejects.toThrow(/模型响应超时/);
+    // 已产出的事件保留；超时异常经协议层补发 error 事件（观测通道）后抛出
+    expect(events[0]).toEqual({ type: "text_delta", text: "hi" });
+    expect(events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("模型响应超时") });
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
 });
