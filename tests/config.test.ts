@@ -19,33 +19,40 @@ describe("resolveConfigPaths", () => {
 });
 
 describe("resolveSessionsDir", () => {
-  it("按启动工作目录分子目录（E46）：路径中非字母数字字符替换为「-」", () => {
+  it("按启动工作目录分子目录（E46）：非字母数字替换为「-」并追加内容哈希后缀（防有损编码撞名）", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "my proj", "app-v2"));
     const dir = resolveSessionsDir({ homedir: "/home/tester", cwd });
-    expect(dir).toBe(
-      path.join("/home/tester", ".minicode", "sessions", cwd.replace(/[^a-zA-Z0-9]/g, "-")),
-    );
+    const name = dir.split(path.sep).pop()!;
+    expect(name).toBe(`${cwd.replace(/[^a-zA-Z0-9]/g, "-")}-${name.split("-").pop()}`);
+    // 有损编码撞名的路径（project-a 与 project_a）哈希不同：隔离不失效
+    const sibling = resolveSessionsDir({
+      homedir: "/home/tester",
+      cwd: path.resolve(path.join(os.tmpdir(), "my proj", "app_v2")),
+    });
+    expect(sibling.split(path.sep).pop()).not.toBe(name);
   });
 
   it("root 覆盖（config.sessionsDir）作用于根目录，子目录编码不变", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "w"));
     const dir = resolveSessionsDir({ homedir: "/home/tester", root: "/custom/sessions", cwd });
-    expect(dir).toBe(path.join("/custom/sessions", cwd.replace(/[^a-zA-Z0-9]/g, "-")));
+    const name = dir.split(path.sep).pop()!;
+    expect(dir.startsWith(path.join("/custom/sessions"))).toBe(true);
+    expect(name).toContain(cwd.replace(/[^a-zA-Z0-9]/g, "-"));
   });
 
   it("XDG_CONFIG_HOME 优先于 homedir", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "w"));
     const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
-    expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg", cwd })).toBe(
-      path.join("/etc/xdg", "minicode", "sessions", encoded),
+    expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg", cwd })).toMatch(
+      new RegExp(`^${path.join("/etc/xdg", "minicode", "sessions", encoded).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-z]+$`),
     );
   });
 
-  it("超长路径截断到 200 字符并追加内容哈希后缀（防截断撞名）", () => {
+  it("超长路径截断到 200 字符内并保留内容哈希后缀", () => {
     const deep = path.resolve(`/${"x".repeat(300)}`);
     const dir = resolveSessionsDir({ homedir: "/home/tester", cwd: deep });
     const name = dir.split(path.sep).pop()!;
-    expect(name.length).toBeLessThanOrEqual(200 + 1 + 7);
+    expect(name.length).toBeLessThanOrEqual(200);
     expect(name).toMatch(/-[0-9a-z]+$/);
     // 内容不同的长路径哈希不同
     const other = resolveSessionsDir({ homedir: "/home/tester", cwd: path.resolve(`/${"y".repeat(300)}`) });

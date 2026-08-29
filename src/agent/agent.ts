@@ -68,6 +68,8 @@ const MAX_CONTEXT_RETRY = 3;
 
 /** 会话记忆文本上限（DESIGN 9.7：防无限膨胀，超出截断） */
 const MAX_MEMORY_CHARS = 4000;
+/** 单次记忆更新的批大小（条）：按未覆盖区取最旧一批，覆盖点精确推进（批次 5~8 审查发现三） */
+const MEMORY_UPDATE_BATCH = 16;
 
 export interface AgentOptions {
   modelClient: ModelClient;
@@ -501,18 +503,25 @@ export class Agent {
     return this.memoryChain;
   }
 
-  /** 单次记忆更新：请求带上调用时刻的消息快照，覆盖点记快照值（更新期间新到消息不算已覆盖） */
+  /**
+   * 单次记忆更新：只喂上次覆盖点之后的未覆盖消息（按批取最旧一批，覆盖点精确推进），
+   * 杜绝「最近 8 条」窗口在覆盖点之间留下永远进不了记忆的空洞——空洞段会在记忆替代
+   * 压缩时被静默丢弃（批次 5~8 审查发现三）。覆盖点记调用时刻的实际覆盖位置（快照），
+   * 更新期间新到消息留给下次更新，不误标已覆盖。
+   */
   private async updateMemoryOnce(): Promise<void> {
-    // 覆盖点快照：更新请求基于此刻的消息集合；期间新到的消息留给下次更新，防止
-    // 后台更新与下一轮对话并发时把未入记忆的消息误标为已覆盖（压缩在途判定会漏内容）
-    const coveredAt = this.messages.length;
+    // 未覆盖区取最旧一批（时间序）：覆盖点按实际发送范围推进，多轮后台更新逐步消化积压
+    const uncovered = this.messages.slice(this.memoryCovered);
+    const recent = uncovered.slice(0, MEMORY_UPDATE_BATCH);
+    const coveredAt = this.memoryCovered + recent.length;
     try {
       const updated = await updateMemory(
         this.modelClient,
         this.modelId,
         {
           currentMemory: this.memory,
-          recentMessages: this.messages,
+          recentMessages: recent,
+          maxRecentMessages: recent.length, // 批内不再二次截断：覆盖点与实际发送范围严格一致
         },
         this.interruptController.signal,
       );
@@ -521,7 +530,7 @@ export class Agent {
         this.memoryCovered = Math.max(this.memoryCovered, coveredAt);
       }
     } catch {
-      // 记忆更新失败不影响对话主流程（含用户打断中止）
+      // 记忆更新失败不影响对话主流程（含用户打断中止）；覆盖点不前进，下次更新重试同一区间
     }
   }
 

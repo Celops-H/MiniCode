@@ -54,14 +54,17 @@ const MAX_SANITIZED_LENGTH = 200;
 
 /**
  * 启动目录 → 会话子目录名：非字母数字字符一律替换为「-」（跨平台安全——Windows
- * 盘符冒号与路径分隔符一并替换）；超长截断并追加原串哈希后缀防撞名。
+ * 盘符冒号与路径分隔符一并替换），并统一追加原串哈希后缀——有损编码对非 ASCII 路径
+ * （中文目录名整段坍缩为「-」）与 `_`/`.` 类差异撞名，会话隔离对这类路径失效
+ * （批次 5~8 审查建议）；超长再截断（哈希已在后缀，无需二次防撞）。
  * @param name 待编码的路径
  * @returns 编码后的子目录名
  */
 export function sanitizePath(name: string): string {
   const sanitized = name.replace(/[^a-zA-Z0-9]/g, "-");
-  if (sanitized.length <= MAX_SANITIZED_LENGTH) return sanitized;
-  return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${fnv1aBase36(name)}`;
+  const hashed = `${sanitized}-${fnv1aBase36(name)}`;
+  if (hashed.length <= MAX_SANITIZED_LENGTH) return hashed;
+  return `${hashed.slice(0, MAX_SANITIZED_LENGTH - 8)}-${fnv1aBase36(name)}`;
 }
 
 /** FNV-1a 哈希的 base36 形式（撞名防御用短哈希，非安全场景） */

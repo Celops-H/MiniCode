@@ -49,7 +49,7 @@ export class SessionStore {
       formatVersion: 1,
     };
     await this.ensureDir();
-    await writeFile(this.metaFile(meta.id), JSON.stringify(meta, null, 2), "utf8");
+    await writeFile(this.metaFile(meta.id), JSON.stringify(meta, null, 2), { mode: 0o600, encoding: "utf8" });
     return new Session(meta);
   }
 
@@ -92,7 +92,7 @@ export class SessionStore {
     for (const [id, { session, messages }] of [...this.pending]) {
       await appendJsonlBatch(this.messageFile(id), messages);
       this.pending.delete(id);
-      await writeFile(this.metaFile(id), JSON.stringify(session.meta, null, 2), "utf8");
+      await writeFile(this.metaFile(id), JSON.stringify(session.meta, null, 2), { mode: 0o600, encoding: "utf8" });
     }
   }
 
@@ -110,12 +110,12 @@ export class SessionStore {
     await this.ensureDir();
     const file = this.messageFile(session.meta.id);
     const tmp = `${file}.tmp`;
-    // 先写临时文件再原子改名：中断时旧文件仍完整，不会损坏会话
-    await writeFile(tmp, messages.map((m) => JSON.stringify(m)).join("\n") + "\n", "utf8");
+    // 先写临时文件再原子改名：中断时旧文件仍完整，不会损坏会话（POSIX 600：会话内容属用户隐私）
+    await writeFile(tmp, messages.map((m) => JSON.stringify(m)).join("\n") + "\n", { mode: 0o600, encoding: "utf8" });
     await rename(tmp, file);
     session.replaceAll(messages);
     session.meta.updatedAt = new Date().toISOString();
-    await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), "utf8");
+    await writeFile(this.metaFile(session.meta.id), JSON.stringify(session.meta, null, 2), { mode: 0o600, encoding: "utf8" });
     // 删除快照中的旧消息（否则后续 flush 会把旧消息追加到重写后的 JSONL 造成错位）；
     // 重写期间新 append 的消息保留。删除在全部 IO 之后：重写失败则 pending 原样保留，flush 仍可补盘
     const entry = this.pending.get(session.meta.id);

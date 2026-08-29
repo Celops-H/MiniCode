@@ -215,3 +215,50 @@ describe("记忆更新后台化（E40）", () => {
     expect(memoryCalls).toBe(2);
   });
 });
+
+
+describe("覆盖窗口与在途保留（批次 5~8 审查必须项）", () => {
+  it("超过单批的消息分批覆盖：未覆盖尾部在记忆替代压缩时保留原文，已覆盖头部被摘要吸收", async () => {
+    // 预置 20 条历史 + 触发轮 2 条 = 22 条未覆盖；单批 16 条 → 覆盖点推进到 16，
+    // 尾部 6 条未覆盖——记忆替代压缩时必须作为在途保留（旧实现覆盖点记全量长度会静默丢弃）
+    const pre = Array.from({ length: 20 }, (_, i) => userMessage(`消息${i}`));
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          yield { type: "text_delta", text: "记忆：预置历史" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        if (context.messages.some((m) => typeof m.content === "string" && m.content.includes("结构化摘要"))) {
+          yield { type: "text_delta", text: "现场摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      initialMessages: pre,
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("触发压缩");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    await agent.compactNow();
+    const after = agent.getMessages();
+    expect(after[0]).toMatchObject({ role: "user", source: "system", content: expect.stringContaining("【会话摘要】") });
+    // 未覆盖尾部（消息16~19 + 触发轮）保留原文
+    expect(after.some((m) => typeof m.content === "string" && m.content === "消息19")).toBe(true);
+    expect(after.some((m) => typeof m.content === "string" && m.content === "触发压缩")).toBe(true);
+    // 已覆盖头部被摘要吸收
+    expect(after.some((m) => typeof m.content === "string" && m.content === "消息0")).toBe(false);
+  });
+});

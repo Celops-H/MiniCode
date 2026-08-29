@@ -36,5 +36,6 @@ export async function readJsonl<T>(file: string): Promise<T[]> {
 export async function appendJsonlBatch<T>(file: string, items: T[]): Promise<void> {
   if (items.length === 0) return;
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  await appendFile(file, items.map((item) => `${JSON.stringify(item)}\n`).join(""), "utf8");
+  // POSIX 600：会话消息文件属用户隐私（Windows 忽略 mode 无副作用）
+  await appendFile(file, items.map((item) => `${JSON.stringify(item)}\n`).join(""), { mode: 0o600, encoding: "utf8" });
 }
