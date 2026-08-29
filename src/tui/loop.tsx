@@ -336,7 +336,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/help") {
-      showToast("命令：/exit 退出 · /compact [指导] 压缩 · /init 生成 AGENTS.md · /session 切换 · /connect 连接 · /model 模型 · /mcp 服务 · /skill 技能 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
+      showToast("命令：/exit 退出 · /compact [指导] 压缩 · /init 生成 AGENTS.md · /session 切换 · /connect 连接 · /model 模型 · /mcp 服务 · /skills 技能 · /rename 改名 · /clear 清空 · /help 帮助 · Esc 打断（连按两次退出）");
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       return;
     }
@@ -390,9 +390,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       });
       return;
     }
-    if (command === "/mcp" || command === "/skill") {
+    if (command === "/mcp" || command === "/skills" || command === "/skill") {
       // 扩展面板（UI-SPEC §8b）：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配
-      // （BACKEND §19/§20）；重装配会重建 agent，运行中拒绝（同 /model 守卫）
+      // （BACKEND §19/§20）；重装配会重建 agent，运行中拒绝（同 /model 守卫）。
+      // E22：命令改名为 /skills（/skill 保留兼容别名）
       if (state.status === "running") {
         showToast(command === "/mcp" ? "运行中不可管理 MCP 服务，等本轮结束后再试" : "运行中不可管理技能，等本轮结束后再试");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });

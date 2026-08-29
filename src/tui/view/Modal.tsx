@@ -1,11 +1,11 @@
 /**
- * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P6-3 弹窗观感修正）：权限确认 / 会话面板 / /connect / /model。
+ * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P6-3 弹窗观感修正 + 面板样式统一批 E20~E29）：权限确认 / 会话面板 / /connect / /model / /mcp / /skills。
  * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
- * 框线风格与消息区工具卡一体：rounded 边框 + 边框内标题，分区（标题/参数/选项/键位提示）。
- * 线条统一黑白灰阶（边框/标题/分隔，P6-3 修正 C 组过犹不及：文字也黑白不染色）——
- * 「选中项」用浅蓝背景块（foregroundAccent 底 + 黑字）做高亮，一眼可辨且与普通文字区分；
- * 例外是 /model 模型行（2026-08-28 用户定论）：行数多、反色块过重，改选中白字 + ▸、未选中灰字，无背景块。
- * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）。
+ * 弹窗（权限确认、/connect）保留 rounded 框线；面板（/model、/mcp、/skills）去线框只留浅紫上界线
+ * （E28），提示行固定面板最下一行、上方有分隔线（E23），配色统一——提示灰/条目白/选中正绿（E23），
+ * 会话列表选中行同样正绿高亮（E25），扩展面板开关前置绿对勾/红叉（E21），/connect key 未输入显示
+ * 灰色占位字、键入消失（E20）。
+ * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）；面板打开时底部输入框隐藏让位（E29，App 层）。
  * 键位：权限三决策 1/2/3 或 ←→ 选择 Enter 确认 Esc 拒绝；会话列表 ↑↓ 选择 Enter 切换 Esc 取消。
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
  * 非 each 依赖的标量刷新），改用 createMemo 直接读 selected 重算——高亮随 ←→ 移动。
@@ -21,6 +21,48 @@ import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "./fit.js
 /** 弹窗内层 box 固定宽度：终端宽 - 四周余量（C-2 固定大小，不随内容自适应抖动） */
 function modalWidth(dims: { width?: number }): number {
   return Math.max(30, (dims.width ?? 80) - 6);
+}
+
+/**
+ * 面板容器（E23/E28）：去线框只留浅紫上界线；内容区（窗口化行）限高，
+ * 提示行固定面板最下一行、上方有分隔线，配色统一——提示灰、条目白、选中正绿。
+ * 供 /model、/mcp、/skills 三块面板共用（E23 一致性）。
+ */
+function PanelFrame(props: {
+  dims: { width?: number };
+  /** 面板内容行（窗口化后的条目） */
+  rows: JSX.Element[];
+  /** 滚动条状态：start 窗口起点、visible 可见行数、total 总行数（total <= visible 无滚动条） */
+  scroll: { start: number; visible: number; total: number };
+  /** 固定最下一行的键位提示（灰） */
+  hint: string;
+}): JSX.Element {
+  const width = modalWidth(props.dims);
+  // 行级滚动条（E23）：可见行右侧一列轨道，滑块位置随窗口滚动；行高与内容行一一对齐
+  const track: JSX.Element[] = [];
+  if (props.scroll.total > props.scroll.visible) {
+    const thumbPos = Math.floor(
+      (props.scroll.start / Math.max(1, props.scroll.total - props.scroll.visible)) *
+        Math.max(0, props.scroll.visible - 1),
+    );
+    for (let i = 0; i < props.scroll.visible; i++) {
+      track.push(<text fg={i === thumbPos ? theme.panelTopLine : theme.borderSubtle}>{i === thumbPos ? "█" : "│"}</text>);
+    }
+  }
+  return (
+    <box flexDirection="column" flexShrink={0} width={width} backgroundColor={theme.backgroundPanel}>
+      <text fg={theme.panelTopLine}>{"─".repeat(width)}</text>
+      <box flexDirection="row" paddingLeft={1}>
+        <box flexDirection="column" flexGrow={1}>{props.rows}</box>
+        {track.length > 0 ? <box flexDirection="column" flexShrink={0}>{track}</box> : null}
+      </box>
+      {/* 提示行上方分隔线 + 固定最下一行的键位提示（灰） */}
+      <text fg={theme.borderSubtle}>{"─".repeat(width)}</text>
+      <text fg={theme.textMuted} paddingLeft={1} paddingY={1}>
+        {props.hint}
+      </text>
+    </box>
+  );
 }
 
 /** 权限确认：边框内标题 + 工具/参数 + 三决策 + 键位提示（选中项浅蓝背景块黑字，随 ←→ 移动；文字黑白不染色） */
@@ -116,7 +158,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(
         <box flexDirection="column">
-          <text fg={sel ? (b.action === "delete" ? theme.error : theme.text) : theme.text}>
+          <text fg={sel ? (b.action === "delete" ? theme.error : theme.success) : theme.text}>
             {`${sel ? "▸ " : "  "}${title}${" ".repeat(GAP)}${model}${" ".repeat(GAP)}${idCell}${actionTag}`}
           </text>
           {/* 副行缩进对齐第一列标题文字：外层 paddingX 2 + 字面空格 2 = 第 4 列，
@@ -164,6 +206,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
   const rows = createMemo(() => {
     // key 输入阶段
     if (b.kind === "connect-key") {
+      // E20：未输入显示背景字（灰），键入即消失——占位文本与实际输入同位置不同色
       const display = b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）";
       return [
         <text paddingY={1} fg={theme.textMuted}>
@@ -172,7 +215,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
         <text>
           默认模型 {b.defaultModel} · {b.apiKeyEnv}：
         </text>,
-        <text fg={theme.text}>
+        <text fg={b.key ? theme.text : theme.textMuted}>
           {display}
           {/* 竖线光标（P4-5）：key 输入位置细竖线指示，明灭闪烁 */}
           <span style={{ fg: cursorOn() ? theme.text : theme.background }}>│</span>
@@ -226,11 +269,12 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
 }
 
 /** /model 模型选择：按厂商分组（● 厂商名 组头 + 缩进模型行，组头不可选中、模型行与厂商名不对齐）
- *  + 思考等级行（←→ 调）+ 键位提示；窗口渲染防超页（选中模型居中滚动、越界贴边） */
+ *  + 思考等级行（←→ 调）；窗口渲染防超页（选中模型居中滚动、越界贴边）。
+ *  E23/E28：去线框走 PanelFrame——浅紫上界线、提示固定最下一行带分隔、配色条目白/选中正绿/提示灰 */
 function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
-  const rows = createMemo(() => {
+  const view = createMemo(() => {
     // 平铺分组显示行：厂商变化时插组头「● 厂商名」，其后是该厂商模型行（缩进 4 列，与组头不对齐）
     const display: Array<{ kind: "group"; name: string } | { kind: "model"; index: number }> = [];
     let lastProvider = "";
@@ -249,60 +293,52 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const visible = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), total - visible));
     const windowed = display.slice(start, start + visible);
+    // 配色统一（E23）：条目白、选中正绿（success + ▸），组头/提示灰
     const items = windowed.map((d) =>
       d.kind === "group" ? (
         <text fg={theme.textMuted}>
           ● {d.name}
         </text>
       ) : d.index === b.selected ? (
-        // 选中模型白字 + ▸ 标记（2026-08-28 用户定论：模型行数多，浅蓝反色块过重，
-        // 改与未选中灰字以色彩区分、不用背景块）；缩进保持 4+标记 与未选中同列
-        <text fg={theme.text}>
+        <text fg={theme.success}>
           {"    ▸ "}
           {b.models[d.index]!.id}
         </text>
       ) : (
-        <text fg={theme.textMuted}>
+        <text fg={theme.text}>
           {"    "}
           {`  ${b.models[d.index]!.id}`}
         </text>
       ),
     );
-    // 溢出指示只计模型数（total 含组头，不计入以免数字与模型数不符）
-    const modelCount = b.models.length;
-    const visibleModels = windowed.filter((d) => d.kind === "model").length;
-    const overflow = modelCount > visibleModels ? `（${visibleModels}/${modelCount}）` : "";
+    // 思考等级行是内容行（←→ 调整），不并入固定提示
     items.push(
       <text fg={theme.textMuted}>
         思考等级：{thinkingLevelLabel(b.thinkingLevel)}（←→ 调整）
       </text>,
     );
-    items.push(
-      <text fg={theme.textMuted} paddingY={1}>
-        ↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Esc 取消{overflow}
-      </text>,
-    );
-    return items;
+    // 溢出指示只计模型数（total 含组头，不计入以免数字与模型数不符）
+    const modelCount = b.models.length;
+    const visibleModels = windowed.filter((d) => d.kind === "model").length;
+    const overflow = modelCount > visibleModels ? `（${visibleModels}/${modelCount}）` : "";
+    return { items, scroll: { start, visible, total }, hint: `↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Esc 取消${overflow}` };
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0} backgroundColor={theme.backgroundPanel}
-        width={modalWidth(dims())} title="选择模型" titleColor={theme.textMuted}>
-        {rows()}
-      </box>
+      <PanelFrame dims={dims()} rows={view().items} scroll={view().scroll} hint={view().hint} />
     </box>
   );
 }
 
-/** /mcp 与 /skill 扩展面板（UI-SPEC §8b）：行 = ▸/空格 标记 + 名称 + 启用/关闭 + 详情；
- *  选中白字 + ▸、未选中灰字，无背景块（同 /model 定论）；空列表显示占位行 */
+/** /mcp 与 /skills 扩展面板（UI-SPEC §8b）：行 = ✓/✕ 开关（绿/红，E21）+ ▸/空格 标记 + 名称 + 详情；
+ *  E23/E28：去线框走 PanelFrame——条目白、选中正绿、提示灰；空列表显示占位行 */
 function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "skill" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
-  const rows = createMemo(() => {
+  const view = createMemo(() => {
     const total = b.rows.length;
     // 高度预算同 ModelModal（avail - 8）少思考等级行：终端高减 9（输入 5+状态 2+agent/通知 2）
-    // 再减边框/内边距/提示行共 7，行高 1 行/条
+    // 再减上界线/分隔线/提示行共 7，行高 1 行/条
     const avail = Math.max(10, (dims().height ?? 20) - 9);
     const visible = Math.max(1, Math.min(Math.max(total, 1), avail - 7));
     const selPos = Math.max(0, Math.min(b.selected, total - 1));
@@ -317,31 +353,28 @@ function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "sk
     } else {
       for (let i = start; i < Math.min(start + visible, total); i++) {
         const row = b.rows[i]!;
-        const line = `${row.label}  ${row.enabled ? "启用" : "关闭"} · ${row.detail}`;
+        // 开关前置为条目首字符：✓ 绿=启用、✕ 红=关闭（E21），替代原「启用/关闭」文字
+        const toggle = row.enabled ? (
+          <span style={{ fg: theme.success }}>✓ </span>
+        ) : (
+          <span style={{ fg: theme.error }}>✕ </span>
+        );
+        const line = `${row.label} · ${row.detail}`;
         items.push(
           i === b.selected ? (
-            <text fg={theme.text}>{"▸ "}{line}</text>
+            <text fg={theme.success}>{"▸ "}{toggle}{line}</text>
           ) : (
-            <text fg={theme.textMuted}>{"  "}{line}</text>
+            <text fg={theme.text}>{"  "}{toggle}{line}</text>
           ),
         );
       }
     }
     const overflow = total > visible ? `（${start + 1}-${Math.min(start + visible, total)}/${total}）` : "";
-    items.push(
-      <text fg={theme.textMuted} paddingY={1}>
-        ↑↓ 选择 · ←→ 启用/关闭 · Enter 应用 · Esc 取消{overflow}
-      </text>,
-    );
-    return items;
+    return { items, scroll: { start, visible, total }, hint: `↑↓ 选择 · ←→ 启用/关闭 · Enter 应用 · Esc 取消${overflow}` };
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-      <box border={true} borderStyle="rounded" borderColor={theme.border} flexDirection="column" flexShrink={0}
-        backgroundColor={theme.backgroundPanel} width={modalWidth(dims())}
-        title={b.kind === "mcp" ? "MCP 服务" : "技能"} titleColor={theme.textMuted}>
-        {rows()}
-      </box>
+      <PanelFrame dims={dims()} rows={view().items} scroll={view().scroll} hint={view().hint} />
     </box>
   );
 }

@@ -52,11 +52,16 @@ export function App(props: AppProps): JSX.Element {
     if (text) props.onAction({ type: "paste", text });
   });
 
-  // /session 全屏页（P4-3）：像进入新页面——消息区/输入框/状态行全部隐藏，只渲染会话列表；
+  // /session 全屏页（P4-3）：像进入新页面——消息区/输入/状态行全部隐藏，只渲染会话列表；
   // Esc（cancel 动作）关面板即返回主界面。
   // 判定必须包 createMemo：组件体常量只在挂载时求值一次、不建立订阅（store 更新后不重算），
   // 曾致全屏化完全不生效（审查 S-1，同 AgentStrip「组件体 if return null 不刷新」同型坑）
   const fullscreen = createMemo(() => props.state.modal?.kind === "session");
+  // 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills 面板不与输入框并存
+  //（/session 已整页全屏；权限确认与 /connect 输入流程保留输入框）
+  const panelOpen = createMemo(
+    () => props.state.modal?.kind === "model" || props.state.modal?.kind === "mcp" || props.state.modal?.kind === "skill",
+  );
 
   // 秒级时钟（P12）：agent 条完成条目的「10s 消失」由时间驱动，老化出树后 store 没有新通知，
   // 光标定位的 bottomRows 若只订阅 agents 会停在旧行。每秒翻一次时钟信号让 bottomRows 重算；
@@ -90,7 +95,8 @@ export function App(props: AppProps): JSX.Element {
           <text fg={theme.textMuted}>{props.state.toast?.text}</text>
         </box>
       </Show>
-      <Show when={!fullscreen()}>
+      {/* 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills 面板不与输入框并存 */}
+      <Show when={!fullscreen() && !panelOpen()}>
         <PromptView
           prompt={props.state.prompt}
           candidate={props.state.candidate}
@@ -100,6 +106,8 @@ export function App(props: AppProps): JSX.Element {
           // agent 条行数带时钟参数——完成条目老化出树后行数随秒级节拍重算，光标跟着回移（P12）
           bottomRows={2 + agentRowCount(props.state.agents, now())}
         />
+      </Show>
+      <Show when={!fullscreen()}>
         <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
         {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
       </Show>

@@ -281,7 +281,7 @@ it("/connect 选中供应商：浅蓝背景块黑字（P6 与权限/新建会话
   expect(other[0] && !isAccentBg(other[0].bg)).toBe(true);
 });
 
-it("/model 选中模型：白字 + ▸、未选中灰字、无背景块（2026-08-28 用户定论，不用反色块）", async () => {
+it("/model 选中模型：正绿 + ▸、未选中白字、无背景块（E23 配色统一）", async () => {
   const modal: ModalState = {
     kind: "model",
     models: [
@@ -294,13 +294,13 @@ it("/model 选中模型：白字 + ▸、未选中灰字、无背景块（2026-0
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  // 选中行：▸ 标记 + 白字（text #ececf0）；未选中行：灰字（textMuted #8f9096）
+  // 选中行：▸ 标记 + 正绿（success #7fd88f）；未选中行：白字（text #ececf0）
   expect(frame).toContain("▸ gpt-5-mini");
   const spans = setup.captureSpans().lines.flatMap((l) => l.spans);
   const sel = spans.find((s) => s.text.includes("gpt-5-mini"));
-  expect(fgHex(sel?.fg)).toBe("#ececf0");
+  expect(fgHex(sel?.fg)).toBe("#7fd88f");
   const other = spans.find((s) => s.text.includes("gpt-4o"));
-  expect(fgHex(other?.fg)).toBe("#8f9096");
+  expect(fgHex(other?.fg)).toBe("#ececf0");
   // 整个 /model 面板不出现浅蓝反色块（选中不再用背景块）
   expect(spans.find((s) => isAccentBg(s.bg))).toBeUndefined();
 });
@@ -351,16 +351,16 @@ it("/model 选中高亮随导航移动（P6 审查补：createMemo 响应式，�
   const [modal, setModal] = createStore<ModalState>({ kind: "model", models, selected: 0, thinkingLevel: undefined });
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
   await setup.waitForVisualIdle();
-  // 白字选中态在 gpt-4o 行（灰字未选中行的 fg 是 textMuted，可区分）
+  // 正绿选中态在 gpt-4o 行（白字未选中行的 fg 是 text，可区分）
   const spans0 = setup.captureSpans().lines.flatMap((l) => l.spans);
   const sel0 = spans0.find((s) => s.text.includes("gpt-4o"));
-  expect(fgHex(sel0?.fg)).toBe("#ececf0");
-  // 下移到第二个模型：白字跟着挪、原行变灰
+  expect(fgHex(sel0?.fg)).toBe("#7fd88f");
+  // 下移到第二个模型：绿色跟着挪、原行变白
   setModal({ kind: "model", models, selected: 1, thinkingLevel: undefined });
   await setup.waitForVisualIdle();
   const spans1 = setup.captureSpans().lines.flatMap((l) => l.spans);
-  expect(fgHex(spans1.find((s) => s.text.includes("gpt-5-mini"))?.fg)).toBe("#ececf0");
-  expect(fgHex(spans1.find((s) => s.text.includes("gpt-4o"))?.fg)).toBe("#8f9096");
+  expect(fgHex(spans1.find((s) => s.text.includes("gpt-5-mini"))?.fg)).toBe("#7fd88f");
+  expect(fgHex(spans1.find((s) => s.text.includes("gpt-4o"))?.fg)).toBe("#ececf0");
 });
 
 it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普通会话白字条目区分）", async () => {
@@ -384,7 +384,7 @@ it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普�
   expect(isBlackFg(sel!.fg)).toBe(true); // 黑字（background #101013）
 });
 
-it("/mcp 面板：服务行启用/关闭与 ▸ 选中标记、键位提示", async () => {
+it("/mcp 面板：服务行绿对勾/红叉开关（E21）、▸ 选中标记与键位提示（E28 无框线）", async () => {
   const modal: ModalState = {
     kind: "mcp",
     rows: [
@@ -396,17 +396,18 @@ it("/mcp 面板：服务行启用/关闭与 ▸ 选中标记、键位提示", as
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("MCP 服务");
-  expect(frame).toContain("▸ fs  启用 · 已连接 · 2 个工具");
-  expect(frame).toContain("git  关闭 · 未启动");
+  // E21：开关前置绿对勾/红叉，替代「启用/关闭」文字；E28：去线框无标题
+  expect(frame).toContain("▸ ✓ fs");
+  expect(frame).toContain("✕ git");
   expect(frame).toContain("←→ 启用/关闭 · Enter 应用 · Esc 取消");
-  // 选中行白字（theme.text #ececf0）、未选中灰字（#8f9096）——同 /model 无背景块
+  // 选中行正绿（E23 success #7fd88f）、未选中白字（#ececf0）
   const spans = setup.captureSpans().lines.flatMap((l) => l.spans);
-  expect(fgHex(spans.find((s) => s.text.includes("fs  启用"))?.fg)).toBe("#ececf0");
-  expect(fgHex(spans.find((s) => s.text.includes("git  关闭"))?.fg)).toBe("#8f9096");
+  expect(fgHex(spans.find((s) => s.text.includes("fs"))?.fg)).toBe("#7fd88f");
+  expect(fgHex(spans.find((s) => s.text.includes("git"))?.fg)).toBe("#ececf0");
+  expect(frame).not.toContain("╭");
 });
 
-it("/skill 面板：标题与技能行描述；空列表显示占位行", async () => {
+it("/skill 面板：技能行描述；空列表显示占位行（E28 去线框无标题）", async () => {
   const modal: ModalState = {
     kind: "skill",
     rows: [{ id: "review", label: "review", detail: "审查代码", enabled: true, source: "project" }],
@@ -415,8 +416,8 @@ it("/skill 面板：标题与技能行描述；空列表显示占位行", async 
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
   await setup.waitForVisualIdle();
   let frame = setup.captureCharFrame();
-  expect(frame).toContain("技能");
-  expect(frame).toContain("review  启用 · 审查代码");
+  expect(frame).toContain("✓ review");
+  expect(frame).toContain("审查代码");
 
   const empty: ModalState = { kind: "skill", rows: [], selected: 0 };
   const setup2 = await testRender(() => <ModalView modal={empty} />, { width: 60, height: 10 });

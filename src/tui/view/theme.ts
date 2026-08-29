@@ -30,6 +30,8 @@ export const theme = {
   borderActive: "#4a4a52",
   /** 弱化边框（消息分隔等细腻线） */
   borderSubtle: "#26262b",
+  /** 面板上界线（E28：面板去线框只留浅紫上界线） */
+  panelTopLine: "#8b7fd4",
 } as const;
 
 export type ThemeColor = string;
