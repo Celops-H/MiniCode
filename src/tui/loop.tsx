@@ -11,7 +11,7 @@ import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
 import type { Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
-import { buildInitPrompt, readInstructionFile } from "../context/index.js";
+import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
@@ -98,10 +98,31 @@ export interface TuiLoopOptions {
   startupConnect?: boolean;
   /** 共享终端（E19）：入口层创建一次跨会话复用；缺省自建并在退出时销毁（测试/单会话） */
   terminal?: TuiTerminal;
-  /** 上一轮带回的 UI 状态（E34）：reconfigure 续接时传入，消息区/输入框/弹层原样保留 */
+  /** 共享挂载（E19 修正，批次 9~14 审查必须项）：渲染器复用时 Solid 根只挂一次——同一渲染器上
+   *  重复 render 会并排叠加旧根（旧根不卸载、按键被新旧两套处理器各处理一次）。共享模式下
+   *  会话轮换只重置 store 内容并切换动作分发。缺省自建（每会话建毁渲染器，destroy 触发根卸载） */
+  shared?: TuiSharedMount;
+  /** 共享模式下本轮是否按当前会话重建视图内容（false = carry 续接保留现有内容，E34） */
+  resetView?: boolean;
+  /** 上一轮带回的 UI 状态（E34）：仅自建路径使用；共享路径靠 store 天然续接 */
   carryState?: TuiState;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
+}
+
+/** 共享 store 的 setter 类型：取 createStore 派生签名，保证 reconcile 等既有用法类型不变 */
+type TuiSetState = ReturnType<typeof createStore<TuiState>>[1];
+
+/** 共享挂载上下文：入口层创建一次，跨会话持有同一 store 代理（E19 修正） */
+export interface TuiSharedMount {
+  /** 共享 solid store 代理（跨会话身份不变） */
+  state: TuiState;
+  /** 内容重置（配合 reconcile 做整体替换；类型取 createStore 派生签名，与既有 commit 用法一致） */
+  setState: TuiSetState;
+  /** 当前会话的动作处理器（每轮由 runTui 更新；App 挂载一次经此分发） */
+  onAction?: (action: TuiAction) => void;
+  /** App 是否已挂载（首轮流挂载，之后只换数据与分发） */
+  mounted: boolean;
 }
 
 /** TUI 终端句柄：渲染器 + 光标闪烁定时器等终端级资源（E19/E34：跨会话复用，
@@ -173,13 +194,34 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   reconfigure?: boolean;
   /** 本轮结束时的 UI 状态（入口层决定下一轮是续接还是按新会话重建） */
   state: TuiState;
-} | undefined> {
+}> {
   const { store, session, modelLabel } = options;
   const hooks: HookBusType = options.hooks ?? new HookBus();
-  // UI 状态：carryState 存在时原样续接（reconfigure 不重建视图，历史固定），否则按当前会话消息初始化
-  const [state, setState] = createStore<TuiState>(
-    options.carryState ?? initState(session.getMessages(), session.meta.title),
-  );
+  // UI 状态：共享挂载（E19 修正）时用入口层创建的 store（跨会话身份不变，Solid 根只挂一次，
+  // 每轮按 resetView 决定重置内容还是原样续接）；否则按会话自建（自建渲染器随 destroy 卸载根）
+  let state: TuiState;
+  let setState: TuiSetState;
+  if (options.shared) {
+    state = options.shared.state;
+    setState = options.shared.setState;
+    if (options.resetView !== false) {
+      setState(
+        reconcile({
+          ...(options.carryState ?? initState(session.getMessages(), session.meta.title)),
+          modelLabel,
+        }),
+      );
+    } else {
+      // carry 续接：内容保留，仅同步当前模型名（/model 切换后状态行与署名回落要跟上）
+      state.modelLabel = modelLabel;
+    }
+  } else {
+    const [ownedState, ownedSetState] = createStore<TuiState>(
+      options.carryState ?? initState(session.getMessages(), session.meta.title, modelLabel),
+    );
+    state = ownedState;
+    setState = ownedSetState;
+  }
 
   let agent: Agent;
   /** 多 agent 团队（assemble 装配；Esc 级联中断子 agent、退出清理用；单 agent 时 undefined） */
@@ -201,6 +243,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 命令过程免铺屏（E24）：/init 等命令执行期间置位，内容增量不进消息区；
    *  错误仍经 interact catch 直显，收尾（Stop/打断/出错）复位 */
   let suppressStream = false;
+  /** 免铺屏装弹（E35 修正）：/init 排队时置位，其提示词被 interact 消费到（UserPromptSubmit
+   *  带 INIT_PROMPT_PREFIX）才真正置位 suppressStream——排队在其前的用户消息不受影响 */
+  let suppressPending = false;
   /** 压缩执行中（E38）：期间 Esc 打断压缩而非退出/打断回合 */
   let compacting = false;
   /** 压缩被用户打断（Esc 置位，compactAsync 据此区分「未配置」与「已打断」） */
@@ -209,6 +254,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let initPolicyBox: { value: boolean } | undefined;
   /** 运行中排队的命令（E35）：Stop 后逐个重新走 handleCommand；消息走 pendingInputs 天然排队 */
   let pendingCommands: string[] = [];
+  /** 排队命令块序号：Date.now() 同毫秒会撞 id，用递增序号 */
+  let commandSeq = 0;
+  /** 排队命令入队 + 上屏「（已排队）」命令块（E35，/compact /init /rename 三处共用） */
+  const queueRunningCommand = (command: string): void => {
+    pendingCommands.push(command);
+    commit({
+      ...state,
+      blocks: [...state.blocks, { kind: "command", id: `cmd_${++commandSeq}`, text: `${command}（已排队）`, time: formatTime() }],
+      prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
+      candidate: undefined,
+    });
+  };
   /** 排队命令逐个出队执行（E35）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流 */
   const drainQueuedCommands = (): void => {
     if (pendingCommands.length === 0) return;
@@ -307,13 +364,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     if (command === "/compact" || command.startsWith("/compact ")) {
       if (state.status === "running") {
         // 运行中排队（E35）：当前轮结束后按序执行，不打断不丢弃
-        pendingCommands.push(command);
-        commit({
-          ...state,
-          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
-          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
-          candidate: undefined,
-        });
+        queueRunningCommand(command);
         return;
       }
       const guidance = command === "/compact" ? undefined : command.slice("/compact ".length).trim() || undefined;
@@ -327,14 +378,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       // E24/E42：命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
       // 过程中只读工具与写项目根 AGENTS.md 免审批（initPolicyBox 置位，收尾复位）
       if (state.status === "running") {
-        // 运行中排队（E35）：当前轮结束后按序执行
-        pendingCommands.push(command);
-        commit({
-          ...state,
-          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
-          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
-          candidate: undefined,
-        });
+        // 运行中排队（E35）：当前轮结束后按序执行；免铺屏装弹待提示词被消费到才置位
+        suppressPending = true;
+        queueRunningCommand(command);
         return;
       }
       const guidance = command.slice("/init".length).trim();
@@ -346,10 +392,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           const full = guidance ? `${prompt}\n\n用户附加指导：\n${guidance}` : prompt;
           agent.appendCommand(command);
           initPolicyBox && (initPolicyBox.value = true);
-          suppressStream = true;
+          // 免铺屏装弹（E35 审查修正）：置位推迟到提示词被消费到（UserPromptSubmit 识别前缀）——
+          // pendingInputs 里排在其前的用户消息不被误伤
+          suppressPending = true;
           commit({
             ...state,
-            blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
+            blocks: [...state.blocks, { kind: "command", id: `cmd_${++commandSeq}`, text: command, time: formatTime() }],
             prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
             candidate: undefined,
           });
@@ -439,13 +487,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         showToast("用法：/rename 会话名");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
       } else if (state.status === "running") {
-        pendingCommands.push(command);
-        commit({
-          ...state,
-          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
-          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
-          candidate: undefined,
-        });
+        queueRunningCommand(command);
       } else {
         session.meta.title = renameTitle;
         commit({ ...state, title: renameTitle, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
@@ -525,6 +567,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       if (ok) {
+        compactInterrupted = false; // 成功路径清掉打断标记（nit：防泄漏误判后续「未配置」提示）
         // 命令痕迹（E24）：压缩成功后落一条命令消息——退出/切换后再回来显示「/compact + 其后对话」；
         // 摘要在前命令在后（追加语义），持久化随 rewriteMessages 一并落盘
         const command = guidance ? `/compact ${guidance}` : "/compact";
@@ -624,8 +667,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     else agent.interrupt();
     resolvePermission("deny", "用户打断");
     ignoreStream = true;
-    // /init 打断收尾（E24）：复位免铺屏与免审批
+    // /init 打断收尾（E24）：复位免铺屏与装弹、免审批
     suppressStream = false;
+    suppressPending = false;
     if (initPolicyBox) initPolicyBox.value = false;
     commit(interruptTurn(state));
     lastEscAt = 0;
@@ -716,7 +760,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
                 .then(() => {
                   showToast(`模型已切换：${picked.id}`);
                   pendingReconfigure = true;
-                  pendingSwitch = session.meta.id; // 同一会话用新模型续跑，历史保留
+                  // 只发 reconfigure 不带 switchTo（批次 9~14 审查问题 2）：reconfigure 无
+                  // switchTo 走 carry 续接——视图与模型上下文不被盘上消息重建（E34）；
+                  // 此前带 switchTo 会让装配层清 carry 并按盘重建，出错轮的消息丢失
                   exitLoop();
                 })
                 .catch(() => showToast("切换模型失败：写入会话文件出错"));
@@ -945,10 +991,24 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     });
   }
 
-  await render(
-    () => <App state={state} model={modelLabel} onAction={handleAction} />,
-    renderer,
-  );
+  if (options.shared) {
+    // 共享挂载（E19 修正）：Solid 根只挂一次，会话轮换仅更新动作分发与数据——
+    // 同一渲染器重复 render 会并排叠加旧根（旧树 useKeyboard 不卸载，按键双份处理）
+    options.shared.onAction = handleAction;
+    if (!options.shared.mounted) {
+      options.shared.mounted = true;
+      await render(
+        // App 不传 model prop：模型名读 state.modelLabel（每轮随 reconcile/属性同步更新）
+        () => <App state={state} onAction={(a) => options.shared!.onAction?.(a)} />,
+        renderer,
+      );
+    }
+  } else {
+    await render(
+      () => <App state={state} model={modelLabel} onAction={handleAction} />,
+      renderer,
+    );
+  }
 
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
   ({ agent, team, initPolicyBox } = options.assemble({ approver, feedRoot, hooks }));
@@ -957,7 +1017,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   const unsubscribeHooks = [
     hooks.on("UserPromptSubmit", (e) => {
       ignoreStream = false;
-      // 命令过程免铺屏（E24）：init 提示词不以用户消息块上屏，命令块已代为留痕
+      // 免铺屏装弹（E35 修正）：/init 提示词被消费到才置位 suppressStream（识别前缀标记），
+      // 排队在其前的用户消息不受影响；init 提示词本身不上屏（命令块已代为留痕）
+      if (suppressPending && e.input.startsWith(INIT_PROMPT_PREFIX)) {
+        suppressPending = false;
+        suppressStream = true;
+      }
       if (!suppressStream) commit(reduceHook(state, e));
     }),
     hooks.on("PreToolUse", (e) => {
@@ -973,10 +1038,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     hooks.on("AgentCompleted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
     hooks.on("AgentInterrupted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
     hooks.on("Stop", (e) => {
+      const isRoot = e.agentPath === undefined || e.agentPath === "/root";
       // /init 收尾（E24）：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。
       // 只认 root 的 Stop——子 agent 回合收尾不应提前结束命令过程
-      if (suppressStream && (e.agentPath === undefined || e.agentPath === "/root")) {
+      if (suppressStream && isRoot) {
         suppressStream = false;
+        suppressPending = false;
         if (initPolicyBox) initPolicyBox.value = false;
         commit({
           ...state,
@@ -987,9 +1054,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         });
       }
       commit(reduceHook(state, e));
-      // 排队命令出队（E35）：一轮结束后按序执行下一条（消息经 pendingInputs 由 interact 消费，
-      // 其收尾 Stop 自然驱动后续出队；/compact 收尾在 compactAsync 里补一次触发）
-      drainQueuedCommands();
+      // 排队命令出队（E35）：只认 root 的 Stop——子 agent 收尾不触发（运行中守卫会重复入队、
+      // 后台迟到 Stop 会在 root 空闲时抢跑命令）；一轮结束按序执行下一条（消息经 pendingInputs
+      // 由 interact 消费，其收尾 Stop 自然驱动后续出队；/compact 收尾在 compactAsync 里补触发）
+      if (isRoot) drainQueuedCommands();
     }),
   ];
 
@@ -1005,8 +1073,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         ignoreStream = false;
-        // 命令过程出错同样收尾（E24）：复位免铺屏与免审批，错误块直显可见
+        // 命令过程出错同样收尾（E24）：复位免铺屏/装弹与免审批，错误块直显可见
         suppressStream = false;
+        suppressPending = false;
         if (initPolicyBox) initPolicyBox.value = false;
         commit({
           ...state,

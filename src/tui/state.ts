@@ -4,6 +4,7 @@
  * 历史回溯、slash 命令候选；帧生成（resolve）只读这些状态。
  */
 import { COMMAND_MARKER, type Message } from "../core/index.js";
+import { INIT_PROMPT_PREFIX } from "../context/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -233,7 +234,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/skill"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/skills"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
@@ -265,6 +266,8 @@ export interface TuiState {
   status: "idle" | "running";
   /** 会话标题（状态行显示；/rename 时同步，/session 重建时由装配层传入；空显示「新会话」） */
   title: string;
+  /** 状态行/消息署名用的当前模型名（共享挂载下由 runTui 每轮同步，App 无 model prop 时读它） */
+  modelLabel: string;
   /** 当前权限模式（default/plan/bypassPermissions）：Shift+Tab 切换，回灌后端 PermissionPipeline；显示名见 permissionModeLabel */
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
@@ -353,7 +356,7 @@ export function selectedPromptText(p: PromptState): string {
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
  *  user/assistant 消息带创建时间戳（后端消息结构 P11）时回填发送时间，切模型等 reconfigure
  *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示（审查补） */
-export function initState(messages: Message[], title = ""): TuiState {
+export function initState(messages: Message[], title = "", modelLabel = ""): TuiState {
   const blocks: BlockView[] = [];
   const msgTime = (m: Message): string | undefined => {
     if (!m.timestamp) return undefined;
@@ -363,6 +366,11 @@ export function initState(messages: Message[], title = ""): TuiState {
   };
   for (const message of messages) {
     if (message.role === "user") {
+      // /init 命令派生的提示词重演弱化（批次 9~14 审查问题 5）：还原为命令块，不铺出全文
+      if (message.content.startsWith(INIT_PROMPT_PREFIX)) {
+        blocks.push({ kind: "command", id: message.id, text: "/init", time: msgTime(message) });
+        continue;
+      }
       // 命令消息重演为命令块（E24）：正文剥掉标记前缀，一条命令一行
       if (message.source === "command") {
         blocks.push({
@@ -436,6 +444,7 @@ export function initState(messages: Message[], title = ""): TuiState {
     streaming: undefined,
     status: "idle",
     title,
+    modelLabel,
     permissionMode: "default",
     thinkingLevel: undefined,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],

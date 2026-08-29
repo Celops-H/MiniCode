@@ -22,12 +22,14 @@ import { theme } from "./theme.js";
 export interface AppProps {
   /** 界面状态（Solid store proxy，属性访问即响应式；title 在 state 内，/rename 同步） */
   state: TuiState;
-  model: string;
+  /** 当前模型名：缺省读 state.modelLabel（共享挂载下 App 只挂一次，模型名经 store 每轮同步） */
+  model?: string;
   /** 键盘/动作 → reducer + 副作用（loop 提供） */
   onAction: (action: TuiAction) => void;
 }
 
 export function App(props: AppProps): JSX.Element {
+  const modelLabel = props.model ?? props.state.modelLabel;
   useKeyboard((e) => {
     const key = opentuiKeyToKey(e);
     const s = props.state;
@@ -77,7 +79,7 @@ export function App(props: AppProps): JSX.Element {
       <Show when={!fullscreen()}>
         <Messages
           blocks={props.state.blocks}
-          modelLabel={props.model}
+          modelLabel={modelLabel}
           streaming={props.state.streaming}
           onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
         />
@@ -108,7 +110,7 @@ export function App(props: AppProps): JSX.Element {
         />
       </Show>
       <Show when={!fullscreen()}>
-        <StatusBar model={props.model} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
+        <StatusBar model={modelLabel} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
         {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
       </Show>
     </box>

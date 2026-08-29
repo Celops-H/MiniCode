@@ -14,9 +14,12 @@ import { createBuiltinTools } from "../tools/index.js";
 import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions } from "../cli/app.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
 import { Models } from "../llm/index.js";
-import { NEW_SESSION_ID } from "./state.js";
+import { NEW_SESSION_ID, initState } from "./state.js";
+import { createStore } from "solid-js/store";
+
+import { type SetStoreFunction } from "solid-js/store";
 import type { TuiState } from "./state.js";
-import { createTuiTerminal, runTui, type TuiTerminal } from "./loop.js";
+import { createTuiTerminal, runTui, type TuiSharedMount, type TuiTerminal } from "./loop.js";
 import type { Config } from "../config/index.js";
 import type { ThinkingLevel } from "../core/index.js";
 
@@ -145,10 +148,16 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
+  // 权限模式盒子上提到入口层（批次 9~14 审查 4c）：carry 续接的 UI 权限模式与管线实际值一致
+  const permissionModeBox: { value: PermissionMode } = { value: "default" };
   // 共享终端一次创建跨会话复用（E19：reconfigure 不再销毁重建渲染器——闪屏根源）
   const terminal = await createTuiTerminal();
-  // UI 状态跨轮传递：reconfigure 续接（E34 会话不退出期间历史固定）、切会话重建
-  let carry: TuiState | undefined;
+  // 共享挂载（批次 9~14 审查必须项 1）：Solid 根只挂一次——同一渲染器重复 render 会叠加旧根
+  //（旧树 useKeyboard 不卸载，按键双份处理）；会话轮换仅重置 store 内容并切换动作分发
+  const [sharedState, setSharedState] = createStore<TuiState>(initState(session.getMessages(), session.meta.title, modelId));
+  const shared: TuiSharedMount = { state: sharedState, setState: setSharedState, mounted: false };
+  // 共享模式下视图内容是否按当前会话重建：首轮/切会话/新建草稿 true，reconfigure carry 续接 false（E34）
+  let resetView = true;
   // 启动引导只作用于首轮（批次 3/4 审查问题 1）：连接成功的 reconfigure 后不复位会复弹弹窗
   let firstRound = true;
   try {
@@ -160,17 +169,21 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         session,
         agents: options.agents ?? true,
         thinkingLevelBox,
+        permissionModeBox,
         startupConnect: startup.needsConnect && firstRound,
-        carryState: carry,
+        shared,
+        resetView,
         terminal,
         projectAgentsFile: options.projectAgentsFile,
       });
-      if (!result) break;
-      carry = result.state;
       firstRound = false;
       if (result.reconfigure) {
+        // 轮换前清掉瞬时态（批次 9~14 审查 4a/4b）：连接成功的 connect-key 弹窗残留（再按 Enter
+        // 会重复触发连接）与已过期的 toast（carry 续接会让它常驻到下一次 toast）
+        sharedState.modal = undefined;
+        sharedState.toast = undefined;
         // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
-        // 会话内视图不按盘上消息重建（carry 续接，E34 历史固定）；切会话/新建草稿才重建视图
+        // 会话内视图不按盘上消息重建（store 内容原样续接，E34 历史固定）；切会话/新建草稿才重建视图
         await loadDotEnv();
         config = await loadConfig();
         models = buildModelClient(config);
@@ -179,10 +192,10 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // 保留作防御（未来 reconfigure + 新建语义的兜底，整体审视 N-2）
         if (result.switchTo === NEW_SESSION_ID) {
           session = await store.createSession({ model: modelId });
-          carry = undefined;
+          resetView = true;
         } else if (result.switchTo) {
           session = await store.loadSession(result.switchTo);
-          carry = undefined;
+          resetView = true;
         } else {
           session = await reloadOrDraftSession(store, session, modelId);
           // 引导态先发消息后连接（E31 边界，批次 3/4 审查问题 2）：草稿可能以空模型落盘，
@@ -191,16 +204,17 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
           if (!session.meta.model || !models.resolve(session.meta.model)) {
             session.meta.model = modelId;
           }
+          resetView = false;
         }
         continue;
       }
       if (!result.switchTo) break;
-      // /session 切换：视图按新会话消息重建（carry 清掉）
+      // /session 切换：视图按新会话消息重建
       session =
         result.switchTo === NEW_SESSION_ID
           ? await store.createSession({ model: modelId })
           : await store.loadSession(result.switchTo);
-      carry = undefined;
+      resetView = true;
     }
   } finally {
     terminal.dispose();
@@ -215,16 +229,20 @@ async function runTuiSession(opts: {
   session: Session;
   agents: boolean;
   thinkingLevelBox: { value: ThinkingLevel | undefined };
+  /** 权限模式盒子（入口层持有，跨会话持久，与 carry 续接的 UI 一致） */
+  permissionModeBox: { value: PermissionMode };
   /** 零可用厂商启动引导（仅首轮可能为 true） */
   startupConnect?: boolean;
-  /** 上一轮带回的 UI 状态（reconfigure 续接用，E34） */
-  carryState?: TuiState;
+  /** 共享挂载上下文（E19 修正，入口层创建一次） */
+  shared: TuiSharedMount;
+  /** 本轮是否按当前会话重建视图内容（false = carry 续接，E34） */
+  resetView: boolean;
   /** 共享终端（E19，入口层创建一次） */
   terminal?: TuiTerminal;
   /** 项目根 AGENTS.md 路径（/init 免审批判定与生成目标；缺省 <cwd>/AGENTS.md） */
   projectAgentsFile?: string;
-}): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState } | undefined> {
-  const { store, models, config, session, agents, thinkingLevelBox } = opts;
+}): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState }> {
+  const { store, models, config, session, agents, thinkingLevelBox, permissionModeBox } = opts;
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
@@ -235,8 +253,6 @@ async function runTuiSession(opts: {
     safetyMargin: 4096,
     keepRecentToolResults: 5,
   };
-  // 权限模式盒子：Shift+Tab 在 loop 侧改这里，PermissionPipeline 经 options.mode getter 活读（plan/auto 即时生效）
-  const permissionModeBox: { value: PermissionMode } = { value: "default" };
   // /init 过程免审批盒子（E24）：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
   const initPolicyBox: { value: boolean } = { value: false };
   const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
@@ -260,7 +276,8 @@ async function runTuiSession(opts: {
       skillsDisabled: config.skills?.disabled ?? [],
       startupNotices: extensions.mcpErrors,
       startupConnect: opts.startupConnect,
-      carryState: opts.carryState,
+      shared: opts.shared,
+      resetView: opts.resetView,
       terminal: opts.terminal,
       projectAgentsFile: opts.projectAgentsFile,
       assemble: ({ approver, feedRoot }) => {

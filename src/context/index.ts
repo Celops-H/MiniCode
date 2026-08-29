@@ -8,5 +8,5 @@ export type { RecoveryContext, RecoveryContextOptions } from "./recover.js";
 export { isContextTooLongError, parseContextTooLongGap, peelToolGroups } from "./retry.js";
 export { MEMORY_SYSTEM_PROMPT, MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest, updateMemory } from "./memory.js";
 export type { MemoryUpdateRequest } from "./memory.js";
-export { loadInstructionFiles, readInstructionFile, buildInstructionsPrompt, buildInitPrompt } from "./instructions.js";
+export { loadInstructionFiles, readInstructionFile, buildInstructionsPrompt, buildInitPrompt, INIT_PROMPT_PREFIX } from "./instructions.js";
 export type { InstructionFile, LoadInstructionsOptions } from "./instructions.js";
