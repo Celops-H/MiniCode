@@ -24,7 +24,7 @@ import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
-import { tuiCursor } from "./cursor.js";
+import { tuiCursor, CURSOR_STEADY_MS } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
@@ -139,10 +139,17 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
     renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
   });
   const blinkTimer = setInterval(() => {
-    if (tuiCursor.enabled) {
-      tuiCursor.visible = !tuiCursor.visible;
-      renderer.requestRender();
+    if (!tuiCursor.enabled) return;
+    // E39：光标移动后宽限窗内保持常亮（移动过程持续可见），停驻后恢复正常闪烁
+    if (Date.now() - tuiCursor.lastMoveAt < CURSOR_STEADY_MS) {
+      if (!tuiCursor.visible) {
+        tuiCursor.visible = true;
+        renderer.requestRender();
+      }
+      return;
     }
+    tuiCursor.visible = !tuiCursor.visible;
+    renderer.requestRender();
   }, 500);
   return {
     renderer,

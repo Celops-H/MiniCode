@@ -95,6 +95,11 @@ export function PromptView(props: {
   createRenderEffect(() => {
     if (props.showCursor !== false) {
       const pos = promptCursorPosition(props.prompt, dims().height ?? 20, props.bottomRows ?? 2);
+      // E39：位置变化（输入/移动）记录时刻——闪烁定时器在宽限窗内保持常亮，
+      // 移动过程不被闪烁相位打断；停驻超过宽限窗后恢复正常闪烁
+      if (tuiCursor.row !== pos.row || tuiCursor.col !== pos.col) {
+        tuiCursor.lastMoveAt = Date.now();
+      }
       tuiCursor.row = pos.row;
       tuiCursor.col = pos.col;
       tuiCursor.enabled = true;

@@ -335,10 +335,11 @@ export function Messages(props: {
   streaming?: Streaming;
   onFoldAt?: (index: number) => void;
 }): JSX.Element {
-  // F-2=57 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
+  // E43=57 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
   // 直接 spread 覆盖会遮蔽原生滚动（S2 审查确认）。改用 ref 包装：先放大 delta 再调原生实现，
-  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。滚轮与滚动条拖拽同走 scroll 事件，拖拽也被 ×3
-  // （更快，方向无害，M3 注释澄清）。
+  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。放大按倍数作用——上下方向速度一致（E43）；
+  // 滚轮事件统一落在消息区 scrollbox 上，长消息等子元素不拦截（事件冒泡到滚动容器）。
+  // ×5（E43 整体速度调大）。
   const boostedScrollboxes = new WeakSet<object>();
   const boostWheel = (el: unknown): void => {
     if (!el || boostedScrollboxes.has(el)) return;
@@ -347,7 +348,7 @@ export function Messages(props: {
     const orig = box.onMouseEvent?.bind(box);
     box.onMouseEvent = (e: unknown) => {
       const ev = e as { type: string; scroll?: { delta: number } };
-      if (ev.type === "scroll" && ev.scroll) ev.scroll.delta *= 3;
+      if (ev.type === "scroll" && ev.scroll) ev.scroll.delta *= 5;
       orig?.(e);
     };
   };
