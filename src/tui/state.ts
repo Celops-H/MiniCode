@@ -16,6 +16,8 @@ export interface MessageBlock {
   id: string;
   role: "user" | "assistant";
   source?: "human" | "system" | "command";
+  /** 助手消息的实际产出模型（E18：路由切到备选后署名跟随；缺省用会话当前模型） */
+  model?: string;
   text: string;
   thinking?: string;
   thinkingCollapsed: boolean;
@@ -267,6 +269,8 @@ export interface TuiState {
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
+  /** 本轮实际产出模型（E18）：model_fallback 事件暂存，done 落消息块时作署名并清除 */
+  activeModel?: string;
   /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
@@ -394,6 +398,8 @@ export function initState(messages: Message[], title = ""): TuiState {
           kind: "message",
           id: message.id,
           role: "assistant",
+          // 署名跟随实际产出模型（E18）：无记录的历史消息回落会话当前模型
+          model: message.meta?.model,
           text,
           thinking: thinking || undefined,
           thinkingCollapsed: true,
@@ -569,6 +575,8 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         ? appendMessageBlock(state, {
             id: `turn_${state.blocks.length}`,
             role: "assistant",
+            // 署名跟随本轮实际产出模型（E18：路由切到备选后归属正确），并清除本轮暂存
+            model: state.activeModel,
             text: state.streaming.text,
             thinking: state.streaming.thinking || undefined,
             isError: state.streaming.isError,
@@ -577,7 +585,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         : state;
       const status: "idle" | "running" =
       event.stopReason === "tool_use" || event.stopReason === "tool_calls" ? "running" : "idle";
-      return { ...merged, streaming: undefined, status, scrollOffset: 0, turnIndex: state.turnIndex + 1 };
+      return { ...merged, activeModel: undefined, streaming: undefined, status, scrollOffset: 0, turnIndex: state.turnIndex + 1 };
     }
     case "error": {
       if (!state.streaming || (!state.streaming.text && !state.streaming.thinking)) {
@@ -585,6 +593,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         // 与 interact catch 同一套 modelErrorText，模型类错误带换模型/配 key 引导
         return {
           ...state,
+          activeModel: undefined,
           streaming: undefined,
           status: "idle",
           blocks: [
@@ -604,9 +613,11 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
       return { ...state, streaming: { ...state.streaming, isError: true } };
     }
     case "model_fallback":
-      // 模型路由切换观察事件：追加常驻通知行（主模型不可用自动切备选），消息列表展示而非一闪而过
+      // 模型路由切换观察事件：追加常驻通知行（主模型不可用自动切备选），消息列表展示而非一闪而过；
+      // 并暂存备选为本轮产出模型（E18），done 落消息块时作署名
       return {
         ...state,
+        activeModel: event.to,
         blocks: [
           ...state.blocks,
           {

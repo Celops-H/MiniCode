@@ -383,6 +383,8 @@ export class Agent {
     }
     let context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
     const collected: StreamEvent[] = [];
+    // 本轮实际产出模型（E18）：路由切到备选时更新，组装后写入消息 meta 供署名/重演一致展示
+    let effectiveModel = this.modelId;
     // 超窗应急剥组重发（DESIGN 9.6）：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
     // 不做摘要；剥组与重试有上限，超限直接报错并恢复剥前消息（剥组是重试手段，失败不留副作用）
     const messagesBeforeRetry = this.messages;
@@ -398,6 +400,7 @@ export class Agent {
           if (this.interruptController.signal.aborted && event.type === "error") continue;
           // 观察事件（模型路由切换提示）只透传宿主观测，不进 collected——否则 assemble 会把
           // 它的长度误算为「已产出」（中断收尾以 collected.length 判断要不要落半截回复）
+          if (event.type === "model_fallback") effectiveModel = event.to;
           if (event.type !== "model_fallback") collected.push(event);
           yield event;
         }
@@ -422,6 +425,8 @@ export class Agent {
       }
     }
     const assistant: AssistantMessage = await assembleAssistantMessage(toAsyncIterable(collected));
+    // 消息归属（E18）：记录实际产出模型（含路由切到备选），重演/署名与底栏、会话列表一致
+    assistant.meta = { ...assistant.meta, model: effectiveModel };
     // 中断收尾（turn 内真打断）：已产出的文本/思考保留为 assistant；含但未执行的工具调用
     // 补失败结果保持配对闭合（续跑不 400，模型看到「执行中断」自行决定重试或调整）；
     // 完全没收到内容则连空消息也不落。中断后本轮结束，已产出留在历史、可正常续跑。

@@ -6,8 +6,8 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, sessionModalTarget, type TuiState } from "../../src/tui/state.js";
+import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
+import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -257,5 +257,32 @@ describe("命令消息重演（E24）", () => {
     expect(command).toMatchObject({ kind: "command", text: "/init" });
     // 普通输入仍是消息块
     expect(state.blocks.some((b) => b.kind === "message" && b.text === "普通输入")).toBe(true);
+  });
+});
+
+describe("消息署名跟随实际产出模型（E18）", () => {
+  it("model_fallback 后 done 落的消息块署名为备选模型，并清除本轮暂存", () => {
+    let s = initState([]);
+    s = reduceEvent(s, { type: "text_delta", text: "回复" });
+    s = reduceEvent(s, { type: "model_fallback", from: "m1", to: "m2" });
+    s = reduceEvent(s, { type: "text_delta", text: "续" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    const blocks = s.blocks.filter((b) => b.kind === "message");
+    const last = blocks.at(-1);
+    expect(last).toMatchObject({ role: "assistant", model: "m2" });
+    // done 即轮边界：暂存清除，下一轮未发生 fallback 时署名回落会话模型
+    expect(s.activeModel).toBeUndefined();
+  });
+
+  it("initState 重演时署名取消息 meta.model，缺省回落会话当前模型", () => {
+    const state = initState([
+      assistantMessage([{ type: "text", text: "旧消息" }], { model: "old-model" }),
+      assistantMessage([{ type: "text", text: "新消息" }]),
+    ]);
+    const blocks = state.blocks.filter(
+      (b): b is Extract<BlockView, { kind: "message" }> => b.kind === "message" && b.role === "assistant",
+    );
+    expect(blocks[0]).toMatchObject({ model: "old-model" });
+    expect(blocks[1]?.model).toBeUndefined();
   });
 });
