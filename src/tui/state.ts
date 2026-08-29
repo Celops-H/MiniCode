@@ -678,7 +678,25 @@ function appendMessageBlock(
  *  agent 生命周期事件可附带 spawnedAt/completedAt（loop 侧注入），state 本身保持纯函数 */
 export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
   switch (event.type) {
-    case "UserPromptSubmit":
+    case "UserPromptSubmit": {
+      // 排队消息转正（E35）：send 时已上屏的 queued_ 块在此消费——改 id 为正式块不再重复追加；
+      // 无排队块（CLI/空闲路径）按原逻辑追加
+      const blocks = state.blocks;
+      const queuedIndex = blocks.findIndex(
+        (b) => b.kind === "message" && b.id.startsWith("queued_") && b.role === "user" && b.text === event.input,
+      );
+      if (queuedIndex >= 0) {
+        return {
+          ...state,
+          streaming: undefined,
+          blocks: blocks.map((b, i) =>
+            i === queuedIndex && b.kind === "message"
+              ? { ...b, id: `user_${queuedIndex}` }
+              : b,
+          ),
+          status: "running",
+        };
+      }
       return {
         ...state,
         streaming: undefined,
@@ -695,6 +713,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         ],
         status: "running",
       };
+    }
     case "PreToolUse": {
       const card = findToolById(state.blocks, event.toolCallId) ?? findPendingTool(state.blocks);
       const blocks = card
@@ -939,9 +958,29 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       if (state.focusIndex >= 0) return { ...state, focusIndex: -1 };
       return { ...state, candidate: undefined };
     case "send": {
-      // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）
+      // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）。
+      // 运行中发送（E35 排队）：消息块即时上屏标记 queued_ 前缀，UserPromptSubmit 消费时
+      // 转正（去重，防排队块与提交块双份）；空闲发送仍由 UserPromptSubmit 统一上屏
       const sent = state.prompt.lines.join("\n").trim();
       const history = sent ? [...state.prompt.history, sent] : state.prompt.history;
+      if (state.status === "running" && sent) {
+        return {
+          ...state,
+          prompt: emptyPrompt(history),
+          candidate: undefined,
+          blocks: [
+            ...state.blocks,
+            {
+              kind: "message" as const,
+              id: `queued_${state.blocks.length}`,
+              role: "user" as const,
+              text: sent,
+              time: formatTime(),
+              thinkingCollapsed: true,
+            },
+          ],
+        };
+      }
       return {
         ...state,
         prompt: emptyPrompt(history),

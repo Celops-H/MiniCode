@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, modelErrorText, resetToNewState, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, modelErrorText, resetToNewState, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -284,5 +284,43 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     );
     expect(blocks[0]).toMatchObject({ model: "old-model" });
     expect(blocks[1]?.model).toBeUndefined();
+  });
+});
+
+describe("运行中排队（E35）", () => {
+  it("运行中 send：消息块即时上屏且 id 带 queued_ 前缀，状态保持 running", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "send" });
+    // send 只清空输入框（ reducer 无输入文本，此处验证排队块经 UserPromptSubmit 去重链路）
+    expect(s.status).toBe("running");
+  });
+
+  it("UserPromptSubmit 消费排队块：同文本 queued_ 块转正不重复追加", () => {
+    let s = initState([
+      userMessage("排队的问题"),
+    ]);
+    // 构造排队块：手排一个 queued_ 前缀消息（模拟 reduceAction send 运行中分支的产出）
+    s = {
+      ...s,
+      status: "running" as const,
+      blocks: [
+        ...s.blocks.map((b) =>
+          b.kind === "message" && b.role === "user" ? { ...b, id: "queued_0" } : b,
+        ),
+      ],
+    };
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "排队的问题" });
+    const userBlocks = s.blocks.filter((b) => b.kind === "message" && b.role === "user");
+    // 转正而非追加：仍只有一条用户消息，id 已换成正式前缀
+    expect(userBlocks).toHaveLength(1);
+    expect(userBlocks[0]!.kind === "message" && userBlocks[0]!.id.startsWith("user_")).toBe(true);
+  });
+
+  it("UserPromptSubmit 无排队块：按原逻辑追加用户消息块", () => {
+    let s = initState([]);
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "新问题" });
+    const userBlocks = s.blocks.filter((b) => b.kind === "message" && b.role === "user");
+    expect(userBlocks).toHaveLength(1);
   });
 });

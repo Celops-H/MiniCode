@@ -200,6 +200,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let compactInterrupted = false;
   /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位；E24） */
   let initPolicyBox: { value: boolean } | undefined;
+  /** 运行中排队的命令（E35）：Stop 后逐个重新走 handleCommand；消息走 pendingInputs 天然排队 */
+  let pendingCommands: string[] = [];
+  /** 排队命令逐个出队执行（E35）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流 */
+  const drainQueuedCommands = (): void => {
+    if (pendingCommands.length === 0) return;
+    const next = pendingCommands.shift()!;
+    handleCommand(next);
+  };
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
   const ESC_EXIT_WINDOW_MS = 800;
   let lastEscAt = 0;
@@ -291,8 +299,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
     if (command === "/compact" || command.startsWith("/compact ")) {
       if (state.status === "running") {
-        showToast("运行中不可压缩，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+        // 运行中排队（E35）：当前轮结束后按序执行，不打断不丢弃
+        pendingCommands.push(command);
+        commit({
+          ...state,
+          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
+          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
+          candidate: undefined,
+        });
         return;
       }
       const guidance = command === "/compact" ? undefined : command.slice("/compact ".length).trim() || undefined;
@@ -306,8 +320,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       // E24/E42：命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
       // 过程中只读工具与写项目根 AGENTS.md 免审批（initPolicyBox 置位，收尾复位）
       if (state.status === "running") {
-        showToast("运行中不可执行 /init，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+        // 运行中排队（E35）：当前轮结束后按序执行
+        pendingCommands.push(command);
+        commit({
+          ...state,
+          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
+          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
+          candidate: undefined,
+        });
         return;
       }
       const guidance = command.slice("/init".length).trim();
@@ -405,11 +425,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
     if (command === "/rename" || command.startsWith("/rename ")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化），
-      // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）
+      // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）。
+      // 运行中排队（E35）：rewriteMessages 与轮末落盘并发会交错，排队到轮后执行
       const renameTitle = command.slice("/rename".length).trim();
       if (!renameTitle) {
         showToast("用法：/rename 会话名");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      } else if (state.status === "running") {
+        pendingCommands.push(command);
+        commit({
+          ...state,
+          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: `${command}（已排队）`, time: formatTime() }],
+          prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
+          candidate: undefined,
+        });
       } else {
         session.meta.title = renameTitle;
         commit({ ...state, title: renameTitle, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
@@ -506,6 +535,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
     } finally {
       compacting = false;
+      // /compact 是排队命令时收尾触发下一条出队（E35：命令链不断流）
+      drainQueuedCommands();
     }
   };
 
@@ -949,6 +980,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         });
       }
       commit(reduceHook(state, e));
+      // 排队命令出队（E35）：一轮结束后按序执行下一条（消息经 pendingInputs 由 interact 消费，
+      // 其收尾 Stop 自然驱动后续出队；/compact 收尾在 compactAsync 里补一次触发）
+      drainQueuedCommands();
     }),
   ];
 
