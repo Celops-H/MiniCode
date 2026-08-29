@@ -31,11 +31,13 @@ export async function readInstructionFile(file: string): Promise<string | null> 
 }
 
 /**
- * 加载指令文件（BACKEND §21）：用户级 ~/.minicode/AGENTS.md 一份 + 项目侧从文件系统
- * 根向 cwd 逐级下扫（每级取一个文件，AGENTS.md 优先、CLAUDE.md 兜底）。拼接顺序
- * 外层在前、内层在后——越靠近 cwd 越具体。无文件返回空数组，静默无此段。
+ * 加载指令文件（BACKEND §21）：用户级 ~/.minicode/AGENTS.md 一份 + 项目级最近的一个
+ * ——当前目录有指令文件（AGENTS.md 优先、CLAUDE.md 兜底）就用它，没有才逐级向上找，
+ * 找到即停（E37）。不再收集到文件系统根的全部层级：越界加载项目外祖先目录的指令文件
+ * 会把无关约定拼进提示词（cc 实际行为是收集根→cwd 全部层级，本项按 request.md 预定
+ * 规则对齐为最近命中即停，差异已记录）。无文件返回空数组，静默无此段。
  * @param opts 路径选项（homedir / cwd 可注入，测试用）
- * @returns 指令文件列表（用户级在最前，项目侧根→cwd 依次）
+ * @returns 指令文件列表（用户级在最前，项目级随后）
  */
 export async function loadInstructionFiles(opts: LoadInstructionsOptions = {}): Promise<InstructionFile[]> {
   const home = opts.homedir ?? os.homedir();
@@ -46,23 +48,25 @@ export async function loadInstructionFiles(opts: LoadInstructionsOptions = {}): 
   const userContent = await readInstructionFile(userFile);
   if (userContent !== null) files.push({ path: userFile, content: userContent });
 
-  // 从 cwd 向上收集各级目录到根，再倒序输出（根在前、cwd 在后）
-  const dirs: string[] = [];
   for (let dir = cwd; ; dir = path.dirname(dir)) {
-    dirs.push(dir);
+    const hit = await findInstructionFileInDir(dir);
+    if (hit) {
+      files.push(hit);
+      break;
+    }
     if (dir === path.parse(dir).root) break;
   }
-  for (const dir of dirs.reverse()) {
-    for (const name of PROJECT_INSTRUCTION_FILENAMES) {
-      const file = path.join(dir, name);
-      const content = await readInstructionFile(file);
-      if (content !== null) {
-        files.push({ path: file, content });
-        break;
-      }
-    }
-  }
   return files;
+}
+
+/** 单个目录内取指令文件：AGENTS.md 优先、没有才读 CLAUDE.md 兜底（同级不重复注入） */
+async function findInstructionFileInDir(dir: string): Promise<InstructionFile | null> {
+  for (const name of PROJECT_INSTRUCTION_FILENAMES) {
+    const file = path.join(dir, name);
+    const content = await readInstructionFile(file);
+    if (content !== null) return { path: file, content };
+  }
+  return null;
 }
 
 /**

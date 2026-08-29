@@ -27,7 +27,19 @@ describe("loadInstructionFiles（指令文件加载）", () => {
     expect(files[0]!.path).toContain(path.join(".minicode", "AGENTS.md"));
   });
 
-  it("项目侧从根向 cwd 逐级下扫，根目录文件在前、cwd 在后（越靠近 cwd 越具体）", async () => {
+  it("项目级：cwd 有指令文件就用它，不向上加载祖先目录的（E37 当前目录有即停）", async () => {
+    const home = tempDir();
+    const root = tempDir();
+    const cwd = path.join(root, "proj");
+    mkdirSync(cwd);
+    writeFileSync(path.join(root, "AGENTS.md"), "根级指令");
+    writeFileSync(path.join(cwd, "AGENTS.md"), "cwd 级指令");
+    const files = await loadInstructionFiles({ homedir: home, cwd });
+    // 只有 cwd 一份：祖先目录（项目外越界面）的指令文件不再收集
+    expect(files.map((f) => f.content)).toEqual(["cwd 级指令"]);
+  });
+
+  it("项目级：cwd 没有才逐级向上，找到最近的一个即停（E37 越界加载根因修复）", async () => {
     const home = tempDir();
     const root = tempDir();
     const mid = path.join(root, "a");
@@ -35,22 +47,21 @@ describe("loadInstructionFiles（指令文件加载）", () => {
     mkdirSync(mid, { recursive: true });
     mkdirSync(cwd);
     writeFileSync(path.join(root, "AGENTS.md"), "根级指令");
-    writeFileSync(path.join(cwd, "AGENTS.md"), "cwd 级指令");
+    writeFileSync(path.join(mid, "AGENTS.md"), "mid 级指令");
     const files = await loadInstructionFiles({ homedir: home, cwd });
-    // Windows 盘根无指令文件，只命中根级与 cwd 级两层
-    expect(files.map((f) => f.content)).toEqual(["根级指令", "cwd 级指令"]);
+    // 命中 mid 即停：更远的根级文件不加载（此前根→cwd 全层级收集会越界拼入无关约定）
+    expect(files.map((f) => f.content)).toEqual(["mid 级指令"]);
   });
 
-  it("每级 AGENTS.md 优先、没有才读 CLAUDE.md 兜底（同级不重复注入）", async () => {
+  it("命中级内 AGENTS.md 优先、没有才读 CLAUDE.md 兜底（同级不重复注入）", async () => {
     const home = tempDir();
     const root = tempDir();
     const cwd = path.join(root, "proj");
     mkdirSync(cwd);
-    writeFileSync(path.join(root, "AGENTS.md"), "根 AGENTS");
-    writeFileSync(path.join(root, "CLAUDE.md"), "根 CLAUDE");
+    writeFileSync(path.join(cwd, "AGENTS.md"), "cwd AGENTS");
     writeFileSync(path.join(cwd, "CLAUDE.md"), "cwd CLAUDE");
     const files = await loadInstructionFiles({ homedir: home, cwd });
-    expect(files.map((f) => f.content)).toEqual(["根 AGENTS", "cwd CLAUDE"]);
+    expect(files.map((f) => f.content)).toEqual(["cwd AGENTS"]);
   });
 
   it("无任何文件时返回空数组（静默无此段）", async () => {
