@@ -7,7 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SessionStore } from "../../src/storage/index.js";
-import { resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
+import { configSchema } from "../../src/config/index.js";
+import { NO_MODEL_ID, createStartupModels, resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
 
 let dir = "";
 
@@ -123,4 +124,21 @@ it("reloadOrDraftSession：非 ENOENT 读盘错误上抛（meta 损坏不静默�
   const created = await store.createSession({ model: "m1", title: "损坏" });
   writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
   await expect(reloadOrDraftSession(store, created, "m3")).rejects.toThrow();
+});
+
+it("createStartupModels：零可用厂商返回引导态（空模型集合 + needsConnect，E31）", () => {
+  const startup = createStartupModels(undefined);
+  expect(startup.needsConnect).toBe(true);
+  expect(startup.modelId).toBe(NO_MODEL_ID);
+  expect(startup.models.listModels()).toEqual([]);
+});
+
+it("createStartupModels：落盘 apiKey 的厂商正常装配（E33 同权）", () => {
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
+  });
+  const startup = createStartupModels(config);
+  expect(startup.needsConnect).toBe(false);
+  expect(startup.modelId).toBe("m-1");
+  expect(startup.models.listModels().map((m) => m.id)).toEqual(["m-1"]);
 });

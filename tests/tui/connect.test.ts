@@ -1,23 +1,24 @@
 /**
- * /connect 写配置逻辑测试：全局 config 合并 provider（不写 modelChain——模型归 /model 管）+ .env 幂等追加/替换。
+ * /connect 写配置逻辑测试：全局 config 合并 provider（不写 modelChain——模型归 /model 管）
+ * + key 落 provider 的 apiKey 字段（E27：项目目录不落 .env）。
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it, expect } from "vitest";
-import { connectProvider, writeGlobalConfig, writeEnvKey, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset } from "../../src/tui/connect.js";
+import { connectProvider, writeGlobalConfig, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset } from "../../src/tui/connect.js";
 
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
 
-it("writeGlobalConfig：写入 provider，不写 modelChain（模型切换归 /model 命令）", async () => {
+it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelChain（模型切换归 /model 命令）", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const file = path.join(dir, "config.json");
   try {
-    await writeGlobalConfig(file, deepseek);
+    await writeGlobalConfig(file, deepseek, "sk-123");
     const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: unknown[]; modelChain?: string[] };
     expect(parsed.providers).toHaveLength(1);
-    expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY" });
+    expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", apiKey: "sk-123" });
     // 连接只把供应商加进列表，不改优先级链——当前会话与模型保持（用 /model 切模型）
     expect(parsed.modelChain).toBeUndefined();
   } finally {
@@ -48,8 +49,10 @@ it("writeGlobalConfig：Anthropic 协议预设写入 protocol 字段，OpenAI �
   try {
     const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "zhipu-coding")!;
     await writeGlobalConfig(file, anthropicPreset);
-    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: Array<{ id: string; protocol?: string }> };
+    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: Array<{ id: string; protocol?: string; apiKey?: string }> };
     expect(parsed.providers[0]).toMatchObject({ id: "zhipu-coding", protocol: "anthropic-messages" });
+    // 未传 key 时不写 apiKey 字段（预设写入与连接写 key 两条路径共用本函数）
+    expect(parsed.providers[0]?.apiKey).toBeUndefined();
 
     const file2 = path.join(dir, "config2.json");
     await writeGlobalConfig(file2, deepseek);
@@ -61,31 +64,14 @@ it("writeGlobalConfig：Anthropic 协议预设写入 protocol 字段，OpenAI �
   }
 });
 
-it("writeEnvKey：新增追加、更新替换（幂等）", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-env-"));
-  const env = path.join(dir, ".env");
-  try {
-    await writeEnvKey(env, "DEEPSEEK_API_KEY", "sk-first");
-    expect(await readFile(env, "utf8")).toContain("DEEPSEEK_API_KEY=sk-first");
-    await writeEnvKey(env, "DEEPSEEK_API_KEY", "sk-second");
-    const text = await readFile(env, "utf8");
-    expect(text).toContain("DEEPSEEK_API_KEY=sk-second");
-    expect(text.split("DEEPSEEK_API_KEY=").length - 1).toBe(1); // 只有一行
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
 it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预设占位模型", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const globalFile = path.join(dir, "config.json");
-  const envFile = path.join(dir, ".env");
   try {
     let fetchCalls = 0;
     const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "deepseek-anthropic")!;
     const ok = await connectProvider(anthropicPreset, "sk-123", {
       globalConfigFile: globalFile,
-      envFile,
       fetchImpl: async () => {
         fetchCalls++;
         return ["should-not-be-used"];
@@ -111,19 +97,19 @@ function fakeFetch(models: string[] | Error): typeof import("../../src/tui/conne
   };
 }
 
-it("connectProvider：写全局 config + .env 成功；空 key 拒绝", async () => {
+it("connectProvider：key 写全局 config 的 apiKey 字段，项目目录不落 .env；空 key 拒绝", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const globalFile = path.join(dir, "config.json");
-  const envFile = path.join(dir, ".env");
   try {
     // 注入空结果 mock：不真实请求网络（连接链路本身不再依赖 /models 成功）
-    const ok = await connectProvider(deepseek, "sk-123", { globalConfigFile: globalFile, envFile, fetchImpl: async () => [] });
+    const ok = await connectProvider(deepseek, "sk-123", { globalConfigFile: globalFile, fetchImpl: async () => [] });
     expect(ok).toEqual({ ok: true });
-    const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { id: string }[] };
-    expect(config.providers[0]?.id).toBe("deepseek");
-    expect(await readFile(envFile, "utf8")).toContain("DEEPSEEK_API_KEY=sk-123");
+    const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: Array<{ id: string; apiKey?: string }> };
+    expect(config.providers[0]).toMatchObject({ id: "deepseek", apiKey: "sk-123" });
+    // 项目目录不落 .env（E27）：临时目录里只有全局 config 一个文件
+    expect(await readdir(dir)).toEqual(["config.json"]);
     // 空 key
-    const bad = await connectProvider(deepseek, "   ", { globalConfigFile: globalFile, envFile });
+    const bad = await connectProvider(deepseek, "   ", { globalConfigFile: globalFile });
     expect(bad.ok).toBe(false);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -136,13 +122,12 @@ it("connectProvider 拉全量模型：/models 返回的列表替换预设占位�
   try {
     const result = await connectProvider(deepseek, "sk-123", {
       globalConfigFile: globalFile,
-      envFile: path.join(dir, ".env"),
-      fetchImpl: fakeFetch(["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]),
+      fetchImpl: fakeFetch(["deepseek-v4-pro", "deepseek-v4-flash"]),
     });
     expect(result.ok).toBe(true);
-    expect(result.fetchedModels).toBe(3);
+    expect(result.fetchedModels).toBe(2);
     const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { models: { id: string }[] }[] };
-    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]);
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -154,7 +139,6 @@ it("connectProvider 拉取失败（key 无效/网络）：用预设模型兜底�
   try {
     const result = await connectProvider(deepseek, "bad-key", {
       globalConfigFile: globalFile,
-      envFile: path.join(dir, ".env"),
       fetchImpl: fakeFetch(new Error("HTTP 401")),
     });
     expect(result.ok).toBe(true);

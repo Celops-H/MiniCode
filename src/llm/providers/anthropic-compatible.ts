@@ -18,6 +18,8 @@ export interface AnthropicCompatibleOptions {
   baseUrl: string;
   /** 存放 API key 的环境变量名 */
   apiKeyEnv: string;
+  /** 落盘 API key（配置 provider.apiKey，E33：与环境变量同权、env 优先） */
+  apiKey?: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
@@ -56,7 +58,7 @@ export class AnthropicCompatibleProvider implements Provider {
     this.protocol = new AnthropicMessagesProtocol();
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     this.defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
-    const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, env: options.env });
+    const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
     this.createClient = options.createClient ?? defaultAnthropicCreateClient;

@@ -24,6 +24,8 @@ export const providerConfigSchema = z
     id: z.string(),
     baseUrl: z.string().url(),
     apiKeyEnv: z.string(),
+    /** 落盘 API key（/connect 写用户级全局配置，E27）；环境变量 key 同权且优先（E33） */
+    apiKey: z.string().optional(),
     /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂（BACKEND §5） */
     protocol: z.enum(PROVIDER_PROTOCOLS).optional(),
     models: z.array(modelConfigSchema),

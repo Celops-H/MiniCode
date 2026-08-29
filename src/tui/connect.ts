@@ -1,9 +1,10 @@
 /**
  * /connect 供应商预设与连接写配置。
- * 交互：/connect → 供应商弹窗选择 → 弹窗内输 API Key（Enter 确认）→ 写全局 config + 项目 .env → 重建会话。
+ * 交互：/connect → 供应商弹窗选择 → 弹窗内输 API Key（Enter 确认）→ 写全局 config → 重建会话。
  * 写配置逻辑：
- * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider（不写 modelChain，模型切换归 /model 命令），过 strict schema
- * - 项目 .env：追加/替换 `${apiKeyEnv}=<key>`（幂等，重复连接更新值不重复追加）
+ * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider，key 写进该 provider 的
+ *   apiKey 字段（E27：用户级配置落 key，项目目录不落 .env），不写 modelChain（模型切换
+ *   归 /model 命令），过 strict schema
  * 失败不抛进程：返回 { ok, error } 由 loop 展示 toast，进程保留。
  */
 import fs from "node:fs/promises";
@@ -25,8 +26,13 @@ async function readGlobalConfigRaw(file: string): Promise<Record<string, unknown
   }
 }
 
-/** 写入全局 config：合并 provider（按 id 追加/替换，不写 modelChain——模型切换归 /model 命令）+ strict 校验 */
-export async function writeGlobalConfig(file: string, preset: ProviderPreset): Promise<void> {
+/**
+ * 写入全局 config：合并 provider（按 id 追加/替换，不写 modelChain——模型切换归 /model 命令）+ strict 校验。
+ * @param file 全局配置文件路径
+ * @param preset 供应商预设
+ * @param apiKey 落盘 API key（写进 provider 的 apiKey 字段；可省略仅更新端点/模型）
+ */
+export async function writeGlobalConfig(file: string, preset: ProviderPreset, apiKey?: string): Promise<void> {
   const raw = await readGlobalConfigRaw(file);
   const providers: Config["providers"] = (raw.providers as unknown as Config["providers"]) ?? [];
   const kept = (providers ?? []).filter((p) => p.id !== preset.id);
@@ -36,6 +42,7 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset): P
       id: preset.id,
       baseUrl: preset.baseUrl,
       apiKeyEnv: preset.apiKeyEnv,
+      ...(apiKey ? { apiKey } : {}),
       ...(preset.protocol ? { protocol: preset.protocol } : {}),
       models: preset.models.map((id) => ({ id })),
     },
@@ -49,21 +56,6 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset): P
   const validated = configSchema.parse(merged);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", "utf8");
-}
-
-/** 追加/替换项目 .env 的 `${key}=<value>` 行（幂等：已有则替换，无则追加） */
-export async function writeEnvKey(envFile: string, key: string, value: string): Promise<void> {
-  let lines: string[] = [];
-  try {
-    lines = (await fs.readFile(envFile, "utf8")).split("\n");
-  } catch {
-    // 无 .env 则新建
-  }
-  const line = `${key}=${value}`;
-  const idx = lines.findIndex((l) => l.startsWith(`${key}=`));
-  if (idx >= 0) lines[idx] = line;
-  else lines.push(line);
-  await fs.writeFile(envFile, lines.join("\n").replace(/\n$/, "") + "\n", "utf8");
 }
 
 /** /models 拉取超时（ms）：厂商慢响应时不让连接卡住 */
@@ -88,18 +80,16 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, timeo
   return (json.data ?? []).map((m) => m.id ?? "").filter(Boolean);
 }
 
-/** 连接供应商：写全局 config + 项目 .env；成功返回 { ok:true, fetchedModels? }，失败 { ok:false, error }。paths 可注入（测试）。 */
+/** 连接供应商：key 写全局 config 的 provider apiKey 字段（项目目录不落 .env）；成功返回 { ok:true, fetchedModels? }，失败 { ok:false, error }。paths 可注入（测试）。 */
 export async function connectProvider(
   preset: ProviderPreset,
   apiKey: string,
-  opts: { globalConfigFile?: string; envFile?: string; fetchImpl?: typeof fetchProviderModels } = {},
+  opts: { globalConfigFile?: string; fetchImpl?: typeof fetchProviderModels } = {},
 ): Promise<{ ok: boolean; error?: string; fetchedModels?: number }> {
   const trimmed = apiKey.trim();
   if (!trimmed) return { ok: false, error: "API Key 不能为空" };
   try {
-    const paths = resolveConfigPaths();
-    const globalFile = opts.globalConfigFile ?? paths.globalConfigFile;
-    const envFile = opts.envFile ?? path.join(process.cwd(), ".env");
+    const globalFile = opts.globalConfigFile ?? resolveConfigPaths().globalConfigFile;
     // 先拉全量模型（10s 超时）：拉到即用真实列表写配置；key 无效/网络失败仅回落预设占位，
     // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）。
     // anthropic 协议端点无 OpenAI /models 拉取约定（Bearer + {data:[{id}]}），直接用
@@ -117,8 +107,7 @@ export async function connectProvider(
         // 拉取失败用预设占位，静默（不 toast 干扰：连接本身成功）
       }
     }
-    await writeGlobalConfig(globalFile, { ...preset, models });
-    await writeEnvKey(envFile, preset.apiKeyEnv, trimmed);
+    await writeGlobalConfig(globalFile, { ...preset, models }, trimmed);
     return { ok: true, fetchedModels };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

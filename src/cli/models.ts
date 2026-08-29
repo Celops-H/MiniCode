@@ -31,9 +31,10 @@ export function buildModelClient(
   opts: { env?: NodeJS.ProcessEnv } = {},
 ): Models {
   const env = opts.env ?? process.env;
-  // key 过滤：无 key 的厂商不注册（调用了也必然认证失败，进列表只会误导 /model 选择）
+  // key 过滤：无 key 的厂商不注册（调用了也必然认证失败，进列表只会误导 /model 选择）。
+  // 环境变量与配置落盘 apiKey 同权（E33），任一存在即可用
   const usable = (config?.providers ?? []).filter(
-    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, env }).auth.configured,
+    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
   );
   if (usable.length === 0) throw new Error(NO_PROVIDER_ERROR);
   // -m 存在时以其为主模型打头，配置的 modelChain 作备选路由
@@ -69,6 +70,7 @@ export function buildModelClient(
           name: provider.id,
           baseUrl: provider.baseUrl,
           apiKeyEnv: provider.apiKeyEnv,
+          apiKey: provider.apiKey,
           env,
           models: modelInfos,
         }),
@@ -80,6 +82,7 @@ export function buildModelClient(
           name: provider.id,
           baseUrl: provider.baseUrl,
           apiKeyEnv: provider.apiKeyEnv,
+          apiKey: provider.apiKey,
           env,
           // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
           reasoningContent: provider.id === "deepseek",
@@ -118,7 +121,7 @@ export function resolveMainModel(
   if (modelId) return modelId;
   const env = opts.env ?? process.env;
   const usable = (config?.providers ?? []).filter(
-    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, env }).auth.configured,
+    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
   );
   const main = config?.modelChain?.[0] ?? usable[0]?.models[0]?.id;
   if (!main) throw new Error(NO_PROVIDER_ERROR);

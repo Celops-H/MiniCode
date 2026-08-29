@@ -164,3 +164,46 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(models.resolve("a-2")).toBeDefined();
   });
 });
+
+describe("落盘 apiKey 与环境变量同权（E33）", () => {
+  const storedConfig: Config = {
+    logLevel: "info",
+    providers: [
+      {
+        id: "stored",
+        baseUrl: "https://stored.example.com",
+        apiKeyEnv: "STORED_API_KEY",
+        apiKey: "stored-key",
+        models: [{ id: "m-1" }],
+      },
+    ],
+  };
+
+  it("无环境变量时仅凭配置 apiKey 即注册可用，主模型可解析", () => {
+    const models = buildModelClient(storedConfig, undefined, { env: {} });
+    expect(models.resolve("m-1")).toBeDefined();
+    expect(resolveMainModel(storedConfig, undefined, { env: {} })).toBe("m-1");
+  });
+
+  it("环境变量与落盘 key 同时存在：环境变量优先（auth.source=env）", () => {
+    const models = buildModelClient(storedConfig, undefined, { env: { STORED_API_KEY: "env-key" } });
+    const provider = models.provider("stored");
+    expect(provider?.auth).toEqual({ configured: true, source: "env" });
+  });
+
+  it("落盘 key 与环境变量皆无：不注册（零可用走启动引导/报错路径）", () => {
+    const bare: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "stored",
+          baseUrl: "https://stored.example.com",
+          apiKeyEnv: "STORED_API_KEY",
+          models: [{ id: "m-1" }],
+        },
+      ],
+    };
+    expect(() => buildModelClient(bare, undefined, { env: {} })).toThrow();
+    expect(() => resolveMainModel(bare, undefined, { env: {} })).toThrow();
+  });
+});

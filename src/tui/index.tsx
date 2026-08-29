@@ -12,12 +12,12 @@ import { HookBus } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
 import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions } from "../cli/app.js";
-import { buildModelClient, resolveMainModel } from "../cli/models.js";
+import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
+import { Models } from "../llm/index.js";
 import { NEW_SESSION_ID } from "./state.js";
 import { runTui } from "./loop.js";
 import type { Config } from "../config/index.js";
 import type { ThinkingLevel } from "../core/index.js";
-import type { Models } from "../llm/index.js";
 
 /**
  * 系统提示词（对齐主流 agent CLI 的写法，2026-08-26 打磨）：
@@ -106,6 +106,24 @@ export async function reloadOrDraftSession(store: SessionStore, current: Session
   }
 }
 
+/** 纯草稿会话在无模型时的占位模型 id（不落盘：连接成功后 reconfigure 重建草稿） */
+export const NO_MODEL_ID = "";
+
+/**
+ * 启动模型客户端装配（E31）：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
+ * 由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
+ * @param config 已加载配置（可省略，等同零厂商）
+ * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、needsConnect 是否进连接引导
+ */
+export function createStartupModels(config?: Config): { models: Models; modelId: string; needsConnect: boolean } {
+  try {
+    return { models: buildModelClient(config), modelId: resolveMainModel(config), needsConnect: false };
+  } catch (err) {
+    if ((err as Error).message !== NO_PROVIDER_ERROR) throw err;
+    return { models: new Models(), modelId: NO_MODEL_ID, needsConnect: true };
+  }
+}
+
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 全局配置播种（BACKEND §14）：独立启动（dev 入口）也要装配配置前检测；
@@ -116,13 +134,15 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   await loadDotEnv();
   let config: Config = await loadConfig();
   const store = new SessionStore(config.sessionsDir ?? resolveSessionsDir());
-  let models: Models = buildModelClient(config);
-  let modelId: string = resolveMainModel(config);
+  // 零可用厂商（E31）：正常启动进 /connect 引导；CLI 宿主非交互，保持报错退出
+  const startup = createStartupModels(config);
+  let models: Models = startup.models;
+  let modelId: string = startup.modelId;
   let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
   for (;;) {
-    const result = await runTuiSession(store, models, config, session, options.agents ?? true, thinkingLevelBox);
+    const result = await runTuiSession(store, models, config, session, options.agents ?? true, thinkingLevelBox, startup.needsConnect);
     if (!result) break;
     // reconfigure（/connect 或 /model）重建配置链：重读 config + .env、重建模型客户端；
     // switchTo 无值时保持当前会话续跑（connect 不切会话、/model 同会话切模型）
@@ -159,6 +179,7 @@ async function runTuiSession(
   session: Session,
   agents: boolean,
   thinkingLevelBox: { value: ThinkingLevel | undefined },
+  startupConnect = false,
 ): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
@@ -191,6 +212,7 @@ async function runTuiSession(
       getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
       skillsDisabled: config.skills?.disabled ?? [],
       startupNotices: extensions.mcpErrors,
+      startupConnect,
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]

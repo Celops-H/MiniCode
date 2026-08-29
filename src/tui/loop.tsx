@@ -93,6 +93,8 @@ export interface TuiLoopOptions {
   skillsDisabled?: string[];
   /** 会话启动通知（MCP 启动失败错误行等）：挂载后 toast 一次，完整状态在 /mcp 面板 */
   startupNotices?: string[];
+  /** 零可用厂商启动引导（E31）：打开供应商选择弹窗 + toast 提示，连接成功经 reconfigure 重建 */
+  startupConnect?: boolean;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
 }
@@ -350,7 +352,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   /** 连接写盘是否进行中（防重入：连按 Enter 并发写全局 config 会 read-modify-write 互相覆盖，丢其它配置） */
   let connecting = false;
 
-  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config + 项目 .env。 */
+  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config（E27：key 落用户级配置的 provider apiKey 字段）。 */
   const submitConnectKey = async (): Promise<void> => {
     const conn = state.modal;
     if (!conn || conn.kind !== "connect-key") return;
@@ -783,6 +785,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
 
   // 装配通知（MCP 启动失败错误行等）：toast 一次提示去向（/mcp 面板有完整连接状态），不打断进入
   if (options.startupNotices?.length) showToast(options.startupNotices.join("；"));
+
+  // 零可用厂商启动引导（E31）：正常进入界面但直接打开供应商选择弹窗，连接成功后
+  // 经 reconfigure 重建配置链即用；Esc 关掉弹窗也可随后用 /connect 再开
+  if (options.startupConnect) {
+    showToast("未配置任何可用厂商，请先连接供应商");
+    commit({
+      ...state,
+      modal: {
+        kind: "connect",
+        providers: PROVIDER_PRESETS.map((p) => ({ id: p.id, name: p.name, defaultModel: p.defaultModel })),
+        selected: 0,
+      },
+    });
+  }
 
   await render(
     () => <App state={state} model={modelLabel} onAction={handleAction} />,

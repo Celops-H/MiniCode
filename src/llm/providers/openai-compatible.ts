@@ -23,6 +23,8 @@ export interface OpenAICompatibleOptions {
   baseUrl: string;
   /** 存放 API key 的环境变量名 */
   apiKeyEnv: string;
+  /** 落盘 API key（配置 provider.apiKey，E33：与环境变量同权、env 优先） */
+  apiKey?: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
   /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
@@ -59,7 +61,7 @@ export class OpenAICompatibleProvider implements Provider {
       emitReasoningEffort: options.reasoningEffort,
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
-    const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, env: options.env });
+    const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
     this.createClient = options.createClient ?? defaultCreateClient;
