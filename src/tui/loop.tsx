@@ -95,15 +95,83 @@ export interface TuiLoopOptions {
   startupNotices?: string[];
   /** 零可用厂商启动引导（E31）：打开供应商选择弹窗 + toast 提示，连接成功经 reconfigure 重建 */
   startupConnect?: boolean;
+  /** 共享终端（E19）：入口层创建一次跨会话复用；缺省自建并在退出时销毁（测试/单会话） */
+  terminal?: TuiTerminal;
+  /** 上一轮带回的 UI 状态（E34）：reconfigure 续接时传入，消息区/输入框/弹层原样保留 */
+  carryState?: TuiState;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
 }
 
-/** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号 */
-export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
+/** TUI 终端句柄：渲染器 + 光标闪烁定时器等终端级资源（E19/E34：跨会话复用，
+ *  reconfigure 不再销毁重建渲染器——重建是「多操作闪屏」的根源） */
+export interface TuiTerminal {
+  renderer: Awaited<ReturnType<typeof createCliRenderer>>;
+  /** 释放终端（入口层退出时调用一次；内含渲染器销毁兜底） */
+  dispose(): void;
+}
+
+/** 创建共享终端：清输入缓冲 → 渲染器 → 光标定位 postProcess 与闪烁定时器（一次装配） */
+export async function createTuiTerminal(): Promise<TuiTerminal> {
+  // Windows 终端输入初始化（对齐 opencode）：清输入缓冲在进 TUI 前，PROCESSED_INPUT
+  // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
+  win32FlushInputBuffer();
+  const renderer = await createCliRenderer({
+    exitOnCtrlC: false,
+    // 强制 JS 渲染（useThread false）：与测试/headless 路径一致，渲染输出经 stdout.write 直达终端
+    // （headless 下已实测：store 更新后的帧内容确实写出，含输入字符）。原生线程路径此前在真机
+    // 与诊断期 stderr 噪声叠加时未验证成功，先保持 JS 路径可靠。
+    useThread: false,
+    targetFps: 60,
+    autoFocus: false,
+    openConsoleOnError: false,
+    // 鼠标：开启后滚动条拖拽/滚轮滚动由 opentui 原生承担，点击折叠等由视图 onMouseUp 接线
+    useMouse: true,
+    // kitty 键盘协议：让 Ctrl+J（换行）等组合键带修饰标志独立到达；不支持的终端自动回退（Ctrl+J 退化为 Enter）
+    useKittyKeyboard: {},
+  });
+  win32DisableProcessedInput();
+
+  // D-1=36 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
+  // 闪烁由定时器翻 tuiCursor.visible 并触发重渲（postProcessFn 随帧执行 setCursorPosition）
+  renderer.addPostProcessFn(() => {
+    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
+  });
+  const blinkTimer = setInterval(() => {
+    if (tuiCursor.enabled) {
+      tuiCursor.visible = !tuiCursor.visible;
+      renderer.requestRender();
+    }
+  }, 500);
+  return {
+    renderer,
+    dispose: () => {
+      clearInterval(blinkTimer);
+      // destroy 包 try（渲染器初始化失败等边缘路径也不漏还原）
+      try {
+        renderer.destroy();
+      } catch {
+        // 渲染器已不可用，忽略
+      }
+    },
+  };
+}
+
+/** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号，
+ *  并带回最终 UI 状态——reconfigure 时入口层把状态原样带回（E34：会话不退出期间
+ *  TUI 历史固定不变，不按盘上消息重建视图） */
+export async function runTui(options: TuiLoopOptions): Promise<{
+  switchTo?: string;
+  reconfigure?: boolean;
+  /** 本轮结束时的 UI 状态（入口层决定下一轮是续接还是按新会话重建） */
+  state: TuiState;
+} | undefined> {
   const { store, session, modelLabel } = options;
   const hooks: HookBusType = options.hooks ?? new HookBus();
-  const [state, setState] = createStore<TuiState>(initState(session.getMessages(), session.meta.title));
+  // UI 状态：carryState 存在时原样续接（reconfigure 不重建视图，历史固定），否则按当前会话消息初始化
+  const [state, setState] = createStore<TuiState>(
+    options.carryState ?? initState(session.getMessages(), session.meta.title),
+  );
 
   let agent: Agent;
   /** 多 agent 团队（assemble 装配；Esc 级联中断子 agent、退出清理用；单 agent 时 undefined） */
@@ -764,24 +832,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     }
   };
 
-  // Windows 终端输入初始化（对齐 opencode）：清输入缓冲在进 TUI 前，PROCESSED_INPUT
-  // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
-  win32FlushInputBuffer();
-  const renderer = await createCliRenderer({
-    exitOnCtrlC: false,
-    // 强制 JS 渲染（useThread false）：与测试/headless 路径一致，渲染输出经 stdout.write 直达终端
-    // （headless 下已实测：store 更新后的帧内容确实写出，含输入字符）。原生线程路径此前在真机
-    // 与诊断期 stderr 噪声叠加时未验证成功，先保持 JS 路径可靠。
-    useThread: false,
-    targetFps: 60,
-    autoFocus: false,
-    openConsoleOnError: false,
-    // 鼠标：开启后滚动条拖拽/滚轮滚动由 opentui 原生承担，点击折叠等由视图 onMouseUp 接线
-    useMouse: true,
-    // kitty 键盘协议：让 Ctrl+J（换行）等组合键带修饰标志独立到达；不支持的终端自动回退（Ctrl+J 退化为 Enter）
-    useKittyKeyboard: {},
-  });
-  win32DisableProcessedInput();
+  // 终端：入口层传入共享终端则复用（跨会话不销毁，E19），否则自建并在退出时销毁
+  const ownTerminal = options.terminal ? undefined : await createTuiTerminal();
+  const renderer = options.terminal?.renderer ?? ownTerminal!.renderer;
 
   // 装配通知（MCP 启动失败错误行等）：toast 一次提示去向（/mcp 面板有完整连接状态），不打断进入
   if (options.startupNotices?.length) showToast(options.startupNotices.join("；"));
@@ -804,18 +857,6 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     () => <App state={state} model={modelLabel} onAction={handleAction} />,
     renderer,
   );
-
-  // D-1=36 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
-  // 闪烁由定时器翻 tuiCursor.visible 并触发重渲（postProcessFn 随帧执行 setCursorPosition）
-  renderer.addPostProcessFn(() => {
-    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
-  });
-  const blinkTimer = setInterval(() => {
-    if (tuiCursor.enabled) {
-      tuiCursor.visible = !tuiCursor.visible;
-      renderer.requestRender();
-    }
-  }, 500);
 
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
   ({ agent, team } = options.assemble({ approver, feedRoot, hooks }));
@@ -871,15 +912,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
   } finally {
     runningLoop = false;
     if (toastTimer) clearTimeout(toastTimer);
-    clearInterval(blinkTimer);
     for (const off of unsubscribeHooks) off();
-    // 先还原终端（renderer.destroy）再发会话结束事件：防 SessionEnd handler 的 stdout
-    // 写进 raw/备用屏；destroy 包 try（渲染器初始化失败等边缘路径也不漏还原）
-    try {
-      renderer.destroy();
-    } catch {
-      // 渲染器已不可用，忽略
-    }
+    // 共享终端不在此销毁（跨会话复用，入口层统一释放）；自建终端按原序还原终端后再发
+    // 会话结束事件：防 SessionEnd handler 的 stdout 写进 raw/备用屏
+    ownTerminal?.dispose();
     try {
       await hooks?.emit({ type: "SessionEnd" });
     } catch {
@@ -889,6 +925,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{ switchTo?: stri
     team?.clear();
   }
   // /session 切换到其它会话 / /connect 重建链：只有改会话或请求重建任一发生才返回信号；
-  // 仅 reconfigure（connect 保持同会话）时 switchTo 留空，由装配层加载同一会话
-  return pendingSwitch || pendingReconfigure ? { switchTo: pendingSwitch, reconfigure: pendingReconfigure } : undefined;
+  // 仅 reconfigure（connect 保持同会话）时 switchTo 留空，由装配层加载同一会话。
+  // UI 最终状态随信号带回：reconfigure 由入口层原样续接（E34 历史固定）
+  return { switchTo: pendingSwitch, reconfigure: pendingReconfigure, state };
 }

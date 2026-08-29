@@ -15,7 +15,8 @@ import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionEx
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
 import { Models } from "../llm/index.js";
 import { NEW_SESSION_ID } from "./state.js";
-import { runTui } from "./loop.js";
+import type { TuiState } from "./state.js";
+import { createTuiTerminal, runTui, type TuiTerminal } from "./loop.js";
 import type { Config } from "../config/index.js";
 import type { ThinkingLevel } from "../core/index.js";
 
@@ -142,46 +143,74 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
-  for (;;) {
-    const result = await runTuiSession(store, models, config, session, options.agents ?? true, thinkingLevelBox, startup.needsConnect);
-    if (!result) break;
-    // reconfigure（/connect 或 /model）重建配置链：重读 config + .env、重建模型客户端；
-    // switchTo 无值时保持当前会话续跑（connect 不切会话、/model 同会话切模型）
-    if (result.reconfigure) {
-      // .env 先注入再读配置（同启动顺序：reconfigure 后 MINICODE_* 变量层不漏读）
-      await loadDotEnv();
-      config = await loadConfig();
-      models = buildModelClient(config);
-      modelId = resolveMainModel(config);
-      // switchTo===NEW_SESSION_ID 分支实际不可达（/model 带自身 id、/connect 不带 switchTo），
-      // 保留作防御（未来 reconfigure + 新建语义的兜底，整体审视 N-2）
-      if (result.switchTo === NEW_SESSION_ID) {
-        session = await store.createSession({ model: modelId });
-      } else if (result.switchTo) {
-        session = await store.loadSession(result.switchTo);
-      } else {
-        session = await reloadOrDraftSession(store, session, modelId);
+  // 共享终端一次创建跨会话复用（E19：reconfigure 不再销毁重建渲染器——闪屏根源）
+  const terminal = await createTuiTerminal();
+  // UI 状态跨轮传递：reconfigure 续接（E34 会话不退出期间历史固定）、切会话重建
+  let carry: TuiState | undefined;
+  try {
+    for (;;) {
+      const result = await runTuiSession({
+        store,
+        models,
+        config,
+        session,
+        agents: options.agents ?? true,
+        thinkingLevelBox,
+        startupConnect: startup.needsConnect,
+        carryState: carry,
+        terminal,
+      });
+      if (!result) break;
+      carry = result.state;
+      if (result.reconfigure) {
+        // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
+        // 会话内视图不按盘上消息重建（carry 续接，E34 历史固定）；切会话/新建草稿才重建视图
+        await loadDotEnv();
+        config = await loadConfig();
+        models = buildModelClient(config);
+        modelId = resolveMainModel(config);
+        // switchTo===NEW_SESSION_ID 分支实际不可达（/model 带自身 id、/connect 不带 switchTo），
+        // 保留作防御（未来 reconfigure + 新建语义的兜底，整体审视 N-2）
+        if (result.switchTo === NEW_SESSION_ID) {
+          session = await store.createSession({ model: modelId });
+          carry = undefined;
+        } else if (result.switchTo) {
+          session = await store.loadSession(result.switchTo);
+          carry = undefined;
+        } else {
+          session = await reloadOrDraftSession(store, session, modelId);
+        }
+        continue;
       }
-      continue;
+      if (!result.switchTo) break;
+      // /session 切换：视图按新会话消息重建（carry 清掉）
+      session =
+        result.switchTo === NEW_SESSION_ID
+          ? await store.createSession({ model: modelId })
+          : await store.loadSession(result.switchTo);
+      carry = undefined;
     }
-    if (!result.switchTo) break;
-    session =
-      result.switchTo === NEW_SESSION_ID
-        ? await store.createSession({ model: modelId })
-        : await store.loadSession(result.switchTo);
+  } finally {
+    terminal.dispose();
   }
 }
 
-/** 单个会话的 TUI 循环：装配 agent（approver 注入权限管线、feedRoot 接 onRootEvent）后跑 runTui */
-async function runTuiSession(
-  store: SessionStore,
-  models: Models,
-  config: Config,
-  session: Session,
-  agents: boolean,
-  thinkingLevelBox: { value: ThinkingLevel | undefined },
-  startupConnect = false,
-): Promise<{ switchTo?: string; reconfigure?: boolean } | undefined> {
+/** 单个会话的 TUI 循环参数：装配 agent（approver 注入权限管线、feedRoot 接 onRootEvent）后跑 runTui */
+async function runTuiSession(opts: {
+  store: SessionStore;
+  models: Models;
+  config: Config;
+  session: Session;
+  agents: boolean;
+  thinkingLevelBox: { value: ThinkingLevel | undefined };
+  /** 零可用厂商启动引导（仅首轮可能为 true） */
+  startupConnect?: boolean;
+  /** 上一轮带回的 UI 状态（reconfigure 续接用，E34） */
+  carryState?: TuiState;
+  /** 共享终端（E19，入口层创建一次） */
+  terminal?: TuiTerminal;
+}): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState } | undefined> {
+  const { store, models, config, session, agents, thinkingLevelBox } = opts;
   const hooks = buildHookBus(config.hooks) ?? new HookBus();
   const modelId = session.meta.model;
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
@@ -213,7 +242,9 @@ async function runTuiSession(
       getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
       skillsDisabled: config.skills?.disabled ?? [],
       startupNotices: extensions.mcpErrors,
-      startupConnect,
+      startupConnect: opts.startupConnect,
+      carryState: opts.carryState,
+      terminal: opts.terminal,
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
