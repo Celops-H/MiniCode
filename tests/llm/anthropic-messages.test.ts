@@ -313,3 +313,26 @@ describe("parseStream：E16 五类现象", () => {
     ]);
   });
 });
+
+describe("parseStream：E16 审查修正", () => {
+  it("message_stop 前省略 content_block_stop：未闭合标签残料 flush 后再 done", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "开头<thinking>残料" } },
+        // 兼容端点直接收尾，无 content_block_stop
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "开头" },
+      // 未闭合的 thinking 段残料按思考发出，不随 message_stop 丢失
+      { type: "thinking_delta", thinking: "残料" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+});

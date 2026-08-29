@@ -89,6 +89,13 @@ export class AnthropicMessagesProtocol implements Protocol {
       openTextBlocks.delete(blockIndex);
     };
 
+    /** 未 stop 的 text 块 flush 标签残料（正常 message_stop 与异常断流的流尾共用） */
+    const flushOpenTextBlocks = function* (): Generator<StreamEvent> {
+      for (const blockIndex of openTextBlocks) {
+        for (const out of tagFilters.get(blockIndex)?.flush() ?? []) yield out;
+      }
+    };
+
     try {
       for await (const chunk of stream) {
         if (typeof chunk !== "object" || chunk === null) continue;
@@ -156,6 +163,8 @@ export class AnthropicMessagesProtocol implements Protocol {
             stopReason = event.delta?.stop_reason;
             break;
           case "message_stop":
+            // 兼容端点可能省略 content_block_stop 直接收尾：未 stop 的 text 块残料先 flush 再 done
+            yield* flushOpenTextBlocks();
             yield { type: "done", stopReason: stopReason ?? "end_turn" };
             return;
           case "error":
@@ -170,10 +179,8 @@ export class AnthropicMessagesProtocol implements Protocol {
       yield { type: "error", message: (err as Error).message ?? String(err) };
       throw err;
     }
-    // 流尾：未 stop 的 text 块 flush 标签残料
-    for (const blockIndex of openTextBlocks) {
-      for (const out of tagFilters.get(blockIndex)?.flush() ?? []) yield out;
-    }
+    // 流尾（断流）：未 stop 的 text 块 flush 标签残料
+    yield* flushOpenTextBlocks();
     // 迭代正常结束但未收到 message_stop（厂商提前断流）：报 error 标记异常轮
     yield { type: "error", message: "流意外结束（未收到 message_stop）" };
   }

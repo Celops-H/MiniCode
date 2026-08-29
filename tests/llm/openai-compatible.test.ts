@@ -168,6 +168,47 @@ describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
+  it("不产出事件的 chunk（ping/仅 role）也算活跃：静默思考期不误判超时", async () => {
+    // 空闲超时按厂商原始 chunk 计时：首个正文 chunk 后每 40ms 来一个仅 role 的
+    // chunk（不产出任何事件），累计 240ms 远超 50ms 超时——若按「事件间隔」计时
+    // 会在 50ms 处误判超时；正常完成即锁定了计时层级
+    async function* keepaliveStream(): AsyncIterable<unknown> {
+      yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
+      for (let i = 0; i < 6; i++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+        yield { choices: [{ delta: { role: "assistant" }, index: 0 }] };
+      }
+      yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+    }
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create() {
+            return keepaliveStream();
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: MODELS,
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50, // 测试用短超时（小于累计静默、大于相邻 chunk 间隔）
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    for await (const e of provider.stream("deepseek-chat", createContext("s", [userMessage("q")]))) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
   it("用户 signal 中止时转发中断底层挂起（打断语义保留，流尽快释放）", async () => {
     let interrupted = false;
     const client: ChatCompletionsClient = {

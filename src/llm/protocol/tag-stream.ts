@@ -31,7 +31,7 @@ const THINKING_CLOSE = "</thinking>";
 const TOOLCALL_OPEN = "<tool_call>";
 const TOOLCALL_CLOSE = "</tool_call>";
 
-/** 开标签清单：normal 态按出现位置匹配（先匹配长标签，避免 `<tool_` 被误认成别的开头） */
+/** 开标签清单：normal 态按出现位置匹配（两者互不为前缀，匹配互不干扰） */
 const OPEN_TAGS = [TOOLCALL_OPEN, THINKING_OPEN] as const;
 
 export class InlineTagFilter {
