@@ -149,6 +149,8 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   const terminal = await createTuiTerminal();
   // UI 状态跨轮传递：reconfigure 续接（E34 会话不退出期间历史固定）、切会话重建
   let carry: TuiState | undefined;
+  // 启动引导只作用于首轮（批次 3/4 审查问题 1）：连接成功的 reconfigure 后不复位会复弹弹窗
+  let firstRound = true;
   try {
     for (;;) {
       const result = await runTuiSession({
@@ -158,13 +160,14 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         session,
         agents: options.agents ?? true,
         thinkingLevelBox,
-        startupConnect: startup.needsConnect,
+        startupConnect: startup.needsConnect && firstRound,
         carryState: carry,
         terminal,
         projectAgentsFile: options.projectAgentsFile,
       });
       if (!result) break;
       carry = result.state;
+      firstRound = false;
       if (result.reconfigure) {
         // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
         // 会话内视图不按盘上消息重建（carry 续接，E34 历史固定）；切会话/新建草稿才重建视图
@@ -182,6 +185,12 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
           carry = undefined;
         } else {
           session = await reloadOrDraftSession(store, session, modelId);
+          // 引导态先发消息后连接（E31 边界，批次 3/4 审查问题 2）：草稿可能以空模型落盘，
+          // 载入的会话模型在新配置里不可解析时归位为当前主模型，免得已连接仍报「未知模型」；
+          // 内存归位即可，下一轮落盘自然纠正盘上 meta
+          if (!session.meta.model || !models.resolve(session.meta.model)) {
+            session.meta.model = modelId;
+          }
         }
         continue;
       }

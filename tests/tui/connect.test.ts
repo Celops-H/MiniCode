@@ -106,7 +106,8 @@ it("connectProvider：key 写全局 config 的 apiKey 字段，项目目录不�
     expect(ok).toEqual({ ok: true });
     const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: Array<{ id: string; apiKey?: string }> };
     expect(config.providers[0]).toMatchObject({ id: "deepseek", apiKey: "sk-123" });
-    // 项目目录不落 .env（E27）：临时目录里只有全局 config 一个文件
+    // 连接过程只产出全局 config 一个文件（key 落配置字段；项目目录不落 .env 由
+    // writeEnvKey 整体删除保证，代码路径已无任何 .env 写点）
     expect(await readdir(dir)).toEqual(["config.json"]);
     // 空 key
     const bad = await connectProvider(deepseek, "   ", { globalConfigFile: globalFile });

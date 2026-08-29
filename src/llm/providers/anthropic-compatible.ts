@@ -142,7 +142,8 @@ const THINKING_BUDGETS: Record<ThinkingLevel, number> = { low: 2048, medium: 409
 /**
  * 思考等级 → Anthropic 请求体 thinking 参数。
  * Anthropic 规定 budget_tokens ≥1024 且 < max_tokens：按 maxTokens 钳制（留 1024
- * 输出头寸）；maxTokens ≤2048 时承载不了思考，返回 undefined（不发，退回厂商默认）。
+ * 输出头寸）；maxTokens < 2048 时承载不了思考（cap = maxTokens - 1024 不足下限），
+ * 返回 undefined（不发，退回厂商默认）；恰为 2048 时预算压到下限 1024。
  * @param level 思考等级
  * @param maxTokens 请求 max_tokens（模型定义值或缺省兜底）
  * @returns thinking 参数；等级无法承载时 undefined
