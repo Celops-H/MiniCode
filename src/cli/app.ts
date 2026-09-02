@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
-import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
+import { buildInstructionsPrompt, environmentPrompt, loadInstructionFiles } from "../context/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
 import { Logger } from "../logger/index.js";
 import { McpManager, killAllMcpServers } from "../mcp/index.js";
@@ -47,14 +46,6 @@ const SYSTEM_PROMPT = [
 
 /** 多 agent 协作开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
 const COORDINATOR_PROMPT = "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。";
-
-/** 环境信息（N3）：OS/架构/Shell/工作目录四项，供模型感知运行环境（CLI/TUI 共用，
- *  经 createSessionAgent 自动注入系统提示词）。Shell 从环境变量取，Windows 缺省记 PowerShell。 */
-export function environmentPrompt(): string {
-  const osName = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform;
-  const shell = process.env.SHELL ?? (process.platform === "win32" ? "PowerShell" : "未知");
-  return `当前环境：操作系统 ${osName}（${os.release()}），架构 ${process.arch}，Shell ${shell}，工作目录 ${process.cwd()}`;
-}
 
 export const program = new Command();
 program
@@ -228,6 +219,8 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     agents,
     hooks,
     compactConfig: buildCompactConfig(config, session.meta.model, models),
+    // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
+    subagentPromptSections: [instructionsSection, extensions.promptSection],
     // root 被后台驱动（子 agent 完成唤醒续跑）时事件转给 CLI 渲染：
     // 迟到子 agent 完成的汇总结论不打丢（review 修复），renderStreamEvent 与 interact 同渲染逻辑
     onRootEvent: (event) => renderStreamEvent(write, event),
@@ -373,6 +366,9 @@ export function createSessionAgent(options: {
   onRootEvent?: (event: StreamEvent) => void;
   /** 权限管线（TUI 注入用户审批 approver）；缺省不启用 */
   permission?: PermissionPipeline;
+  /** 协作子 agent 的提示词附加段（E12/E14：项目指令段 + 可用技能段，装配时传入；
+   *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定） */
+  subagentPromptSections?: string[];
 }): { agent: Agent; team?: Team } {
   const envPrompt = environmentPrompt();
   if (options.agents === false) {

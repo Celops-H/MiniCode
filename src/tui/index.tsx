@@ -321,6 +321,8 @@ async function runTuiSession(opts: {
           agents,
           hooks,
           compactConfig,
+          // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
+          subagentPromptSections: [instructionsSection, extensions.promptSection],
           // 思考等级活引用：/@/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
           thinkingLevelRef: () => thinkingLevelBox.value,
           // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）

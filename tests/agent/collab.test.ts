@@ -111,6 +111,119 @@ describe("协作工具集（多 agent 环境）", () => {
     ).toBe(true);
   });
 
+  it("子 agent 提示词注入（E12+E14）：装配段（指令/技能）与环境段随派生注入子 agent", async () => {
+    const team = new Team();
+    const childPrompts: string[] = [];
+    const root = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          // 子 agent（协作提示开头）只记录提示词并直接收尾；root 先派生再总结
+          if (context.systemPrompt.startsWith("你是团队工作 agent")) {
+            childPrompts.push(context.systemPrompt);
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "spawn_agent" };
+            yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ agentName: "worker", prompt: "干活" }) };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "已派发" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      subagentPromptSections: ["", "【项目指令】用 pnpm test 跑测试", "【可用技能】\n- demo — 演示技能"],
+    });
+    team.registerRoot(root);
+    root.start("派活");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    // 等 worker 被 NEW_TASK 唤醒驱动（后台驱动，同 watcher 测试）
+    await sleep(50);
+    expect(childPrompts.length).toBeGreaterThan(0);
+    const childPrompt = childPrompts[0]!;
+    // 固定协作提示开头；装配段（指令 + 技能）注入；环境段按子 agent cwd 生成
+    expect(childPrompt.startsWith("你是团队工作 agent")).toBe(true);
+    expect(childPrompt).toContain("【项目指令】用 pnpm test 跑测试");
+    expect(childPrompt).toContain("【可用技能】");
+    expect(childPrompt).toContain("工作目录");
+    // 空串段被过滤：段间不出现空行（空段不占位直接跳过）
+    expect(childPrompt).not.toContain("\n\n");
+    // 顺序：协作提示 → 装配段 → 环境段
+    expect(childPrompt.indexOf("【项目指令】")).toBeLessThan(childPrompt.indexOf("【可用技能】"));
+    expect(childPrompt.indexOf("【可用技能】")).toBeLessThan(childPrompt.indexOf("当前环境"));
+  });
+
+  it("装配段随派生链传递（E12+E14）：孙 agent 的提示词同样注入", async () => {
+    const team = new Team();
+    const childPrompts: string[] = [];
+    const root = new Agent({
+      // root 与协作成员共用一套 mock：按「协作提示开头」识别成员；worker（收 /root 新任务）
+      // 再派生 grand，grand（收 /root/worker 新任务）直接收尾
+      modelClient: {
+        async *stream(_modelId, context) {
+          if (!context.systemPrompt.startsWith("你是团队工作 agent")) {
+            const hasResult = context.messages.some((m) => m.role === "tool_result");
+            if (!hasResult) {
+              yield { type: "toolcall_start", index: 0, id: "c1", name: "spawn_agent" };
+              yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ agentName: "worker", prompt: "干活" }) };
+              yield { type: "toolcall_end", index: 0 };
+              yield { type: "done", stopReason: "tool_calls" };
+              return;
+            }
+            yield { type: "text_delta", text: "已派发" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          childPrompts.push(context.systemPrompt);
+          const isGrand = context.messages.some(
+            (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("from /root/worker"),
+          );
+          if (isGrand) {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c2", name: "spawn_agent" };
+            yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ agentName: "grand", prompt: "第二层" }) };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+            return;
+          }
+          yield { type: "text_delta", text: "完成" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      subagentPromptSections: ["【项目指令】（测试段）"],
+    });
+    team.registerRoot(root);
+    root.start("派活");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    // 等 worker 派生 grand 并被驱动（两级后台驱动）
+    await sleep(80);
+    // worker 与 grand 的上下文提示词都含注入段（装配段随派生链传递到孙 agent）
+    expect(childPrompts.length).toBeGreaterThanOrEqual(2);
+    for (const prompt of childPrompts) {
+      expect(prompt.startsWith("你是团队工作 agent")).toBe(true);
+      expect(prompt).toContain("【项目指令】（测试段）");
+    }
+  });
+
   it("spawn_agent：深度守卫拒绝嵌套派生（maxDepth 1 时）", async () => {
     const team = new Team({ maxDepth: 1 });
     // 直接经工具执行路径验证：子 agent 的协作工具在深度 2 时被拒绝
