@@ -209,6 +209,94 @@ describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
     ]);
   });
 
+  it("finish_reason 后厂商握着连接不发结束帧：宽限窗后正常收尾 done，不再误报超时（E47）", async () => {
+    // 响应已逻辑完整（finish_reason 已到），厂商不发 [DONE] 也不关流：
+    // 旧实现 30s 空闲超时报错丢整轮，现在宽限窗耗尽按正常收尾关流
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create(_request, options) {
+            return {
+              async *[Symbol.asyncIterator]() {
+                yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
+                yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+                await new Promise<void>((resolve) => {
+                  const onAbort = (): void => resolve();
+                  if (options?.signal?.aborted) onAbort();
+                  else options?.signal?.addEventListener("abort", onAbort, { once: true });
+                });
+              },
+            };
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: MODELS,
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50,
+      streamTailGraceMs: 60, // 测试用短宽限窗
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    const t0 = Date.now();
+    for await (const e of provider.stream("deepseek-chat", createContext("s", [userMessage("q")]))) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "done", stopReason: "stop" },
+    ]);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it("finish_reason 后宽限窗内补发的正文不丢（E47）", async () => {
+    async function* tailContentStream(signal?: AbortSignal): AsyncIterable<unknown> {
+      yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
+      yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      yield { choices: [{ delta: { content: "补发" }, index: 0 }] };
+      await new Promise<void>((resolve) => {
+        const onAbort = (): void => resolve();
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create(_request, options) {
+            return tailContentStream(options?.signal);
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      models: MODELS,
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50,
+      streamTailGraceMs: 60,
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    for await (const e of provider.stream("deepseek-chat", createContext("s", [userMessage("q")]))) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "text_delta", text: "补发" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
   it("用户 signal 中止时转发中断底层挂起（打断语义保留，流尽快释放）", async () => {
     let interrupted = false;
     const client: ChatCompletionsClient = {

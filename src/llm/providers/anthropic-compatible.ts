@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { resolveAuth } from "../auth.js";
 import { AnthropicMessagesProtocol } from "../protocol/index.js";
-import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
+import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, TAIL_GRACE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
 import type { Context, StreamEvent, ThinkingLevel } from "../../core/index.js";
 import type { Provider, ProviderAuth, ModelInfo } from "../types.js";
 
@@ -24,6 +24,8 @@ export interface AnthropicCompatibleOptions {
   env?: NodeJS.ProcessEnv;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
+  /** 收尾宽限窗（ms，E47）：stop_reason/message_stop 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
+  streamTailGraceMs?: number;
   /** Anthropic 请求默认 max_tokens（请求体必填，模型未定义时兜底） */
   defaultMaxTokens?: number;
   /** 创建 client 的工厂（测试注入 mock） */
@@ -46,6 +48,7 @@ export class AnthropicCompatibleProvider implements Provider {
   private readonly modelList: ModelInfo[];
   private readonly createClient: (apiKey: string, baseUrl: string) => AnthropicMessagesClient;
   private readonly streamIdleTimeoutMs: number;
+  private readonly streamTailGraceMs: number;
   private readonly defaultMaxTokens: number;
   private readonly apiKey?: string;
   private client?: AnthropicMessagesClient;
@@ -57,6 +60,7 @@ export class AnthropicCompatibleProvider implements Provider {
     this.modelList = options.models;
     this.protocol = new AnthropicMessagesProtocol();
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
+    this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;
     this.defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
@@ -114,9 +118,14 @@ export class AnthropicCompatibleProvider implements Provider {
         { signal: controller.signal },
       );
       // 空闲超时包在原始流外：anthropic 的 ping 等不产出事件的 chunk 也算活跃，
-      // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出
+      // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出。
+      // 收尾宽限（E47）：stop_reason / message_stop 已到即响应完整，个别厂商握着连接
+      // 不发结束帧，宽限窗后正常关流（协议以 stop_reason 收 done），不再误报超时丢整轮
       yield* this.protocol.parseStream(
-        withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort()),
+        withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort(), {
+          isTailChunk: anthropicEventFinished,
+          tailGraceMs: this.streamTailGraceMs,
+        }),
       );
     } finally {
       if (userSignal) userSignal.removeEventListener("abort", forwardAbort);
@@ -135,6 +144,19 @@ export class AnthropicCompatibleProvider implements Provider {
 
 /** Anthropic 请求 max_tokens 兜底：模型未定义 contextWindow/maxTokens 时的输出上限 */
 export const DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * 响应完成事件判定（E47 收尾宽限）：message_delta 带 stop_reason 即响应逻辑完成
+ * （Anthropic 的停止原因在 message_delta，message_stop 是紧随的结束帧）。
+ * @param event 一个流式响应事件
+ * @returns 是否为完成信号
+ */
+function anthropicEventFinished(event: unknown): boolean {
+  if (typeof event !== "object" || event === null) return false;
+  const e = event as { type?: unknown; delta?: { stop_reason?: unknown } };
+  if (e.type === "message_stop") return true;
+  return e.type === "message_delta" && Boolean(e.delta?.stop_reason);
+}
 
 /** 思考等级 → thinking 预算（budget_tokens）的基础映射（E17） */
 const THINKING_BUDGETS: Record<ThinkingLevel, number> = { low: 2048, medium: 4096, high: 8192 };

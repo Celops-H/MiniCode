@@ -15,6 +15,7 @@ import {
 } from "../core/index.js";
 import {
   buildRecoveryText,
+  estimateTextTokens,
   estimateTokens,
   extractRecoveryContext,
   generateSummary,
@@ -540,8 +541,16 @@ export class Agent {
    */
   private async maybeCompact(): Promise<void> {
     if (!this.compactConfig || this.compactDisabled) return;
-    if (!needsCompact(estimateTokens(this.messages), this.compactConfig)) return;
+    if (!needsCompact(this.estimateContextTokens(), this.compactConfig)) return;
     await this.doCompact();
+  }
+
+  /**
+   * 当前上下文的估算 token（E15）：消息 + 系统提示词。每次请求全量携带 systemPrompt，
+   * 只按消息估算会系统性低估体积，长提示词会话（指令文件 + 技能清单）的压缩触发点明显滞后。
+   */
+  private estimateContextTokens(): number {
+    return estimateTokens(this.messages) + estimateTextTokens(this.systemPrompt);
   }
 
   /**
@@ -567,7 +576,7 @@ export class Agent {
     if (pruned !== this.messages) {
       this.messages = pruned;
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
-      if (!instructions && !needsCompact(estimateTokens(this.messages), this.compactConfig!)) return true;
+      if (!instructions && !needsCompact(this.estimateContextTokens(), this.compactConfig!)) return true;
     }
     // ② 压缩：带指导走现场摘要（DESIGN 9.8）；无指导且有会话记忆时用记忆替代
     // 现场摘要（DESIGN 9.7，省压缩时模型调用）；否则增量合并（已有旧摘要）或全量总结

@@ -1,12 +1,12 @@
 import OpenAI from "openai";
 import { resolveAuth } from "../auth.js";
 import { OpenAICompletionsProtocol } from "../protocol/index.js";
-import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
+import { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, TAIL_GRACE_TIMEOUT_MS, withIdleTimeout } from "./timeout.js";
 import type { Context, StreamEvent } from "../../core/index.js";
 import type { Provider, ProviderAuth, ModelInfo } from "../types.js";
 
 // 常量自共享模块取（anthropic-compatible 同用）；此处 re-export 维持原导出路径
-export { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS };
+export { REQUEST_TIMEOUT_MS, STREAM_IDLE_TIMEOUT_MS, TAIL_GRACE_TIMEOUT_MS };
 
 /** OpenAI 兼容 client 接口（默认官方 SDK，测试可注入 mock） */
 export interface ChatCompletionsClient {
@@ -33,6 +33,8 @@ export interface OpenAICompatibleOptions {
   reasoningEffort?: boolean;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
+  /** 收尾宽限窗（ms，E47）：finish_reason 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
+  streamTailGraceMs?: number;
   /** 创建 client 的工厂（测试注入 mock） */
   createClient?: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
 }
@@ -48,6 +50,7 @@ export class OpenAICompatibleProvider implements Provider {
   private readonly modelList: ModelInfo[];
   private readonly createClient: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
   private readonly streamIdleTimeoutMs: number;
+  private readonly streamTailGraceMs: number;
   private readonly apiKey?: string;
   private client?: ChatCompletionsClient;
 
@@ -61,6 +64,7 @@ export class OpenAICompatibleProvider implements Provider {
       emitReasoningEffort: options.reasoningEffort,
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
+    this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
@@ -111,9 +115,14 @@ export class OpenAICompatibleProvider implements Provider {
         { signal: controller.signal },
       );
       // 空闲超时包在原始流外：厂商 ping、仅 role 的 chunk 等不产出事件的 chunk 也算活跃，
-      // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出
+      // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出。
+      // 收尾宽限（E47）：finish_reason 已到即响应完整，个别厂商握着连接不发 [DONE]，
+      // 宽限窗后正常关流（协议以 finish_reason 收 done），不再误报超时丢整轮
       yield* this.protocol.parseStream(
-        withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort()),
+        withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort(), {
+          isTailChunk: openaiChunkFinished,
+          tailGraceMs: this.streamTailGraceMs,
+        }),
       );
     } finally {
       if (userSignal) userSignal.removeEventListener("abort", forwardAbort);
@@ -128,6 +137,21 @@ export class OpenAICompatibleProvider implements Provider {
     this.client ??= this.createClient(this.apiKey, this.baseUrl);
     return this.client;
   }
+}
+
+/**
+ * finish_reason 判定（E47 收尾宽限）：首个 choice 带停止原因即响应逻辑完成
+ * （与协议 parseStream 的 firstChoice 同口径，只认第一个 choice）。
+ * @param chunk 一个流式响应片段
+ * @returns 是否携带 finish_reason
+ */
+function openaiChunkFinished(chunk: unknown): boolean {
+  if (typeof chunk !== "object" || chunk === null) return false;
+  const choices = (chunk as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || choices.length === 0) return false;
+  const choice = choices[0];
+  if (typeof choice !== "object" || choice === null) return false;
+  return Boolean((choice as { finish_reason?: unknown }).finish_reason);
 }
 
 /**

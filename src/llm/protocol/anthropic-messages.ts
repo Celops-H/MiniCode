@@ -159,8 +159,10 @@ export class AnthropicMessagesProtocol implements Protocol {
             break;
           }
           case "message_delta":
-            // Anthropic 的停止原因在 message_delta.delta.stop_reason
-            stopReason = event.delta?.stop_reason;
+            // Anthropic 的停止原因在 message_delta.delta.stop_reason；仅在有值时覆盖——
+            // 个别兼容厂商在带 stop_reason 的 message_delta 后再发只带 usage 的
+            // message_delta，无条件覆盖会把已收到的停止原因清掉（E47 收尾判定随之失效）
+            stopReason ??= event.delta?.stop_reason;
             break;
           case "message_stop":
             // 兼容端点可能省略 content_block_stop 直接收尾：未 stop 的 text 块残料先 flush 再 done
@@ -181,7 +183,14 @@ export class AnthropicMessagesProtocol implements Protocol {
     }
     // 流尾（断流）：未 stop 的 text 块 flush 标签残料
     yield* flushOpenTextBlocks();
-    // 迭代正常结束但未收到 message_stop（厂商提前断流）：报 error 标记异常轮
+    // 已收到 stop_reason（message_delta 已到，响应逻辑上已完整）：按正常完成收 done。
+    // E47 收尾宽限关流场景（厂商发完 message_delta 后握着连接不发 message_stop）落到这里，
+    // 整轮不因缺 message_stop 被误判异常
+    if (stopReason) {
+      yield { type: "done", stopReason };
+      return;
+    }
+    // 迭代正常结束且未收到任何停止原因（厂商提前断流）：报 error 标记异常轮
     yield { type: "error", message: "流意外结束（未收到 message_stop）" };
   }
 }

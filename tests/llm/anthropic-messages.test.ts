@@ -170,6 +170,42 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(events).toEqual([{ type: "error", message: expect.stringContaining("未收到 message_stop") }]);
   });
 
+  it("流尾已收到 stop_reason 而缺 message_stop：按正常完成收 done（E47 收尾宽限关流）", async () => {
+    // 厂商发完 message_delta（停止原因已到）后握着连接不发 message_stop，
+    // 收尾宽限关流后落到流尾收尾分支——响应逻辑上已完整，不再误报异常轮
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "你好" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("后续只带 usage 的 message_delta 不清掉已收到的停止原因（审查修正）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_delta", delta: { usage: { output_tokens: 5 } } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "end_turn" });
+  });
+
   it("流中断异常：发 error 事件（观测）后原样抛出（控制流）", async () => {
     const events: StreamEvent[] = [];
     async function* throwingStream(): AsyncIterable<unknown> {

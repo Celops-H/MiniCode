@@ -38,6 +38,16 @@ export function estimateTokens(messages: Message[]): number {
   return Math.ceil(messages.reduce((sum, message) => sum + messageChars(message), 0) * TOKENS_PER_CHAR);
 }
 
+/**
+ * 估算一段文本的 token 数（与消息同口径：字符数 × 系数）。
+ * 系统提示词不占消息位，压缩触发判断按同口径单独计入（E15）。
+ * @param text 文本
+ * @returns 估算 token 数
+ */
+export function estimateTextTokens(text: string): number {
+  return Math.ceil(text.length * TOKENS_PER_CHAR);
+}
+
 /** 触发判断的窗口参数 */
 export interface CompactThresholdOptions {
   /** 模型上下文窗口（token） */
