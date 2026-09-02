@@ -416,7 +416,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/session") {
-      // 运行中拒绝（G-5=43）：切会话会把当前回合作废、删除交互风险面更大；
+      // 运行中拒绝：切会话会把当前回合作废、删除交互风险面更大；
       // 子 agent 后台运行中同样拦截（E13 同根源，审查决断纳入）——重建会中断全部 agent
       if (reassemblyBlocked(state)) {
         showToast("有 agent 运行中，等全部结束后再切换会话");
