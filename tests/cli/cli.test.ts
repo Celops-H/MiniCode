@@ -713,6 +713,94 @@ describe("CLI 交互循环", () => {
     });
   });
 
+  it("api error 当轮也落盘用户消息（E48）：模型流抛错时本轮用户输入不丢", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          // 流中断异常的两段语义：先发 error 事件（观测）再原样抛出（控制流）
+          yield { type: "error", message: "连接中断" };
+          throw new Error("连接中断");
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "这轮会出错的消息";
+    }
+
+    await expect(
+      interact({ agent, store, session, inputs: inputs(), write: () => {} }),
+    ).rejects.toThrow("连接中断");
+
+    // 用户消息已落盘：reconfigure/重开后的 UI 与模型上下文一致（agent 内存里有这条）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toHaveLength(1);
+    expect(loaded.getMessages()[0]).toMatchObject({ role: "user", content: "这轮会出错的消息" });
+  });
+
+  it("api error 多轮中途抛错（E48）：checkpoint 已落盘部分不重复，出错轮只补增量", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "文件内容",
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            // 第 1 轮：工具调用（checkpoint 在工具执行前落盘 user + assistant）
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+            return;
+          }
+          // 第 2 轮（工具结果回灌后）：流抛错
+          yield { type: "error", message: "连接中断" };
+          throw new Error("连接中断");
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      // 与真实宿主同一套 checkpoint：以 session 内存消息数为游标只补未落盘部分
+      checkpoint: async (messages) => {
+        const newOnes = messages.slice(session.getMessages().length);
+        for (const message of newOnes) {
+          await store.appendMessage(session, message);
+        }
+        await store.flush();
+      },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "读文件";
+    }
+
+    await expect(
+      interact({ agent, store, session, inputs: inputs(), write: () => {} }),
+    ).rejects.toThrow("连接中断");
+
+    // 盘上序列无重复：user + assistant(工具调用) + tool_result 各一条——
+    // checkpoint 已落盘的 user/assistant 不被 finally 重复追加，出错轮只补 tool_result
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "assistant", "tool_result"]);
+  });
+
   it("/exit 退出交互，后续输入不再处理", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
