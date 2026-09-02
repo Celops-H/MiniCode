@@ -117,27 +117,31 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
     agent.start(prompt);
-    // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，此前确认）
-    for await (const event of agent.run()) {
-      render(event);
+    // 轮末落盘（E48）：放 finally——api error 当轮（模型流抛错）时 agent 内存里已有本轮
+    // 用户消息，异常路径跳过落盘会让盘上缺这条，reconfigure/重开后的 UI 与模型上下文不一致；
+    // 历史被改写（压缩/裁剪/剥组）按内存整份重写，否则补落盘游标之后的新消息，与正常轮末同一套
+    try {
+      // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，此前确认）
+      for await (const event of agent.run()) {
+        render(event);
+      }
+    } finally {
+      const agentMessages = agent.getMessages();
+      if (agent.consumeHistoryRewritten()) {
+        await store.rewriteMessages(session, agentMessages);
+        write("\n[历史已压缩] 上下文已压缩，落盘已同步。\n");
+      } else {
+        const newMessages = agentMessages.slice(session.getMessages().length);
+        for (const message of newMessages) {
+          await store.appendMessage(session, message);
+        }
+        // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
+        await store.flush();
+      }
     }
     write("\n");
-    // 历史被改写（压缩/裁剪/剥组）：agent 内存为真相，重写整份盘防落盘错位；
-    // 否则只落盘本轮新增（checkpoint 已提前落盘过部分，这里补齐剩余）
-    const agentMessages = agent.getMessages();
-    if (agent.consumeHistoryRewritten()) {
-      await store.rewriteMessages(session, agentMessages);
-      write("\n[历史已压缩] 上下文已压缩，落盘已同步。\n");
-    } else {
-      const newMessages = agentMessages.slice(session.getMessages().length);
-      for (const message of newMessages) {
-        await store.appendMessage(session, message);
-      }
-      // 强制落盘（checkpoint）：本轮消息已入队，flush 后下轮模型请求前历史在盘上
-      await store.flush();
-    }
     // 回显本轮工具结果（重写分支也要回显，不能因压缩吞掉工具输出）
-    for (const message of agentMessages.slice(roundStart)) {
+    for (const message of agent.getMessages().slice(roundStart)) {
       if (message.role === "tool_result") {
         write(`\n[工具结果] ${message.content}\n`);
       }
