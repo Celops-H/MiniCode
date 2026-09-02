@@ -7,7 +7,8 @@ import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/cli/interact.js";
 import { buildModelClient } from "../../src/cli/models.js";
-import { buildCompactConfig, buildHookBus, createSessionAgent, environmentPrompt } from "../../src/cli/app.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent } from "../../src/cli/app.js";
+import { environmentPrompt } from "../../src/context/index.js";
 import { configSchema, loadConfig } from "../../src/config/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
@@ -141,6 +142,47 @@ describe("CLI 多 Agent 组装", () => {
     }
     // 默认开启：协作工具对模型可见
     expect(toolsSeen).toContain("spawn_agent");
+  });
+
+  it("subagentPromptSections 随装配传入（E12/E14）：派生子 agent 的提示词含注入段", async () => {
+    const childPrompts: string[] = [];
+    const { agent, team } = createSessionAgent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          // 子 agent（协作提示开头）记录提示词并直接收尾；root 先派生再总结
+          if (context.systemPrompt.startsWith("你是团队工作 agent")) {
+            childPrompts.push(context.systemPrompt);
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "spawn_agent" };
+            yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ agentName: "worker", prompt: "干活" }) };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "已派发" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      agents: true,
+      subagentPromptSections: ["【项目指令】（测试段）", "【可用技能】\n- demo — 演示技能"],
+    });
+    agent.start("派活");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(team).toBeDefined();
+    expect(childPrompts.length).toBeGreaterThan(0);
+    expect(childPrompts[0]).toContain("【项目指令】（测试段）");
+    expect(childPrompts[0]).toContain("【可用技能】");
   });
 });
 

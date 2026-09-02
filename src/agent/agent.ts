@@ -15,6 +15,7 @@ import {
 } from "../core/index.js";
 import {
   buildRecoveryText,
+  environmentPrompt,
   estimateTextTokens,
   estimateTokens,
   extractRecoveryContext,
@@ -105,6 +106,9 @@ export interface AgentOptions {
   toolTimeoutMs?: number;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
   team?: Team;
+  /** 协作子 agent 的提示词附加段（E12/E14：项目指令段 + 可用技能段，宿主装配时传入）；
+   *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定、可取用技能 */
+  subagentPromptSections?: string[];
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -115,6 +119,8 @@ export class Agent {
   private readonly maxTurns: number;
   /** 只读快工具正常执行超时（ms） */
   private readonly toolTimeoutMs: number;
+  /** 协作子 agent 的提示词附加段（E12/E14）：派生时拼进子 agent 系统提示词 */
+  private readonly subagentPromptSections: string[];
   private readonly registry: ToolRegistry;
   private readonly compactConfig?: CompactConfig;
   private readonly permission?: PermissionPipeline;
@@ -168,6 +174,7 @@ export class Agent {
     this.thinkingLevelRef = options.thinkingLevelRef;
     this.maxTurns = options.maxTurns ?? 10;
     this.toolTimeoutMs = options.toolTimeoutMs ?? TOOL_READONLY_TIMEOUT_MS;
+    this.subagentPromptSections = options.subagentPromptSections ?? [];
     this.compactConfig = options.compactConfig;
     this.permission = options.permission;
     this.hooks = options.hooks;
@@ -210,19 +217,29 @@ export class Agent {
     // Git Worktree 隔离（DESIGN 4.2）：worktrees 开启且父在 git 仓库内时，
     // 子 agent 绑定独立工作区（cwd），文件写与父物理隔离；非 git 仓库继承父 cwd
     const worktree = this.team?.createChildWorktree(path.parent(), agentName);
+    const childCwd = worktree?.dir ?? this.cwd;
+    // 子 agent 提示词（E12/E14，DESIGN 11.1）：固定协作提示 + 装配段（项目指令/可用技能，
+    // 宿主传入）+ 环境段（按子 agent 实际 cwd 生成，worktree 隔离时是子工作区路径）
+    const childPrompt = [
+      COLLAB_SUBAGENT_PROMPT,
+      ...this.subagentPromptSections.filter((section) => section.length > 0),
+      environmentPrompt(childCwd),
+    ].join("\n");
     const child = new Agent({
       modelClient: this.modelClient,
       modelId: this.modelId,
-      systemPrompt: COLLAB_SUBAGENT_PROMPT,
+      systemPrompt: childPrompt,
       tools: this.registry.list().filter((tool) => !COLLAB_TOOL_NAMES.has(tool.name)),
       permission: this.permission,
       hooks: this.hooks,
       team: this.team,
       maxTurns: this.maxTurns,
       outputDir: this.outputDir,
-      cwd: worktree?.dir ?? this.cwd,
+      cwd: childCwd,
       // 思考等级随父继承（会话级偏好，子 agent 与 root 一致）
       thinkingLevelRef: this.thinkingLevelRef,
+      // 装配段随链传递：孙 agent 派生时同样注入
+      subagentPromptSections: this.subagentPromptSections,
     });
     child.agentPath = path;
     return child;

@@ -10,3 +10,4 @@ export { MEMORY_SYSTEM_PROMPT, MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest, 
 export type { MemoryUpdateRequest } from "./memory.js";
 export { loadInstructionFiles, readInstructionFile, buildInstructionsPrompt, buildInitPrompt, INIT_PROMPT_PREFIX } from "./instructions.js";
 export type { InstructionFile, LoadInstructionsOptions } from "./instructions.js";
+export { environmentPrompt } from "./environment.js";
