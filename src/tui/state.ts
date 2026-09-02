@@ -673,7 +673,7 @@ export function hasRunningAgent(agents: AgentNode[]): boolean {
 }
 
 /** 重装配族命令守卫（E13）：root 运行中或任一子 agent 后台运行中都拦截——
- *  /connect /model /mcp /skills 的重建链会重建 agent，把全部 agent 的当前工作作废 */
+ *  /session /connect /model /mcp /skills 的重建链会重建 agent，把全部 agent 的当前工作作废 */
 export function reassemblyBlocked(state: TuiState): boolean {
   return state.status === "running" || hasRunningAgent(state.agents);
 }
