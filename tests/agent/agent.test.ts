@@ -764,6 +764,49 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
+  it("压缩触发估算计入系统提示词（E15）：消息未撞线、加提示词后撞线仍触发压缩", async () => {
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const echoTool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: () => "回显",
+    };
+    // 可用窗口 50 token：消息体积约 7 token 远未撞线，200 字符系统提示词约 60 token
+    // 计入后撞线——只按消息估算的话此处不会压缩（回归锚点）
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "系".repeat(200),
+      initialMessages: [userMessage("背景".repeat(10))],
+      tools: [echoTool],
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+  });
+
   it("撞线时历史裁剪优先于摘要", async () => {
     let summaryCalled = false;
     const modelClient: ModelClient = {

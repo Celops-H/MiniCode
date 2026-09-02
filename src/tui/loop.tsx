@@ -19,7 +19,7 @@ import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, s
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -416,9 +416,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/session") {
-      // 运行中拒绝（G-5=43：与 /compact 等守卫一致——运行中切会话会把当前回合作废，删除交互风险面更大）
-      if (state.status === "running") {
-        showToast("运行中不可切换会话，等本轮结束后再试");
+      // 运行中拒绝（G-5=43）：切会话会把当前回合作废、删除交互风险面更大；
+      // 子 agent 后台运行中同样拦截（E13 同根源，审查决断纳入）——重建会中断全部 agent
+      if (reassemblyBlocked(state)) {
+        showToast("有 agent 运行中，等全部结束后再切换会话");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
@@ -427,9 +428,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/connect") {
-      // 运行中拒绝（重建链会把当前回合作废）；否则打开供应商选择弹窗
-      if (state.status === "running") {
-        showToast("运行中不可切换供应商，等本轮结束后再试");
+      // 重装配族守卫（E13）：root 运行中或子 agent 后台运行中都拦截——重建链会把全部
+      // agent 的当前工作作废；否则打开供应商选择弹窗
+      if (reassemblyBlocked(state)) {
+        showToast("有 agent 运行中，等全部结束后再切换供应商");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
@@ -446,9 +448,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/model") {
-      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（运行中同样等本轮结束）
-      if (state.status === "running") {
-        showToast("运行中不可切换模型，等本轮结束后再试");
+      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族守卫，E13 同 /connect）
+      if (reassemblyBlocked(state)) {
+        showToast("有 agent 运行中，等全部结束后再切换模型");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }
@@ -467,10 +469,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
     if (command === "/mcp" || command === "/skills" || command === "/skill") {
       // 扩展面板（UI-SPEC §8b）：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配
-      // （BACKEND §19/§20）；重装配会重建 agent，运行中拒绝（同 /model 守卫）。
+      // （BACKEND §19/§20）；重装配会重建 agent，重装配族守卫拦截（E13，同 /model，含子 agent 后台运行）。
       // E22：命令改名为 /skills（/skill 保留兼容别名）
-      if (state.status === "running") {
-        showToast(command === "/mcp" ? "运行中不可管理 MCP 服务，等本轮结束后再试" : "运行中不可管理技能，等本轮结束后再试");
+      if (reassemblyBlocked(state)) {
+        showToast(command === "/mcp" ? "有 agent 运行中，等全部结束后再管理 MCP 服务" : "有 agent 运行中，等全部结束后再管理技能");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
         return;
       }

@@ -1,4 +1,4 @@
-export { estimateTokens, needsCompact } from "./token.js";
+export { estimateTokens, estimateTextTokens, needsCompact } from "./token.js";
 export type { CompactThresholdOptions } from "./token.js";
 export { pruneToolResults, PRUNED_MARKER } from "./prune.js";
 export { buildSummaryRequest, generateSummary, replaceWithSummary, SUMMARY_MARKER } from "./summary.js";

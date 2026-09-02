@@ -164,6 +164,48 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
+  it("stop_reason 后厂商握着连接不发 message_stop：宽限窗后正常收尾 done，不再误报超时（E47）", async () => {
+    async function* tailHangingStream(signal?: AbortSignal): AsyncIterable<unknown> {
+      yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } };
+      yield { type: "content_block_stop", index: 0 };
+      yield { type: "message_delta", delta: { stop_reason: "end_turn" } };
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+    }
+    const client: AnthropicMessagesClient = {
+      messages: {
+        async create(_request, options) {
+          return tailHangingStream(options?.signal);
+        },
+      },
+    };
+    const provider = new AnthropicCompatibleProvider({
+      id: "deepseek-anthropic",
+      name: "DeepSeek（Anthropic 兼容）",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      env: { DEEPSEEK_API_KEY: "sk" },
+      streamIdleTimeoutMs: 50,
+      streamTailGraceMs: 60, // 测试用短宽限窗
+      models: MODELS,
+      createClient: () => client,
+    });
+    const events: StreamEvent[] = [];
+    const t0 = Date.now();
+    for await (const e of provider.stream("claude-sonnet-4-5", createContext("s", [userMessage("q")]))) {
+      events.push(e);
+    }
+    // 响应已逻辑完整（stop_reason 已到）：宽限窗耗尽关流按正常完成收 done，不报超时
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
   it("思考等级随请求下发为 thinking 预算（E17）", async () => {
     const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
     // 缺省 maxTokens 8192：high 基础预算 8192 被钳制到 maxTokens-1024=7168

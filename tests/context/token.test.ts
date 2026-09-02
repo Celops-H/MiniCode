@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateTokens, needsCompact } from "../../src/context/index.js";
+import { estimateTextTokens, estimateTokens, needsCompact } from "../../src/context/index.js";
 import type { Message } from "../../src/core/index.js";
 
 describe("estimateTokens（token 估算）", () => {
@@ -42,6 +42,14 @@ describe("estimateTokens（token 估算）", () => {
     ];
     // text 5 + thinking 2 + name 4 + input JSON 20 = 31 字符 × 0.3 = 9.3 → 10
     expect(estimateTokens(messages)).toBe(10);
+  });
+});
+
+describe("estimateTextTokens（文本 token 估算，E15）", () => {
+  it("与消息同口径：字符数 × 0.3 向上取整", () => {
+    expect(estimateTextTokens("")).toBe(0);
+    expect(estimateTextTokens("a".repeat(100))).toBe(30);
+    expect(estimateTextTokens("a".repeat(101))).toBe(31);
   });
 });
 

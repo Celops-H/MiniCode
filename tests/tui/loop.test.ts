@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, modelErrorText, resetToNewState, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, modelErrorText, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -284,6 +284,38 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     );
     expect(blocks[0]).toMatchObject({ model: "old-model" });
     expect(blocks[1]?.model).toBeUndefined();
+  });
+});
+
+describe("重装配族命令守卫（E13）：reassemblyBlocked 覆盖子 agent 后台运行", () => {
+  it("root 运行中拦截", () => {
+    const s: TuiState = { ...initState([]), status: "running" };
+    expect(reassemblyBlocked(s)).toBe(true);
+  });
+
+  it("root 空闲但子 agent 后台运行中仍拦截（守卫收紧点）", () => {
+    const s: TuiState = {
+      ...initState([]),
+      status: "idle",
+      agents: [
+        { path: "/root", status: "completed", spawnedAt: 1, completedAt: 2 },
+        { path: "/root/t", status: "running", spawnedAt: 1, completedAt: null },
+      ],
+    };
+    expect(reassemblyBlocked(s)).toBe(true);
+  });
+
+  it("root 空闲且子 agent 都已结束（完成/中断）放行", () => {
+    const s: TuiState = {
+      ...initState([]),
+      status: "idle",
+      agents: [
+        { path: "/root", status: "completed", spawnedAt: 1, completedAt: 2 },
+        { path: "/root/t", status: "completed", spawnedAt: 1, completedAt: 2 },
+        { path: "/root/u", status: "interrupted", spawnedAt: 1, completedAt: 2 },
+      ],
+    };
+    expect(reassemblyBlocked(s)).toBe(false);
   });
 });
 
