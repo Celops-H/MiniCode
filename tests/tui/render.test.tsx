@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
 import { initState, reduceHook, type TuiState } from "../../src/tui/state.js";
+import { assistantMessage } from "../../src/core/index.js";
 
 /** 取首个文本等于 text 的 span 的 fg 颜色（hex）；无匹配或无颜色返回 undefined */
 function textFg(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
@@ -205,5 +206,34 @@ describe("view/App 渲染链", () => {
     const restored = setup.captureCharFrame();
     expect(restored).toContain("● 空闲"); // 状态行恢复
     expect(restored).not.toContain("会话列表");
+  });
+
+  it("切模型后状态行模型名同步：App 挂载一次读 state.modelLabel，setStore 更新后跟随（共享挂载，回归 c9c5e53）", async () => {
+    // App 不传 model prop（共享挂载形态），状态行/署名读 store 的 modelLabel
+    const [state, setState] = createStore<TuiState>(initState([], "", "deepseek-v4-flash"));
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, { width: 64, height: 8 });
+    await setup.waitForVisualIdle();
+    expect(JSON.stringify(setup.captureCharFrame())).toContain("deepseek-v4-flash");
+    // /model 切换后 carry 续接：只更新 store 的 modelLabel（旧实现把 modelLabel 提取成本地
+    // 变量再传 prop，opentui 不响应 store 更新，状态行停留旧值）
+    setState({ modelLabel: "glm-4.5-air" });
+    await setup.waitForVisualIdle();
+    const frame = JSON.stringify(setup.captureCharFrame());
+    expect(frame).toContain("glm-4.5-air");
+    expect(frame).not.toContain("deepseek-v4-flash");
+  });
+
+  it("切模型后无模型记录的历史消息署名跟随 modelLabel（Messages 内联读，同源回归）", async () => {
+    // 无 meta.model 的助手消息：署名回落到 store 的 modelLabel，切模型后该署名应跟随更新
+    const messages = [assistantMessage([{ type: "text", text: "历史内容" }])];
+    const [state, setState] = createStore<TuiState>(initState(messages, "", "deepseek-v4-flash"));
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, { width: 64, height: 10 });
+    await setup.waitForVisualIdle();
+    expect(JSON.stringify(setup.captureCharFrame())).toContain("deepseek-v4-flash");
+    setState({ modelLabel: "glm-4.5-air" });
+    await setup.waitForVisualIdle();
+    const frame = JSON.stringify(setup.captureCharFrame());
+    expect(frame).toContain("glm-4.5-air");
+    expect(frame).not.toContain("deepseek-v4-flash");
   });
 });
