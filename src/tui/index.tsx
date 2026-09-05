@@ -178,18 +178,17 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
       });
       firstRound = false;
       if (result.reconfigure) {
-        // 轮换前清掉瞬时态（批次 9~14 审查 4a/4b）：连接成功的 connect-key 弹窗残留（再按 Enter
-        // 会重复触发连接）与已过期的 toast（carry 续接会让它常驻到下一次 toast）
-        sharedState.modal = undefined;
-        sharedState.toast = undefined;
+        // 轮换前清瞬时态：连接成功的 connect-key 弹窗残留（再按 Enter 会重复触发连接）必须清；
+        // toast 不清——carry 续接保留界面内容，新轮 runTui 会给遗留 toast 重新挂过期定时器，
+        // 成功提示（模型已切换/已连接/配置已写入）正常显示、到期自然消失
+        setSharedState({ modal: undefined });
         // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
         // 会话内视图不按盘上消息重建（store 内容原样续接，E34 历史固定）；切会话/新建草稿才重建视图
         await loadDotEnv();
         config = await loadConfig();
         models = buildModelClient(config);
         modelId = resolveMainModel(config);
-        // switchTo===NEW_SESSION_ID 分支实际不可达（/model 带自身 id、/connect 不带 switchTo），
-        // 保留作防御（未来 reconfigure + 新建语义的兜底，整体审视 N-2）
+        // switchTo===NEW_SESSION_ID 分支实际不可达（reconfigure 不带 switchTo），保留作防御
         if (result.switchTo === NEW_SESSION_ID) {
           session = await store.createSession({ model: modelId });
           resetView = true;

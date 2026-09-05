@@ -212,8 +212,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         }),
       );
     } else {
-      // carry 续接：内容保留，仅同步当前模型名（/model 切换后状态行与署名回落要跟上）
-      state.modelLabel = modelLabel;
+      // carry 续接：内容保留，仅同步当前模型名（/model 切换后状态行与署名回落要跟上）。
+      // 必须走 setState：对 store proxy 顶层直接赋值不触发订阅更新（实测值悄悄变、
+      // 订阅者收不到通知），界面仍显示旧模型名
+      setState({ modelLabel });
     }
   } else {
     const [ownedState, ownedSetState] = createStore<TuiState>(
@@ -301,6 +303,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }, TOAST_MS);
     }
   };
+  // 新轮接管上一轮遗留 toast（carry 续接保留界面内容）：旧轮退出已取消其 5 秒过期定时器，
+  // 不重新挂会一直挂着；也不能在入口层 reconfigure 轮无条件清——那会把刚显示的成功提示
+  //（模型已切换/已连接/配置已写入）一起吞掉。这里为其重新挂过期定时器，正常到期消失
+  if (state.toast) showToast(state.toast.text);
 
   /** 流式事件 → reducer（用户输入驱动 + root 后台驱动都经此，双渲染流两侧都接） */
   const feedEvent = (event: StreamEvent): void => {

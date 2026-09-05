@@ -29,7 +29,6 @@ export interface AppProps {
 }
 
 export function App(props: AppProps): JSX.Element {
-  const modelLabel = props.model ?? props.state.modelLabel;
   useKeyboard((e) => {
     const key = opentuiKeyToKey(e);
     const s = props.state;
@@ -79,7 +78,10 @@ export function App(props: AppProps): JSX.Element {
       <Show when={!fullscreen()}>
         <Messages
           blocks={props.state.blocks}
-          modelLabel={modelLabel}
+          // 内联读取 modelLabel：不能提前提取成本地变量再传 prop——opentui reconciler
+          // 对「组件内提取的 store 标量 → 子组件 prop」不建立响应，store 更新后子组件
+          // 仍持旧值（切模型后状态行/署名模型名不更新的根因）；内联读取才订阅
+          modelLabel={props.model ?? props.state.modelLabel}
           streaming={props.state.streaming}
           onFoldAt={(index) => props.onAction({ type: "fold-at", index })}
         />
@@ -110,7 +112,7 @@ export function App(props: AppProps): JSX.Element {
         />
       </Show>
       <Show when={!fullscreen()}>
-        <StatusBar model={modelLabel} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
+        <StatusBar model={props.model ?? props.state.modelLabel} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
         {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
       </Show>
     </box>
