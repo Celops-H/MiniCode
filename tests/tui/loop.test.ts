@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, modelErrorText, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, modelErrorText, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -270,7 +270,45 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     const blocks = s.blocks.filter((b) => b.kind === "message");
     const last = blocks.at(-1);
     expect(last).toMatchObject({ role: "assistant", model: "m2" });
-    // done 即轮边界：暂存清除，下一轮未发生 fallback 时署名回落会话模型
+    // 回合结束清除暂存，下一轮 UserPromptSubmit 重新快照
+    expect(s.activeModel).toBeUndefined();
+  });
+
+  it("工具循环续轮保留快照：续轮 done 落块署名不回落当前模型名（E70 review 补）", () => {
+    let s = initState([], "", "glm-5.3");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "查一下" });
+    s = reduceEvent(s, { type: "text_delta", text: "思考中" });
+    // 首轮 done（工具调用）：回合未结束，快照保留给续轮
+    s = reduceEvent(s, { type: "done", stopReason: "tool_calls" });
+    expect(s.status).toBe("running");
+    expect(s.activeModel).toBe("glm-5.3");
+    s = reduceEvent(s, { type: "text_delta", text: "最终回答" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    const msgs = s.blocks.filter(
+      (b): b is Extract<BlockView, { kind: "message" }> => b.kind === "message" && b.role === "assistant",
+    );
+    expect(msgs[0]).toMatchObject({ text: "思考中", model: "glm-5.3" });
+    expect(msgs[1]).toMatchObject({ text: "最终回答", model: "glm-5.3" });
+    expect(s.activeModel).toBeUndefined();
+  });
+
+  it("运行中排队消息转正同样快照当前模型（E70 review 补）", () => {
+    let s = initState([], "", "glm-5.3");
+    s = { ...s, status: "running", prompt: { ...s.prompt, lines: ["排队消息"], curCol: 4 } };
+    s = reduceAction(s, { type: "send" });
+    // 运行中发送：消息块带 queued_ 前缀上屏
+    expect(s.blocks.some((b) => b.kind === "message" && b.id.startsWith("queued_"))).toBe(true);
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "排队消息" });
+    expect(s.activeModel).toBe("glm-5.3");
+  });
+
+  it("打断收尾的半截块署名本轮实际产出模型（E70 review 补）", () => {
+    let s = initState([], "", "glm-5.3");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "长回答" });
+    s = reduceEvent(s, { type: "text_delta", text: "半截" });
+    s = interruptTurn(s);
+    const last = s.blocks.filter((b) => b.kind === "message").at(-1);
+    expect(last).toMatchObject({ role: "assistant", text: "半截", model: "glm-5.3" });
     expect(s.activeModel).toBeUndefined();
   });
 
@@ -284,6 +322,43 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     );
     expect(blocks[0]).toMatchObject({ model: "old-model" });
     expect(blocks[1]?.model).toBeUndefined();
+  });
+
+  it("UserPromptSubmit 快照当前模型：普通轮 done 落块署名不再缺省（E70）", () => {
+    let s = initState([], "", "glm-5.3");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "你好" });
+    s = reduceEvent(s, { type: "text_delta", text: "回复" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    const last = s.blocks.filter((b) => b.kind === "message").at(-1);
+    expect(last).toMatchObject({ role: "assistant", model: "glm-5.3" });
+    expect(s.activeModel).toBeUndefined();
+  });
+
+  it("/model 切换后：新轮署名跟新模型，历史块署名不翻转（E70）", () => {
+    let s = initState([], "", "glm-5.3");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "第一问" });
+    s = reduceEvent(s, { type: "text_delta", text: "旧答" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    // /model 切换走 carry 续接：只同步 modelLabel，历史块不动
+    s = { ...s, modelLabel: "deepseek-v4-pro" };
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "第二问" });
+    s = reduceEvent(s, { type: "text_delta", text: "新答" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    const msgs = s.blocks.filter(
+      (b): b is Extract<BlockView, { kind: "message" }> => b.kind === "message" && b.role === "assistant",
+    );
+    expect(msgs[0]).toMatchObject({ text: "旧答", model: "glm-5.3" });
+    expect(msgs[1]).toMatchObject({ text: "新答", model: "deepseek-v4-pro" });
+  });
+
+  it("回退事件覆盖快照：切换备选后署名仍是实际产出模型（E70）", () => {
+    let s = initState([], "", "main-1");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "你好" });
+    s = reduceEvent(s, { type: "model_fallback", from: "main-1", to: "backup-1" });
+    s = reduceEvent(s, { type: "text_delta", text: "备选产出" });
+    s = reduceEvent(s, { type: "done", stopReason: "end_turn" });
+    const last = s.blocks.filter((b) => b.kind === "message").at(-1);
+    expect(last).toMatchObject({ role: "assistant", model: "backup-1" });
   });
 });
 

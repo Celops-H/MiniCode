@@ -51,6 +51,7 @@ export class OpenAICompatibleProvider implements Provider {
   private readonly createClient: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
   private readonly streamIdleTimeoutMs: number;
   private readonly streamTailGraceMs: number;
+  private readonly apiKeyEnv: string;
   private readonly apiKey?: string;
   private client?: ChatCompletionsClient;
 
@@ -65,6 +66,7 @@ export class OpenAICompatibleProvider implements Provider {
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;
+    this.apiKeyEnv = options.apiKeyEnv;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
@@ -132,7 +134,8 @@ export class OpenAICompatibleProvider implements Provider {
   /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
   private getClient(): ChatCompletionsClient {
     if (!this.apiKey) {
-      throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量`);
+      // E59：文案带上具体环境变量名，用户可直接定位要配的变量
+      throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
     this.client ??= this.createClient(this.apiKey, this.baseUrl);
     return this.client;
@@ -156,10 +159,17 @@ function openaiChunkFinished(chunk: unknown): boolean {
 
 /**
  * 默认用官方 OpenAI SDK 创建 client（带请求超时，防厂商请求挂起无限等待）。
+ * maxRetries 显式为 0（E58）：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
+ * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址
  * @returns OpenAI 兼容 client
  */
 export function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
-  return new OpenAI({ baseURL: baseUrl, apiKey, timeout: REQUEST_TIMEOUT_MS }) as unknown as ChatCompletionsClient;
+  return new OpenAI({
+    baseURL: baseUrl,
+    apiKey,
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRetries: 0,
+  }) as unknown as ChatCompletionsClient;
 }

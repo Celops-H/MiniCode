@@ -135,6 +135,20 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(models.resolve("deepseek-chat@deepseek-anthropic")?.provider.id).toBe("deepseek-anthropic");
   });
 
+  it("限定名条目的 vendorId 保持原始模型 id（E71）：厂商侧请求发原始 id 而非限定名", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "zhipu", baseUrl: "https://a.example.com", apiKeyEnv: "A", models: [{ id: "glm-5.3" }] },
+        { id: "other", baseUrl: "https://b.example.com", apiKeyEnv: "B", models: [{ id: "glm-5.3" }] },
+      ],
+    };
+    const models = buildModelClient(config, undefined, { env: { A: "k", B: "k" } });
+    // 先注册者无限定名（vendorId 缺省即 id 本身），后注册者限定名注册、vendorId 是原始 id
+    expect(models.resolve("glm-5.3")?.model.vendorId).toBeUndefined();
+    expect(models.resolve("glm-5.3@other")?.model.vendorId).toBe("glm-5.3");
+  });
+
   it("-m 指定配置之外的模型时显式报错，不静默忽略", () => {
     const config: Config = {
       logLevel: "info",

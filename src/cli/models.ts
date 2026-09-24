@@ -45,16 +45,18 @@ export function buildModelClient(
   });
   // 跨厂商同 id 模型限定 provider：模型路由全局只认 id，后注册的重复 id 会永远路由到
   // 首个厂商（如 DeepSeek 的 OpenAI 端点与 Anthropic 兼容端点模型 id 相同），后者不可达。
-  // 重复 id 以「模型id@厂商id」的限定名注册（厂商侧请求仍用原始 id，见 vendorId）
+  // 重复 id 以「模型id@厂商id」的限定名做注册 id；厂商侧请求仍用原始模型 id——provider
+  // 发请求取的就是 vendorId（E71：曾把 vendorId 赋成限定名本身，限定名条目请求厂商 400
+  // 「模型不存在」），此处必须保持原始 id
   const seenModelIds = new Set<string>();
   for (const provider of usable) {
     const protocol = provider.protocol ?? "openai-chat-completions";
     const modelInfos = provider.models.map((m) => {
-      const vendorId = seenModelIds.has(m.id) ? `${m.id}@${provider.id}` : undefined;
+      const qualified = seenModelIds.has(m.id) ? `${m.id}@${provider.id}` : undefined;
       seenModelIds.add(m.id);
       return {
-        id: vendorId ?? m.id,
-        vendorId,
+        id: qualified ?? m.id,
+        vendorId: qualified ? m.id : undefined,
         name: m.name ?? m.id,
         api: protocol,
         providerId: provider.id,
