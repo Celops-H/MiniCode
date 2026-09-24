@@ -62,7 +62,7 @@ export class Models {
   /**
    * 按模型 id 路由到对应 Provider 的流式调用。配置了 router 时从优先级链选模型：
    * 可切换错误（限流/5xx/网络等）切到下一个健康模型，每个模型最多试一次；
-   * 不可切换错误（参数/认证）或流已开始响应后直接上抛，避免混流。
+   * 不可切换错误（参数/认证）或已产出内容后直接上抛，避免混流。
    * @param modelId 模型 id（路由模式下为优先级链主模型）
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流
@@ -109,13 +109,14 @@ export class Models {
         selected = next;
         continue;
       }
-      let started = false;
       let contentEmitted = false;
       let streamFailed = false;
       try {
         for await (const event of resolved.provider.stream(selected, context, options)) {
-          started = true;
-          // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标
+          // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标；
+          // 也不算「已吐出内容」（E57 审查补充）——首 token 前的厂商故障（空闲超时、
+          // 流内 error 后异常收尾）仍可切换备选，与 BACKEND §6 的排除条件对齐。
+          // done 等 非 error 事件都置位：厂商宣告正常完成（done 收尾）不进冷却
           if (event.type === "error") streamFailed = true;
           else contentEmitted = true;
           yield event;
@@ -133,8 +134,9 @@ export class Models {
         // 用户打断（signal 已中止）：控制流而非模型故障，直接上抛——不切备选不标冷却
         // （否则会带着已中止的 signal 挨个真实请求备选链，白白计费）
         if (options?.signal?.aborted) throw err;
-        // 确定性错误或流已开始响应：直接上抛，切换无意义或会混流
-        if (!isSwitchableError(err) || started) throw err;
+        // 确定性错误或已吐出内容（切换会混流）：直接上抛；error 事件不算内容，
+        // 首 token 前的故障仍走下面的切换（E57 审查补充）
+        if (!isSwitchableError(err) || contentEmitted) throw err;
         router.recordFailure(selected);
         const next = router.select(chain);
         // 主模型失败、切换备选：发观察事件（TUI 常驻通知行「已切换」），避免静默路由——

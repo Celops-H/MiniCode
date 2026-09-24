@@ -608,7 +608,8 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
     }
     case "error": {
       if (!state.streaming || (!state.streaming.text && !state.streaming.thinking)) {
-        // 无前缀内容的独立错误：展示错误消息块并回到空闲（error 即轮边界）；
+        // 无前缀内容的独立错误：展示错误消息块并回到空闲（无内容时 error 作轮边界收口；
+        // 路由切换续流的场景下本分支先收掉主模型错误块，备选增量到达时重建流式区）；
         // 与 interact catch 同一套 modelErrorText，模型类错误带换模型/配 key 引导
         return {
           ...state,
