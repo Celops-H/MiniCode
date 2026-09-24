@@ -90,6 +90,15 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("info");
   });
 
+  it("debug 调试开关可经配置文件开启（E68）；缺省不出现", async () => {
+    const config = await loadConfig({
+      paths: setup({ global: { debug: { streamChunks: true } } }),
+    });
+    expect(config.debug?.streamChunks).toBe(true);
+    const bare = await loadConfig({ paths: setup() });
+    expect(bare.debug).toBeUndefined();
+  });
+
   it("全局配置生效", async () => {
     const config = await loadConfig({ paths: setup({ global: { logLevel: "debug" } }) });
     expect(config.logLevel).toBe("debug");

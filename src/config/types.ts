@@ -59,6 +59,16 @@ export const skillsConfigSchema = z
   .strict();
 export type SkillsConfig = z.infer<typeof skillsConfigSchema>;
 
+/** 调试开关（诊断用，E68）；strict：拼错字段直接报错而非默认忽略 */
+export const debugConfigSchema = z
+  .object({
+    /** 记录 openai 流解析中未产出任何事件的被丢弃 chunk（数量 + 样本，流结束时输出到
+     *  stderr），排查「流活跃但零输出」的静默卡死；诊断输出会干扰 TUI 画面，仅排查时开启 */
+    streamChunks: z.boolean().optional(),
+  })
+  .strict();
+export type DebugConfig = z.infer<typeof debugConfigSchema>;
+
 /** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错（DESIGN 16） */
 export const configSchema = z
   .object({
@@ -89,6 +99,8 @@ export const configSchema = z
   mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
   /** Skill 技能配置（BACKEND §20）：disabled 关闭名单，全局/项目两层取并集 */
   skills: skillsConfigSchema.optional(),
+  /** 调试开关（诊断用，E68）：默认全关，零行为影响 */
+  debug: debugConfigSchema.optional(),
 })
   .strict();
 

@@ -94,6 +94,8 @@ export function buildModelClient(
           // 仅 OpenAI 官方支持 reasoning_effort 请求参数；其余厂商发该字段可能 400，不开
           reasoningEffort: provider.id === "openai",
           models: modelInfos,
+          // E68 诊断开关（调试排查「流活跃但零输出」的静默卡死）：config.debug.streamChunks
+          debugDroppedChunks: config?.debug?.streamChunks === true,
         }),
       );
     }

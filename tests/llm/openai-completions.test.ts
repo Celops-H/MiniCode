@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assembleAssistantMessage,
   assistantMessage,
@@ -530,5 +530,286 @@ describe("parseStream：E16 五类现象", () => {
       { type: "text_delta", text: "补发" },
       { type: "done", stopReason: "stop" },
     ]);
+  });
+});
+
+describe("parseStream：E56 流内 error 载荷", () => {
+  it("HTTP 200 SSE 里无 choices、带 error 对象的 chunk：解析出真实原因转 error 事件", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen({ error: { message: "额度已用尽", type: "insufficient_quota", code: "quota_exceeded" } }),
+    )) {
+      events.push(e);
+    }
+    // 真实原因直达消费端，且不再补「流意外结束」把它顶掉
+    expect(events).toEqual([{ type: "error", message: "额度已用尽" }]);
+  });
+
+  it("error 载荷为字符串形态时同样解析（one-api 各版本形态不一）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(chunkGen({ error: "无可用渠道" }))) {
+      events.push(e);
+    }
+    expect(events).toEqual([{ type: "error", message: "无可用渠道" }]);
+  });
+
+  it("error 载荷对象无 message 字段：序列化整个对象保底，不静默吞", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(chunkGen({ error: { code: 1302 } }))) {
+      events.push(e);
+    }
+    expect(events).toEqual([{ type: "error", message: '{"code":1302}' }]);
+  });
+
+  it("error 载荷为退化形态（false/空对象）：占位噪声不当真实错误，维持静默跳过（E56 review 补）", async () => {
+    for (const degenerate of [false, {}, 0]) {
+      const events: StreamEvent[] = [];
+      for await (const e of protocol.parseStream(chunkGen({ error: degenerate }))) {
+        events.push(e);
+      }
+      // 不产出「false」「{}」这类误导性错误事件，回落流尾的通用「流意外结束」
+      expect(events).toEqual([{ type: "error", message: "流意外结束（未收到 finish_reason）" }]);
+    }
+  });
+
+  it("error chunk 之后流正常结束有 finish_reason：error 仅作观测，done 照发", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { error: { message: "上游抖动" } },
+        { choices: [{ delta: { content: "恢复" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "error", message: "上游抖动" },
+      { type: "text_delta", text: "恢复" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+});
+
+describe("parseStream：E62 两处兜底", () => {
+  it("tool_calls 缺 index、有 id：按新调用分组（此前整条调用被丢弃）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [{ delta: { tool_calls: [{ id: "call_1", function: { name: "read", arguments: '{"path":' } }] } }],
+        },
+        { choices: [{ delta: { tool_calls: [{ function: { arguments: '"a.ts"}' } }] } }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 首片有 id 开新调用；续片无 id 无 index 归并最近打开的调用，参数完整
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "toolcall_delta", index: 0, partialJson: '"a.ts"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("tool_calls 缺 index 且无 id 且无已打开调用：无处归属跳过，后续 id 片照常开调用", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        // 参数先到、id 未到（先发参数后补 id 的厂商形态），且无已打开调用可归并
+        { choices: [{ delta: { tool_calls: [{ function: { arguments: '{"x":' } }] } }] },
+        { choices: [{ delta: { tool_calls: [{ id: "call_1", function: { name: "read", arguments: '"1"}' } }] } }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '"1"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("tool_calls 缺 index 且每片重发同一 id：归并同一条调用，不裂成多条（E62 review 补）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { tool_calls: [{ id: "call_1", function: { name: "read", arguments: '{"path":' } }] } }] },
+        { choices: [{ delta: { tool_calls: [{ id: "call_1", function: { arguments: '"a.ts"}' } }] } }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 若每片都开新调用，截断参数会各自解析失败、工具以空参数真实执行
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "toolcall_delta", index: 0, partialJson: '"a.ts"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("多个无 index 调用各自成组：有 id 即新调用、续片归并最近打开者", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { tool_calls: [{ id: "c0", function: { name: "a", arguments: '{"p":1}' } }] } }] },
+        { choices: [{ delta: { tool_calls: [{ id: "c1", function: { name: "b", arguments: '{"q":2}' } }] } }] },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "c0", name: "a" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"p":1}' },
+      { type: "toolcall_start", index: 1, id: "c1", name: "b" },
+      { type: "toolcall_delta", index: 1, partialJson: '{"q":2}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "toolcall_end", index: 1 },
+      { type: "done", stopReason: "tool_calls" },
+    ]);
+  });
+
+  it("厂商不支持真流式、完整 message 单 chunk 下发：回落读 message 不再全丢", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        {
+          choices: [
+            {
+              message: { role: "assistant", content: "完整回复", reasoning_content: "先思考" },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "先思考" },
+      { type: "text_delta", text: "完整回复" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("message 形式的 tool_calls（无 index 有 id）完整组装成 tool_call 块（E62 a+b 组合）", async () => {
+    const assistant = await assembleAssistantMessage(
+      protocol.parseStream(
+        chunkGen(
+          {
+            choices: [
+              {
+                message: {
+                  content: "",
+                  tool_calls: [{ id: "call_1", type: "function", function: { name: "read", arguments: '{"path":"a.ts"}' } }],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          },
+        ),
+      ),
+    );
+    expect(assistant.content[0]).toMatchObject({
+      type: "tool_call",
+      id: "call_1",
+      name: "read",
+      input: { path: "a.ts" },
+    });
+  });
+});
+
+describe("parseStream：E68 零产出 chunk 诊断", () => {
+  /** 捕获诊断 stderr 输出（E68 报告走 process.stderr.write） */
+  async function captureDiagnostics(run: () => Promise<void>): Promise<string[]> {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((line: unknown) => {
+      writes.push(String(line));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+    return writes;
+  }
+
+  it("调试开关开启：零产出 chunk 记入诊断，流结束时输出计数与样本", async () => {
+    const debugProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
+    const writes = await captureDiagnostics(async () => {
+      for await (const _ of debugProtocol.parseStream(
+        chunkGen(
+          { choices: [{ delta: { role: "assistant" }, index: 0 }] },
+          { id: "gen-1", created: 1, model: "glm-4.5-air", choices: [{ delta: {}, index: 0 }] },
+          { choices: [{ delta: { content: "hi" }, index: 0 }] },
+          { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        ),
+      )) {
+        // 消费流
+      }
+    });
+    const report = writes.join("");
+    expect(report).toContain("流解析诊断");
+    expect(report).toContain("4 个 chunk");
+    // 零产出 3 个：仅 role 的 chunk、厂商元信息空 delta、finish_reason 收尾 chunk（无工具打开时只补 end）
+    expect(report).toContain("3 个未产出任何事件");
+    expect(report).toContain("glm-4.5-air");
+  });
+
+  it("调试开关关闭（默认）：零产出 chunk 静默跳过，无任何诊断输出（无行为改变）", async () => {
+    const writes = await captureDiagnostics(async () => {
+      for await (const _ of protocol.parseStream(
+        chunkGen(
+          { choices: [{ delta: { role: "assistant" }, index: 0 }] },
+          { choices: [{ delta: { content: "hi" }, index: 0 }] },
+          { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        ),
+      )) {
+        // 消费流
+      }
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it("流中断异常收尾时诊断仍输出（静默卡死多由用户打断才结束，证据不能丢）", async () => {
+    const debugProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
+    async function* silentThenThrow(): AsyncIterable<unknown> {
+      yield { choices: [{ delta: { role: "assistant" }, index: 0 }] };
+      throw new Error("连接中断");
+    }
+    const writes = await captureDiagnostics(async () => {
+      await expect(async () => {
+        for await (const _ of debugProtocol.parseStream(silentThenThrow())) {
+          // 消费流以触发异常
+        }
+      }).rejects.toThrow("连接中断");
+    });
+    expect(writes.join("")).toContain("1 个未产出任何事件");
+  });
+
+  it("超长零产出 chunk 的样本截断，保留可辨识度（E68 review 补）", async () => {
+    const debugProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
+    const writes = await captureDiagnostics(async () => {
+      for await (const _ of debugProtocol.parseStream(
+        chunkGen(
+          { choices: [{ delta: { role: "assistant", content: "" }, index: 0 }], padding: "x".repeat(300) },
+          { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        ),
+      )) {
+        // 消费流
+      }
+    });
+    const report = writes.join("");
+    expect(report).toContain("...(len ");
   });
 });
