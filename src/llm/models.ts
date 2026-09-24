@@ -85,24 +85,48 @@ export class Models {
     const router = this.router;
     const chain = modelId ? [modelId, ...(this.chain ?? []).filter((m) => m !== modelId)] : this.chain ?? [modelId];
     let selected = router.select(chain);
+    // 轮开始 select 跳过冷却中的主模型直接从备选起步：同样发切换观察事件——agent 侧
+    // effectiveModel 与 TUI 署名都靠它知道实际产出者，用户也能看到「已切换」而非静默换模型
+    if (selected && selected !== chain[0]) {
+      yield { type: "model_fallback", from: chain[0]!, to: selected };
+    }
     const tried = new Set<string>();
     let lastError: unknown;
     while (selected && !tried.has(selected)) {
       tried.add(selected);
       const resolved = this.resolve(selected);
       if (!resolved) {
-        throw new Error(`未知模型：${selected}`);
+        // 链上不可解析条目（模型下线、厂商 key 已删后未注册）跳过继续下一个（E54）：
+        // 直接抛「未知模型」会中断路由、遮蔽后续条目的真实错误。记失败进冷却让 select
+        // 不再选中它；lastError 只在还没有真实厂商错误时赋值，整链尝试完后上抛的
+        // 始终是最后的真实错误（review 补：真实失败在前时不被「未知模型」反向遮蔽）
+        lastError ??= new Error(`未知模型：${selected}`);
+        router.recordFailure(selected);
+        const next = router.select(chain);
+        // 只在真的换了一个未尝试的模型时发观察事件：select 全挂兜底会返回链首，
+        // 链首若是自身或已试过的模型，发「已切换」就是虚假通知（review 补）
+        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next };
+        selected = next;
+        continue;
       }
       let started = false;
+      let contentEmitted = false;
       let streamFailed = false;
       try {
         for await (const event of resolved.provider.stream(selected, context, options)) {
           started = true;
           // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标
           if (event.type === "error") streamFailed = true;
+          else contentEmitted = true;
           yield event;
         }
-        if (!streamFailed) router.recordSuccess(selected);
+        if (streamFailed) {
+          // 以 error 收尾对齐异常路径记健康度（E57）：未产出任何内容记失败进冷却——
+          // 否则报错厂商永不进冷却，每次请求都先撞一遍再失败；已产出内容属半截响应，不误标
+          if (!contentEmitted) router.recordFailure(selected);
+        } else {
+          router.recordSuccess(selected);
+        }
         return;
       } catch (err) {
         lastError = err;
@@ -113,9 +137,11 @@ export class Models {
         if (!isSwitchableError(err) || started) throw err;
         router.recordFailure(selected);
         const next = router.select(chain);
-        // 主模型失败、切换备选：发观察事件（TUI toast「已切换」），避免静默路由——
-        // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等
-        if (next) yield { type: "model_fallback", from: selected, to: next };
+        // 主模型失败、切换备选：发观察事件（TUI 常驻通知行「已切换」），避免静默路由——
+        // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等。
+        // 但只在真的换了一个未尝试的模型时才发：select 全挂兜底会返回链首，链首若是
+        // 自身或已试过的模型，发「已切换」就是虚假通知（review 补）
+        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next };
         selected = next;
       }
     }

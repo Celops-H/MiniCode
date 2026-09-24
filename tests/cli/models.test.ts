@@ -177,6 +177,37 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(resolveMainModel(config, "a-2")).toBe("a-2");
     expect(models.resolve("a-2")).toBeDefined();
   });
+
+  it("modelChain 不可解析条目装配期告警不阻断（E54）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+      ],
+      modelChain: ["a-1", "ghost-1"],
+    };
+    const warnings: string[] = [];
+    const models = buildModelClient(config, undefined, { env: KEYS, onWarning: (w) => warnings.push(w) });
+    expect(models.resolve("a-1")).toBeDefined();
+    expect(warnings).toEqual([
+      expect.stringContaining("ghost-1"),
+    ]);
+  });
+
+  it("主模型不可解析仍硬报错（E54：告警只覆盖主模型之外的条目）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+      ],
+      modelChain: ["ghost-1", "a-1"],
+    };
+    const warnings: string[] = [];
+    expect(() =>
+      buildModelClient(config, undefined, { env: KEYS, onWarning: (w) => warnings.push(w) }),
+    ).toThrow("模型 ghost-1 不可用");
+    expect(warnings).toEqual([]);
+  });
 });
 
 describe("落盘 apiKey 与环境变量同权（E33）", () => {

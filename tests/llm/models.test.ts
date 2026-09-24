@@ -167,11 +167,12 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(first[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
     expect(openrouterCalls).toBe(1);
 
-    // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求、无 fallback 通知（没发生切换）
+    // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求；轮开始跳过也发
+    // model_fallback 观察事件（署名与提示跟实际产出者，批次 18 review 补）
     const second: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) second.push(e);
     expect(openrouterCalls).toBe(1); // 坏 key 模型零重试
-    expect(second[0]).toEqual({ type: "text_delta", text: "deepseek:deepseek-1" });
+    expect(second[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
     expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
   });
 
@@ -193,11 +194,12 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     const models = new Models({ router: new ModelRouter(), chain: ["main-1", "backup-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
+    const events: StreamEvent[] = [];
     await expect(async () => {
-      for await (const _ of models.stream("main-1", createContext("s"))) {
-        // 消费流以触发路由错误
-      }
+      for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     }).rejects.toThrow("backup 失败");
+    // 备选也失败后 select 全挂兜底返回链首（已尝试）：不发「已切换 main-1」的虚假通知
+    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "backup-1" }]);
   });
 
   it("不可切换错误直接上抛，不切备选且不计数", async () => {
@@ -279,5 +281,112 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
       expect(events[0]).toMatchObject({ type: "error" });
     }
     expect(router.isHealthy("main-1")).toBe(false); // error 流不计成功，仍不健康
+  });
+
+  it("流以 error 收尾且未产出内容：记失败进冷却，下次请求直接路由到健康备选（E57）", async () => {
+    const router = new ModelRouter({ cooldownMs: 60_000 });
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    const errorProvider: Provider = {
+      id: "main",
+      name: "main",
+      baseUrl: "https://main.example.com",
+      auth: { configured: true },
+      getModels: () => [{ id: "main-1", name: "main-1", api: "openai-chat-completions", providerId: "main" }],
+      async *stream() {
+        yield { type: "error", message: "流意外结束" };
+      },
+    };
+    models.register(errorProvider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    // 第一次：未产出内容以 error 收尾 → 记 recordFailure 进冷却（E57 前永不冷却，每次都先撞一遍）
+    const first: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) first.push(e);
+    expect(first[0]).toMatchObject({ type: "error" });
+    expect(router.isHealthy("main-1")).toBe(false);
+    // 第二次：冷却期内直接路由到备选
+    const second: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) second.push(e);
+    expect(second[0]).toEqual({ type: "model_fallback", from: "main-1", to: "backup-1" });
+    expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
+  });
+
+  it("流以 error 收尾但已产出内容（半截响应）：不误标失败（E57）", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1"] });
+    const partialErrorProvider: Provider = {
+      id: "main",
+      name: "main",
+      baseUrl: "https://main.example.com",
+      auth: { configured: true },
+      getModels: () => [{ id: "main-1", name: "main-1", api: "openai-chat-completions", providerId: "main" }],
+      async *stream() {
+        yield { type: "text_delta", text: "半截" };
+        yield { type: "error", message: "流中断" };
+      },
+    };
+    models.register(partialErrorProvider);
+    for await (const _ of models.stream("main-1", createContext("s"))) {
+      // 消费流
+    }
+    expect(router.isHealthy("main-1")).toBe(true); // 半截响应不记失败
+  });
+
+  it("链上不可解析条目跳过继续下一个，两次切换都有观察事件（E54）", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "ghost-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    // 主模型 429 → select 落到不可解析的 ghost-1 → 跳过 → 备选正常产出
+    expect(events).toEqual([
+      { type: "model_fallback", from: "main-1", to: "ghost-1" },
+      { type: "model_fallback", from: "ghost-1", to: "backup-1" },
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("整链尝试完后抛最后的真实错误，不被「未知模型」遮蔽（E54）", async () => {
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1", "backup-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
+    await expect(async () => {
+      for await (const _ of models.stream("main-1", createContext("s"))) {
+        // 消费流以触发路由
+      }
+    }).rejects.toThrow("backup 失败");
+  });
+
+  it("整链全部不可解析时抛「未知模型」，不发自我切换的虚假事件（E54 review 补）", async () => {
+    const models = new Models({ router: new ModelRouter(), chain: ["ghost-1"] });
+    models.register(makeProvider("a", ["a-1"], "A"));
+    const events: StreamEvent[] = [];
+    await expect(async () => {
+      for await (const e of models.stream("ghost-1", createContext("s"))) events.push(e);
+    }).rejects.toThrow("未知模型");
+    // select 全挂兜底返回链首（自身）：不发「已切换 ghost-1」
+    expect(events).toEqual([]);
+  });
+
+  it("单条目链真实失败：不发自我切换事件，直接上抛真实错误（review 补既有路径）", async () => {
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    const events: StreamEvent[] = [];
+    await expect(async () => {
+      for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    }).rejects.toThrow("main 失败");
+    expect(events).toEqual([]);
+  });
+
+  it("真实失败在前、死条目收尾：抛真实厂商错误，不被「未知模型」反向遮蔽（E54 review 补）", async () => {
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1"] });
+    models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
+    const events: StreamEvent[] = [];
+    await expect(async () => {
+      for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    }).rejects.toThrow("main 失败");
+    // 主模型切到死条目有观察事件；死条目之后无未尝试模型，不再发第二次
+    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "ghost-1" }]);
   });
 });

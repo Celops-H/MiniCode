@@ -118,15 +118,28 @@ export const NO_MODEL_ID = "";
 /**
  * 启动模型客户端装配（E31）：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
  * 由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
+ * modelChain 死条目等装配告警（E54）收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
  * @param config 已加载配置（可省略，等同零厂商）
- * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、needsConnect 是否进连接引导
+ * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、
+ *   needsConnect 是否进连接引导、warnings 装配告警列表
  */
-export function createStartupModels(config?: Config): { models: Models; modelId: string; needsConnect: boolean } {
+export function createStartupModels(config?: Config): {
+  models: Models;
+  modelId: string;
+  needsConnect: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
   try {
-    return { models: buildModelClient(config), modelId: resolveMainModel(config), needsConnect: false };
+    return {
+      models: buildModelClient(config, undefined, { onWarning: (w) => warnings.push(w) }),
+      modelId: resolveMainModel(config),
+      needsConnect: false,
+      warnings,
+    };
   } catch (err) {
     if ((err as Error).message !== NO_PROVIDER_ERROR) throw err;
-    return { models: new Models(), modelId: NO_MODEL_ID, needsConnect: true };
+    return { models: new Models(), modelId: NO_MODEL_ID, needsConnect: true, warnings };
   }
 }
 
@@ -145,6 +158,9 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   const startup = createStartupModels(config);
   let models: Models = startup.models;
   let modelId: string = startup.modelId;
+  // 装配告警（E54，modelChain 死条目等）：每个会话轮经 startupNotices 提示一次，
+  // reconfigure 重建模型客户端时重置重收
+  let modelWarnings: string[] = startup.warnings;
   let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
@@ -171,6 +187,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         thinkingLevelBox,
         permissionModeBox,
         startupConnect: startup.needsConnect && firstRound,
+        modelWarnings,
         shared,
         resetView,
         terminal,
@@ -183,10 +200,12 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // 成功提示（模型已切换/已连接/配置已写入）正常显示、到期自然消失
         setSharedState({ modal: undefined });
         // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
-        // 会话内视图不按盘上消息重建（store 内容原样续接，E34 历史固定）；切会话/新建草稿才重建视图
+        // 会话内视图不按盘上消息重建（store 内容原样续接，E34 历史固定）；切会话/新建草稿才重建视图。
+        // 装配告警随重建重置重收（E54）
         await loadDotEnv();
         config = await loadConfig();
-        models = buildModelClient(config);
+        modelWarnings = [];
+        models = buildModelClient(config, undefined, { onWarning: (w) => modelWarnings.push(w) });
         modelId = resolveMainModel(config);
         // switchTo===NEW_SESSION_ID 分支实际不可达（reconfigure 不带 switchTo），保留作防御
         if (result.switchTo === NEW_SESSION_ID) {
@@ -232,6 +251,8 @@ async function runTuiSession(opts: {
   permissionModeBox: { value: PermissionMode };
   /** 零可用厂商启动引导（仅首轮可能为 true） */
   startupConnect?: boolean;
+  /** 装配告警（E54：modelChain 死条目等），随启动提示一并 toast */
+  modelWarnings?: string[];
   /** 共享挂载上下文（E19 修正，入口层创建一次） */
   shared: TuiSharedMount;
   /** 本轮是否按当前会话重建视图内容（false = carry 续接，E34） */
@@ -273,7 +294,7 @@ async function runTuiSession(opts: {
       mcpServers: config.mcpServers ?? {},
       getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
       skillsDisabled: config.skills?.disabled ?? [],
-      startupNotices: extensions.mcpErrors,
+      startupNotices: [...(opts.modelWarnings ?? []), ...extensions.mcpErrors],
       startupConnect: opts.startupConnect,
       shared: opts.shared,
       resetView: opts.resetView,

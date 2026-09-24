@@ -7,8 +7,9 @@
  * 结尾必达 done（正常停因）或 error（流错误）。error 三条来源：
  * 厂商 API 错误事件（不抛异常）、流意外结束（不抛）、流中断异常
  * （yield error 后原样抛出供控制流处理，剥组重试等）。
- * model_fallback 为观察事件：模型路由在主模型失败、切换到备选时发出，
- * 供宿主提示用户（TUI toast）；不进内容组装（assemble 忽略），不参与轮产出判定。
+ * model_fallback 为观察事件：模型路由切换到备选时发出，供宿主提示用户（TUI toast）；
+ * 发出时机有三——主模型流内失败切备选、轮开始主模型冷却中 select 直接落到备选、
+ * 链上不可解析条目跳转（Models.stream）；不进内容组装（assemble 忽略），不参与轮产出判定。
  * 消费端约定：error 事件后不得中断迭代（未消费完的异常会被吞），必须继续消费到流结束。
  */
 export type StreamEvent =
