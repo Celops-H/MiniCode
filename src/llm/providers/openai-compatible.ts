@@ -35,6 +35,8 @@ export interface OpenAICompatibleOptions {
   streamIdleTimeoutMs?: number;
   /** 收尾宽限窗（ms，E47）：finish_reason 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
   streamTailGraceMs?: number;
+  /** E68 诊断开关（调试排查用）：记录流解析中未产出事件的被丢弃 chunk 样本，来自 config.debug.streamChunks */
+  debugDroppedChunks?: boolean;
   /** 创建 client 的工厂（测试注入 mock） */
   createClient?: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
 }
@@ -63,6 +65,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.protocol = new OpenAICompletionsProtocol({
       reasoningContent: options.reasoningContent,
       emitReasoningEffort: options.reasoningEffort,
+      debugDroppedChunks: options.debugDroppedChunks,
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;

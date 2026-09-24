@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createContext, userMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import { defaultCreateClient, OpenAICompatibleProvider, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
@@ -98,6 +98,45 @@ describe("stream", () => {
     }
     // 全局限定名不发给厂商：请求 model 是原始 id
     expect(lastRequest).toMatchObject({ model: "deepseek-chat" });
+  });
+
+  it("debugDroppedChunks 透传协议层（E68 接线）：装配开关打开时零产出 chunk 输出诊断", async () => {
+    const client: ChatCompletionsClient = {
+      chat: {
+        completions: {
+          async create() {
+            return chunkGen(
+              { choices: [{ delta: { role: "assistant" }, index: 0 }] },
+              { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+            );
+          },
+        },
+      },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "deepseek",
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      env: { DEEPSEEK_API_KEY: "sk" },
+      models: MODELS,
+      debugDroppedChunks: true,
+      createClient: () => client,
+    });
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((line: unknown) => {
+      writes.push(String(line));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      for await (const _ of provider.stream("deepseek-chat", createContext("s"))) {
+        // 消费流
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    // 零产出 2 个：仅 role 的 chunk 与 finish_reason 收尾 chunk（无工具打开时不产出事件）
+    expect(writes.join("")).toContain("2 个未产出任何事件");
   });
 
   it("未配置认证时抛错", async () => {
