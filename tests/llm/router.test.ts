@@ -29,6 +29,10 @@ describe("isSwitchableError（可切换错误分类）", () => {
     expect(isSwitchableError({ status: 401 })).toBe(true);
   });
 
+  it("余额不足（402）可切换——DeepSeek 余额不足返回 Payment Required，失败理由与 401 同构（E53）", () => {
+    expect(isSwitchableError({ status: 402 })).toBe(true);
+  });
+
   it("参数（400）/权限（403）错误不可切换，直接报错", () => {
     expect(isSwitchableError({ status: 400 })).toBe(false);
     expect(isSwitchableError({ status: 403 })).toBe(false);

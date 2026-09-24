@@ -142,3 +142,12 @@ it("createStartupModels：落盘 apiKey 的厂商正常装配（E33 同权）", 
   expect(startup.modelId).toBe("m-1");
   expect(startup.models.listModels().map((m) => m.id)).toEqual(["m-1"]);
 });
+
+it("createStartupModels：modelChain 死条目收进 warnings 供界面提示（E54）", () => {
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
+    modelChain: ["m-1", "ghost-1"],
+  });
+  const startup = createStartupModels(config);
+  expect(startup.warnings).toEqual([expect.stringContaining("ghost-1")]);
+});

@@ -19,16 +19,19 @@ export const NO_PROVIDER_ERROR =
  * 模型列表（列表里出现的模型一定有 key，无例外）；可用厂商为零直接报错，不再回退
  * 硬编码兜底（删除文件重启即按预设重新播种，见 config/seed.ts）。
  * -m 指定时以其为主模型打头（配置的 modelChain 作为备选路由）；-m 未在配置中出现则
- * 显式报错，不静默忽略。
+ * 显式报错，不静默忽略。modelChain 整链在装配期校验（E54）：主模型不可解析硬报错，
+ * 其余条目不可解析经 onWarning 告警（运行时路由会跳过，见 Models.stream）。
  * @param config 配置（providers / modelChain 可选）
  * @param modelId 模型 id 覆盖（-m 选项），可省略
- * @param opts 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
+ * @param opts.env 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
+ * @param opts.onWarning 装配告警回调（modelChain 死条目等非致命问题）；缺省输出到 stderr，
+ *   TUI 宿主注入收集器转为界面提示（console 直写在全屏界面下会花屏）
  * @returns 注册了 Provider 的 Models 集合
  */
 export function buildModelClient(
   config: Config | undefined,
   modelId?: string,
-  opts: { env?: NodeJS.ProcessEnv } = {},
+  opts: { env?: NodeJS.ProcessEnv; onWarning?: (message: string) => void } = {},
 ): Models {
   const env = opts.env ?? process.env;
   // key 过滤：无 key 的厂商不注册（调用了也必然认证失败，进列表只会误导 /model 选择）。
@@ -101,6 +104,16 @@ export function buildModelClient(
     throw new Error(
       `模型 ${main} 不可用：请确认其所属厂商的 API key 已配置、模型在 providers 中，或调整 -m / modelChain`,
     );
+  }
+  // modelChain 整链校验（E54）：主模型之外的条目不可解析（模型下线、所属厂商 key 已删后
+  // 未注册）只告警不阻断——运行时路由会跳过它们，但用户应在装配期就知道链上有死条目，
+  // 而不是等切换失败才看到被遮蔽的错误
+  const onWarning = opts.onWarning ?? ((message: string) => console.error(message));
+  const warned = new Set<string>();
+  for (const entry of chain ?? []) {
+    if (entry === main || warned.has(entry) || models.resolve(entry)) continue;
+    warned.add(entry);
+    onWarning(`模型链条目 ${entry} 不可解析：所属厂商 key 未配置或模型不在 providers 中，自动路由将跳过它`);
   }
   return models;
 }
