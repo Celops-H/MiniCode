@@ -50,6 +50,7 @@ export class AnthropicCompatibleProvider implements Provider {
   private readonly streamIdleTimeoutMs: number;
   private readonly streamTailGraceMs: number;
   private readonly defaultMaxTokens: number;
+  private readonly apiKeyEnv: string;
   private readonly apiKey?: string;
   private client?: AnthropicMessagesClient;
 
@@ -62,6 +63,7 @@ export class AnthropicCompatibleProvider implements Provider {
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;
     this.defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
+    this.apiKeyEnv = options.apiKeyEnv;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
@@ -135,7 +137,8 @@ export class AnthropicCompatibleProvider implements Provider {
   /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
   private getClient(): AnthropicMessagesClient {
     if (!this.apiKey) {
-      throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量`);
+      // E59：文案带上具体环境变量名，用户可直接定位要配的变量
+      throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
     this.client ??= this.createClient(this.apiKey, this.baseUrl);
     return this.client;
@@ -182,6 +185,8 @@ export function anthropicThinkingParam(
 /**
  * 默认用官方 Anthropic SDK 创建 client（x-api-key + anthropic-version 认证头由 SDK
  * 注入；带请求超时，防厂商请求挂起无限等待）。
+ * maxRetries 显式为 0（E58）：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
+ * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址（Anthropic 兼容端点）
  * @returns Anthropic 兼容 client
@@ -191,5 +196,6 @@ export function defaultAnthropicCreateClient(apiKey: string, baseUrl: string): A
     baseURL: baseUrl,
     apiKey,
     timeout: REQUEST_TIMEOUT_MS,
+    maxRetries: 0,
   }) as unknown as AnthropicMessagesClient;
 }

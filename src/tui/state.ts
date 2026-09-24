@@ -272,7 +272,8 @@ export interface TuiState {
   permissionMode: PermissionMode;
   /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
-  /** 本轮实际产出模型（E18）：model_fallback 事件暂存，done 落消息块时作署名并清除 */
+  /** 本轮实际产出模型（E18/E70）：轮开始（UserPromptSubmit）快照当前模型，回退事件覆盖；
+   *  done 落块作署名，工具循环续轮保留、回合结束清除 */
   activeModel?: string;
   /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
@@ -594,7 +595,16 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         : state;
       const status: "idle" | "running" =
       event.stopReason === "tool_use" || event.stopReason === "tool_calls" ? "running" : "idle";
-      return { ...merged, activeModel: undefined, streaming: undefined, status, scrollOffset: 0, turnIndex: state.turnIndex + 1 };
+      // 工具循环续轮（stopReason 为 tool_use/tool_calls）不算回合结束：保留快照——
+      // 续轮没有新的 UserPromptSubmit，此处清掉会让续轮落块署名回落「当前模型名」（review 补）
+      return {
+        ...merged,
+        activeModel: status === "running" ? state.activeModel : undefined,
+        streaming: undefined,
+        status,
+        scrollOffset: 0,
+        turnIndex: state.turnIndex + 1,
+      };
     }
     case "error": {
       if (!state.streaming || (!state.streaming.text && !state.streaming.thinking)) {
@@ -651,6 +661,9 @@ export function interruptTurn(state: TuiState): TuiState {
       kind: "message",
       id: `turn_${blocks.length}`,
       role: "assistant",
+      // 半截块同样署名本轮实际产出模型（review 补）：与 agent 落盘的 meta.model 对齐，
+      // 否则同一消息 live 视图与恢复重演的署名不一致
+      model: state.activeModel,
       text: state.streaming.text,
       thinking: state.streaming.thinking || undefined,
       thinkingCollapsed: true,
@@ -663,7 +676,7 @@ export function interruptTurn(state: TuiState): TuiState {
       blocks[i] = { ...block, status: "failure", error: "执行中断：用户打断" };
     }
   }
-  return { ...state, blocks, streaming: undefined, status: "idle" };
+  return { ...state, blocks, streaming: undefined, status: "idle", activeModel: undefined };
 }
 
 /** 是否有运行中的子 agent（P8）：主 agent 等子 agent 结论时主状态非 running，
@@ -695,7 +708,10 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
   switch (event.type) {
     case "UserPromptSubmit": {
       // 排队消息转正（E35）：send 时已上屏的 queued_ 块在此消费——改 id 为正式块不再重复追加；
-      // 无排队块（CLI/空闲路径）按原逻辑追加
+      // 无排队块（CLI/空闲路径）按原逻辑追加。
+      // 轮开始快照当前模型进 activeModel（E70）：普通轮 done 落块也有署名可用——此前只在
+      // model_fallback 事件赋值，普通轮是 undefined，渲染回落「当前模型名」，/model 切换后
+      // 历史块署名跟着全翻转；回退事件仍会覆盖快照，署名始终是实际产出模型
       const blocks = state.blocks;
       const queuedIndex = blocks.findIndex(
         (b) => b.kind === "message" && b.id.startsWith("queued_") && b.role === "user" && b.text === event.input,
@@ -703,6 +719,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       if (queuedIndex >= 0) {
         return {
           ...state,
+          activeModel: state.modelLabel,
           streaming: undefined,
           blocks: blocks.map((b, i) =>
             i === queuedIndex && b.kind === "message"
@@ -714,6 +731,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       }
       return {
         ...state,
+        activeModel: state.modelLabel,
         streaming: undefined,
         blocks: [
           ...state.blocks,

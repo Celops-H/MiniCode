@@ -107,7 +107,7 @@ describe("stream", () => {
       for await (const _ of gen) {
         // 消费流以触发认证检查
       }
-    }).rejects.toThrow();
+    }).rejects.toThrow("请设置环境变量 DEEPSEEK_API_KEY");
   });
 });
 
@@ -115,6 +115,11 @@ describe("请求超时", () => {
   it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
     const client = defaultCreateClient("sk", "https://api.deepseek.com") as unknown as { timeout: number };
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
+  });
+
+  it("默认 client 关闭 SDK 内置重试（E58：失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
+    const client = defaultCreateClient("sk", "https://api.deepseek.com") as unknown as { maxRetries: number };
+    expect(client.maxRetries).toBe(0);
   });
 });
 

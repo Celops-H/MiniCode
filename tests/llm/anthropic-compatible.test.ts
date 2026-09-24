@@ -115,7 +115,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
       for await (const _ of gen) {
         // 消费流以触发认证检查
       }
-    }).rejects.toThrow();
+    }).rejects.toThrow("请设置环境变量 ZHIPU_API_KEY");
   });
 
   it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
@@ -123,6 +123,13 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
       timeout: number;
     };
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
+  });
+
+  it("默认 client 关闭 SDK 内置重试（E58：失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
+    const client = defaultAnthropicCreateClient("sk", "https://open.bigmodel.cn/api/anthropic") as unknown as {
+      maxRetries: number;
+    };
+    expect(client.maxRetries).toBe(0);
   });
 
   it("N 秒无新 chunk 时中断底层请求并抛「模型响应超时」（空闲超时与 openai 侧一致）", async () => {
