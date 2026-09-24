@@ -230,6 +230,35 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.isHealthy("main-1")).toBe(true); // 流中断不计数
   });
 
+  it("首 token 前厂商故障（error 事件后异常收尾）仍切备选：error 事件不算已产出内容（E57 审查补充）", async () => {
+    const router = new ModelRouter({ cooldownMs: 60_000 });
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    // 模拟空闲超时路径：协议先 yield error 事件再抛异常（此前 error 置 started 挡住切换）
+    const timeoutProvider: Provider = {
+      id: "main",
+      name: "main",
+      baseUrl: "https://main.example.com",
+      auth: { configured: true },
+      getModels: () => [{ id: "main-1", name: "main-1", api: "openai-chat-completions", providerId: "main" }],
+      async *stream() {
+        yield { type: "error", message: "模型响应超时" };
+        throw new Error("模型响应超时");
+      },
+    };
+    models.register(timeoutProvider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    // error 事件先到（观测通道），异常后切备选正常产出
+    expect(events).toEqual([
+      { type: "error", message: "模型响应超时" },
+      { type: "model_fallback", from: "main-1", to: "backup-1" },
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+    expect(router.isHealthy("main-1")).toBe(false); // 记失败进冷却
+  });
+
   it("用户打断（signal 已中止）直接上抛，不切备选不标冷却", async () => {
     const router = new ModelRouter();
     const models = new Models({ router, chain: ["main-1", "backup-1"] });
