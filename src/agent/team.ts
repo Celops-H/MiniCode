@@ -318,7 +318,7 @@ export class Team {
       await this.sendMessage(parentPath, {
         type: "FINAL_ANSWER",
         from: path,
-        content: `子代理 ${name} 执行失败（${message}），任务未完成。请基于当前进展决定重试、换方式或放弃该子任务。`,
+        content: `子代理 ${name} 执行失败（${message}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
         triggerTurn: true,
       });
       return;
