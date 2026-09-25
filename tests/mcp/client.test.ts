@@ -90,6 +90,16 @@ describe("McpClient（stdio JSON-RPC）", () => {
     await expect(pending).rejects.toThrow(/进程退出.*在途请求已终止/);
   }, 10_000);
 
+  it("server→client 请求（带 id 无 result）不顶掉在途响应（E85）", async () => {
+    const client = makeClient("server-request");
+    clients.push(client);
+    await client.start();
+    const result = await client.callTool("echo", { text: "你好" });
+    // 撞号请求被过滤，真实响应正常落到 callTool
+    expect(result.output).toBe("echo: 你好");
+    expect(result.isError).toBe(false);
+  });
+
   it("多字节字符跨 chunk 边界不被截碎（流式 UTF-8 解码）", async () => {
     const client = makeClient("bigtext");
     clients.push(client);

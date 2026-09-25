@@ -61,6 +61,11 @@ export class SessionStore {
   async loadSession(id: string): Promise<Session> {
     const raw = await readFile(this.metaFile(id), "utf8");
     const parsed = JSON.parse(raw) as SessionMeta;
+    // 最小形状校验（E89）：listSessions 有形状检查而这里没有，坏 meta 照加载——缺 id
+    // 续聊后以 undefined 为攒批键静默写出 undefined.jsonl；显式报错让用户可定位坏文件
+    if (typeof parsed?.id !== "string" || parsed.id.length === 0) {
+      throw new Error(`会话元数据损坏（${id}.meta.json 缺少会话 id）：无法加载，可删除该会话文件后重建`);
+    }
     // 旧会话无 formatVersion 字段，视为版本 1
     const meta: SessionMeta = { ...parsed, formatVersion: parsed.formatVersion ?? 1 };
     const messages = await readJsonl<Message>(this.messageFile(id));
@@ -134,8 +139,11 @@ export class SessionStore {
     let files: string[];
     try {
       files = await readdir(this.dir);
-    } catch {
-      return [];
+    } catch (err) {
+      // 目录不存在（从未建过会话）返回空列表；其余错误（EACCES 等）上抛——
+      // 一律吞成「无会话」会让权限问题伪装成空状态，用户误以为会话全丢（E89）
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
     }
     const items: SessionListItem[] = [];
     for (const file of files) {

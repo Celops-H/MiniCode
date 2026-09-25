@@ -10,6 +10,13 @@ import {
 } from "../../src/skills/index.js";
 
 describe("parseFrontmatter（frontmatter 两行子集解析）", () => {
+  it("前导 BOM 剥离（E87）：带 BOM 的 SKILL.md frontmatter 正常解析", () => {
+    const bom = String.fromCharCode(0xfeff);
+    const { attrs, body } = parseFrontmatter(bom + "---\nname: my-skill\ndescription: 干什么用的\n---\n正文");
+    expect(attrs.name).toBe("my-skill");
+    expect(attrs.description).toBe("干什么用的");
+    expect(body).toBe("正文");
+  });
   it("解析 name/description 并剥出正文", () => {
     const { attrs, body } = parseFrontmatter("---\nname: my-skill\ndescription: 干什么用的\n---\n正文第一行\n\n正文第二行");
     expect(attrs).toEqual({ name: "my-skill", description: "干什么用的" });

@@ -101,6 +101,25 @@ describe("会话持久化与续跑", () => {
     const list = await store.listSessions();
     expect(list.map((m) => m.id)).toEqual([good.meta.id]);
   });
+  it("loadSession 坏 meta（缺 id）抛可读错误，不再照加载（E89）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "session-test-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 手改 meta 抹掉 id
+    await writeFile(path.join(dir, `${session.meta.id}.meta.json`), JSON.stringify({ title: "坏档" }), "utf8");
+    await expect(store.loadSession(session.meta.id)).rejects.toThrow("缺少会话 id");
+  });
+
+  it("listSessions 非 ENOENT 错误上抛，不再一律吞成空列表（E89）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "session-test-"));
+    const store = new SessionStore(dir);
+    // sessionsDir 指向一个文件：readdir 报 ENOTDIR（非 ENOENT），应上抛而非返回 []
+    const filePath = path.join(dir, "not-a-dir");
+    writeFileSync(filePath, "x");
+    const badStore = new SessionStore(filePath);
+    await expect(badStore.listSessions()).rejects.toThrow();
+  });
+
   it("listSessions：meta 缺 updatedAt（JSON 合法但形状不全）同样跳过，排序不崩（审查补）", async () => {
     const store = setup();
     const good = await store.createSession({ model: "m", title: "完好" });

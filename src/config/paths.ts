@@ -61,10 +61,14 @@ const MAX_SANITIZED_LENGTH = 200;
  * @returns 编码后的子目录名
  */
 export function sanitizePath(name: string): string {
-  const sanitized = name.replace(/[^a-zA-Z0-9]/g, "-");
-  const hashed = `${sanitized}-${fnv1aBase36(name)}`;
+  // Windows 文件系统大小写不敏感：编码前统一小写（E89）——C:\Work\proj 与 c:\work\proj
+  // 否则分裂两个会话存储、互不可见。归一改变子目录名，既有会话一次性失效（需重新指向，
+  // 与配置文档同步说明）
+  const normalized = process.platform === "win32" ? name.toLowerCase() : name;
+  const sanitized = normalized.replace(/[^a-zA-Z0-9]/g, "-");
+  const hashed = `${sanitized}-${fnv1aBase36(normalized)}`;
   if (hashed.length <= MAX_SANITIZED_LENGTH) return hashed;
-  return `${hashed.slice(0, MAX_SANITIZED_LENGTH - 8)}-${fnv1aBase36(name)}`;
+  return `${hashed.slice(0, MAX_SANITIZED_LENGTH - 8)}-${fnv1aBase36(normalized)}`;
 }
 
 /** FNV-1a 哈希的 base36 形式（撞名防御用短哈希，非安全场景） */
