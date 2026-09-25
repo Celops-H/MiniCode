@@ -53,6 +53,11 @@ describe("buildRequest：消息与工具转换", () => {
     const notEnabled = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
     expect(notEnabled.enable_thinking).toBeUndefined();
   });
+  it("请求体带 stream_options.include_usage（E63 真实用量）", () => {
+    const req = protocol.buildRequest(createContext("s", [userMessage("hi")])) as { stream_options?: { include_usage?: boolean } };
+    expect(req.stream_options).toEqual({ include_usage: true });
+  });
+
   it("user / assistant / tool_result 消息转换", () => {
     const context = createContext(
       "助手",
@@ -163,6 +168,37 @@ describe("buildRequest：消息与工具转换", () => {
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
     // 完整轮无任何产出落下的空 assistant 没有信息，直接不发
     expect(req.messages).toEqual([{ role: "system", content: "s" }]);
+  });
+
+  it("流尾 usage chunk 转统一用量挂 done（E63）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        // include_usage 的流尾 chunk：无 choices，仅带用量
+        { usage: { prompt_tokens: 120, completion_tokens: 45 } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "done", stopReason: "stop", usage: { inputTokens: 120, outputTokens: 45 } },
+    ]);
+  });
+
+  it("无 usage chunk 的流 done 不带 usage（厂商未给时契约不变）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
   });
 
   it("工具 schema 转换为 function 格式", () => {

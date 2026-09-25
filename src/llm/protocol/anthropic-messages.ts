@@ -1,4 +1,4 @@
-import type { Context, ContentBlock, Message, StreamEvent, ToolDefinition } from "../../core/index.js";
+import type { Context, ContentBlock, Message, ModelUsage, StreamEvent, ToolDefinition } from "../../core/index.js";
 import type { ModelInfo, Protocol } from "../types.js";
 import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
@@ -7,12 +7,16 @@ interface AnthropicChunk {
   index?: number;
   /** text/thinking 块可能把首段内容放在 start 而非 delta（部分兼容端点） */
   content_block?: { type?: string; id?: string; name?: string; text?: string; thinking?: string };
+  /** message_start 携带的用量（E63：input_tokens，output_tokens 为流初值） */
+  message?: { usage?: { input_tokens?: number; output_tokens?: number } };
   delta?: {
     type?: string;
     text?: string;
     thinking?: string;
     partial_json?: string;
     stop_reason?: string;
+    /** message_delta 携带的用量（E63：output_tokens 为累计最终值） */
+    usage?: { input_tokens?: number; output_tokens?: number };
   };
 }
 
@@ -48,6 +52,10 @@ export class AnthropicMessagesProtocol implements Protocol {
     const toolIndexByBlock = new Map<number, number>();
     let nextToolIndex = 0;
     let stopReason: string | undefined;
+    // 真实用量（E63）：message_start 给 input_tokens（output 为流初值），
+    // message_delta 给累计 output_tokens（最终值），随 done 事件挂出
+    let inputTokens: number | undefined;
+    let outputTokens: number | undefined;
     // 每个 text/thinking 块各一份清洗状态（块开始新建、块结束 flush），按块 index 取用
     const textGuards = new Map<number, PrefixDeltaGuard>();
     const thinkingGuards = new Map<number, PrefixDeltaGuard>();
@@ -160,16 +168,25 @@ export class AnthropicMessagesProtocol implements Protocol {
             releaseBlock(blockIndex);
             break;
           }
+          case "message_start":
+            // 真实用量（E63）：输入 token 在 message_start 的 usage 里
+            inputTokens = event.message?.usage?.input_tokens ?? inputTokens;
+            outputTokens ??= event.message?.usage?.output_tokens;
+            break;
           case "message_delta":
             // Anthropic 的停止原因在 message_delta.delta.stop_reason；仅在有值时覆盖——
             // 个别兼容厂商在带 stop_reason 的 message_delta 后再发只带 usage 的
             // message_delta，无条件覆盖会把已收到的停止原因清掉（E47 收尾判定随之失效）
             stopReason ??= event.delta?.stop_reason;
+            // 真实用量（E63）：output_tokens 为累计最终值，最后一次取值
+            if (typeof event.delta?.usage?.output_tokens === "number") {
+              outputTokens = event.delta.usage.output_tokens;
+            }
             break;
           case "message_stop":
             // 兼容端点可能省略 content_block_stop 直接收尾：未 stop 的 text 块残料先 flush 再 done
             yield* flushOpenTextBlocks();
-            yield { type: "done", stopReason: stopReason ?? "end_turn" };
+            yield { type: "done", stopReason: stopReason ?? "end_turn", ...anthropicUsage(inputTokens, outputTokens) };
             return;
           case "error":
             yield { type: "error", message: anthropicErrorMessage((chunk as { error?: unknown }).error) };
@@ -189,7 +206,7 @@ export class AnthropicMessagesProtocol implements Protocol {
     // E47 收尾宽限关流场景（厂商发完 message_delta 后握着连接不发 message_stop）落到这里，
     // 整轮不因缺 message_stop 被误判异常
     if (stopReason) {
-      yield { type: "done", stopReason };
+      yield { type: "done", stopReason, ...anthropicUsage(inputTokens, outputTokens) };
       return;
     }
     // 迭代正常结束且未收到任何停止原因（厂商提前断流）：报 error 标记异常轮
@@ -264,6 +281,26 @@ function toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
  */
 function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
   return { name: tool.name, description: tool.description, input_schema: tool.inputSchema };
+}
+
+/**
+ * 统一用量（E63）：input/output 任一存在才产出 done.usage，缺省不带（厂商未给用量
+ * 的流 done 与旧契约一致）。
+ * @param inputTokens 输入 token（message_start）
+ * @param outputTokens 输出 token（message_delta 累计最终值，回落 message_start 初值）
+ * @returns ModelUsage；两者皆缺省返回空对象（展开后不携带 usage 字段）
+ */
+function anthropicUsage(
+  inputTokens: number | undefined,
+  outputTokens: number | undefined,
+): { usage?: ModelUsage } {
+  if (inputTokens === undefined && outputTokens === undefined) return {};
+  return {
+    usage: {
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+    },
+  };
 }
 
 /**

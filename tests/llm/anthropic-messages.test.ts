@@ -234,7 +234,12 @@ describe("parseStream：SSE → 统一事件", () => {
     )) {
       events.push(e);
     }
-    expect(events.at(-1)).toEqual({ type: "done", stopReason: "end_turn" });
+    // 只带 usage 的 message_delta：停止原因保留，用量被解析挂 done（E63）
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { outputTokens: 5 },
+    });
   });
 
   it("流中断异常：发 error 事件（观测）后原样抛出（控制流）", async () => {
@@ -378,6 +383,85 @@ describe("parseStream：E16 五类现象", () => {
       { type: "text_delta", text: "好" },
       { type: "done", stopReason: "end_turn" },
     ]);
+  });
+});
+
+describe("parseStream：真实用量挂 done（E63）", () => {
+  it("message_start 的 input_tokens 与 message_delta 的累计 output_tokens → done.usage", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "message_start", message: { usage: { input_tokens: 88, output_tokens: 1 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", usage: { output_tokens: 27 } } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 88, outputTokens: 27 },
+    });
+  });
+
+  it("缺 message_delta 用量的兼容端点回落 message_start 的 output_tokens", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "message_start", message: { usage: { input_tokens: 88, output_tokens: 5 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 88, outputTokens: 5 },
+    });
+  });
+
+  it("E47 收尾宽限关流路径（缺 message_stop）同样携带用量", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "message_start", message: { usage: { input_tokens: 10 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", usage: { output_tokens: 3 } } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 10, outputTokens: 3 },
+    });
+  });
+
+  it("厂商未给用量时 done 不带 usage（契约不变）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "end_turn" });
   });
 });
 

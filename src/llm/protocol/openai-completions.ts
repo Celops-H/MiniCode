@@ -1,5 +1,6 @@
 import type { Context, Message, StreamEvent } from "../../core/index.js";
 import type { TextContent, ThinkingContent, ToolCall, ToolDefinition } from "../../core/index.js";
+import type { ModelUsage } from "../../core/index.js";
 import type { ModelInfo, Protocol } from "../types.js";
 import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
@@ -94,6 +95,8 @@ export class OpenAICompletionsProtocol implements Protocol {
         : {}),
       // DashScope 等厂商需显式开启思考：仅推理系列模型随思考等级发送
       ...(this.enableThinking && reasoning && context.thinkingLevel ? { enable_thinking: true } : {}),
+      // 真实用量（E63）：流尾回传 usage chunk（仅含 usage、choices 为空），解析挂 done.usage
+      stream_options: { include_usage: true },
     };
   }
 
@@ -125,6 +128,9 @@ export class OpenAICompletionsProtocol implements Protocol {
     const thinkingGuard = new PrefixDeltaGuard();
     const tagFilter = new InlineTagFilter(() => nextToolIndex++);
     let finishReason: string | undefined;
+    // 真实用量（E63）：流尾 usage chunk（include_usage）的 prompt/completion tokens，
+    // 最后一次取值，随 done 事件挂出
+    let usage: ModelUsage | undefined;
     // E56：已上报的厂商真实错误（error 载荷），流尾不再补「流意外结束」把真实原因顶掉
     let reportedError: string | undefined;
     // E68 诊断（仅调试开关开启时收集）：被消费却未产出任何事件的 chunk 计数与样本，
@@ -141,6 +147,10 @@ export class OpenAICompletionsProtocol implements Protocol {
         // chunk——解析出真实错误原因转成统一 error 事件，此前经 firstChoice 直接 continue，
         // 原因丢失、最终只报「流意外结束」
         const chunkError = chunkErrorMessage(chunk);
+        // usage chunk（E63）：流尾仅带用量的 chunk，取值后不算「零产出」诊断；
+        // 用量与 choices 独立处理（个别厂商同 chunk 携带时不丢内容）
+        const chunkUsage = readOpenAIUsage(chunk);
+        if (chunkUsage) usage = chunkUsage;
         if (chunkError) {
           reportedError ??= chunkError;
           events.push({ type: "error", message: chunkError });
@@ -256,7 +266,7 @@ export class OpenAICompletionsProtocol implements Protocol {
             }
           }
         }
-        if (dropped && events.length === 0) {
+        if (dropped && events.length === 0 && !chunkUsage) {
           dropped.silent++;
           if (dropped.samples.length < DROPPED_SAMPLE_LIMIT) {
             dropped.samples.push(droppedChunkSample(chunk));
@@ -284,7 +294,7 @@ export class OpenAICompletionsProtocol implements Protocol {
       yield { type: "toolcall_end", index };
     }
     if (finishReason) {
-      yield { type: "done", stopReason: finishReason };
+      yield { type: "done", stopReason: finishReason, ...(usage ? { usage } : {}) };
       return;
     }
     // 已上报过厂商真实错误（E56）：不再补「流意外结束」，真实原因不被通用文案顶掉
@@ -328,6 +338,23 @@ function chunkErrorMessage(chunk: unknown): string | undefined {
     return Object.keys(error).length > 0 ? JSON.stringify(error) : undefined;
   }
   return String(error);
+}
+
+/**
+ * 取 chunk 携带的 usage（E63 真实用量）：include_usage 开启后流尾会有仅含 usage 的
+ * chunk（choices 为空），prompt_tokens/completion_tokens 转统一 ModelUsage。
+ * @param chunk 一个流式响应片段
+ * @returns 统一用量；无 usage 载荷返回 undefined
+ */
+function readOpenAIUsage(chunk: unknown): ModelUsage | undefined {
+  if (typeof chunk !== "object" || chunk === null) return undefined;
+  const usage = (chunk as { usage?: unknown }).usage;
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const tokens = usage as { prompt_tokens?: unknown; completion_tokens?: unknown };
+  const input = typeof tokens.prompt_tokens === "number" ? tokens.prompt_tokens : undefined;
+  const output = typeof tokens.completion_tokens === "number" ? tokens.completion_tokens : undefined;
+  if (input === undefined && output === undefined) return undefined;
+  return { ...(input !== undefined ? { inputTokens: input } : {}), ...(output !== undefined ? { outputTokens: output } : {}) };
 }
 
 /**
