@@ -120,7 +120,16 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
     }
     const prompt = turnInput ?? input;
-    await hooks?.emit({ type: "UserPromptSubmit", input: prompt });
+    // 会话级 hook 发射兜底（E82 审查补充）：hook 命令故障不按「启动失败」退出整个会话，
+    // 与 turn 内工具级 hook 的兜底语义对齐（CLI 经 onError 渲染后跳过本轮；TUI 上抛）
+    try {
+      await hooks?.emit({ type: "UserPromptSubmit", input: prompt });
+    } catch (err) {
+      if (!options.onError) throw err;
+      const error = err instanceof Error ? err.message : String(err);
+      options.onError(modelErrorText(error));
+      continue;
+    }
     // 后台续跑活跃（子 agent 完成唤醒 root 正在跑）时等它结束再开新轮——
     // 此时 start 会复位中断信号污染后台轮、run() 因防重入空返回导致落盘游标错位；
     // 后台轮有看门狗/超时兜底必然收尾，用户输入在此排队不丢
@@ -141,7 +150,10 @@ export async function interact(options: InteractOptions): Promise<void> {
     } catch (err) {
       // 会话期错误（E82）：CLI 注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
       // （429/5xx/网络）此前上抛穿到 main catch 按「启动失败」退出整个会话进程，
-      // 与 TUI 渲染错误块继续输入循环的行为不对称；未注入（TUI）保持原样上抛
+      // 与 TUI 渲染错误块继续输入循环的行为不对称；未注入（TUI）保持原样上抛。
+      // 覆盖面注意（审查补充）：catch 同时兜住 turn 内宿主 checkpoint 回调的落盘故障，
+      // 该类错误会被标成会话错误继续循环、随后 finally 落盘大概率再抛穿透——概率极低，
+      // 真遇到按两层报错排查即可
       if (!options.onError) throw err;
       const error = err instanceof Error ? err.message : String(err);
       options.onError(modelErrorText(error));

@@ -993,6 +993,48 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
     expect(agent.getMessages().some((m) => m.role === "user" && m.content === "/init")).toBe(false);
   });
 
+  it("/compact 成功落命令痕迹（E98，与 TUI 同口径）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 摘要调用（tools 为空）返回摘要文本；未配置压缩时 /compact 返回未压缩不落痕
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+    async function* inputs(): AsyncIterable<string> {
+      yield "写点什么";
+      yield "/compact";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+    });
+    expect(outputs.some((t) => t.includes("已压缩"))).toBe(true);
+    const commandMessage = agent.getMessages().find((m) => m.role === "user" && m.source === "command");
+    expect(commandMessage).toBeDefined();
+    expect((commandMessage as { content: string }).content).toBe("【命令】/compact");
+  });
+
   it("/init 与 /compact 落命令痕迹（E98，与 TUI 同口径）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);

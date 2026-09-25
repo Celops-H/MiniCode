@@ -353,7 +353,9 @@ export class Agent {
         if (this.stopped) return;
         if (this.turnCount >= this.maxTurns) {
           // maxTurns 耗尽收尾（E83）：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
-          // 界面永远「运行中」、排队命令不 drain——与「回复无工具调用」分支同形发射
+          // 界面永远「运行中」、排队命令不 drain——与「回复无工具调用」分支真正同形
+          // （先置 stopped：唤醒路径的 runTurn 入口分支见 stopped 直接返回，不重复发 Stop）
+          this.stopped = true;
           await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
           return;
         }
