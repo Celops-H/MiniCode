@@ -4,7 +4,7 @@ import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import type { HookBus } from "../hooks/index.js";
 import type { StreamEvent } from "../core/index.js";
-import { modelErrorText } from "../tui/state.js";
+import { modelErrorText } from "../core/index.js";
 
 /**
  * 渲染单个流式事件为文本（CLI 与 root 后台事件共用，DESIGN 15）：
