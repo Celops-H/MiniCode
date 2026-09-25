@@ -264,7 +264,6 @@ export function permissionModeLabel(mode: PermissionMode): string {
 export interface Streaming {
   text: string;
   thinking: string;
-  isError: boolean;
 }
 
 export interface TuiState {
@@ -520,7 +519,10 @@ function findActiveTool(blocks: BlockView[], index: number, turn: number): ToolB
   return undefined;
 }
 
-/** 最近一个尚未配对的工具卡片（PreToolUse 调用 id 先于卡片存在时兜底） */
+/** 最近一个尚未配对的工具卡片（PreToolUse 调用 id 先于卡片存在时兜底）。
+ *  边界（审查记录）：LIFO 顺序对「无 id 厂商 + 单次并行多个调用」会把 id 交叉回填
+ *  （结果挂到参数不符的卡上）；改 FIFO 则对陈旧残留 pending 卡场景配错，两者取其一，
+ *  按更常见的陈旧残留场景保留 LIFO */
 function findPendingTool(blocks: BlockView[]): ToolBlock | undefined {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i]!;
@@ -539,7 +541,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         streaming: {
           text: (prev?.text ?? "") + event.text,
           thinking: prev?.thinking ?? "",
-          isError: prev?.isError ?? false,
+
         },
         status: "running",
       };
@@ -551,7 +553,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         streaming: {
           text: prev?.text ?? "",
           thinking: (prev?.thinking ?? "") + event.thinking,
-          isError: prev?.isError ?? false,
+
         },
         status: "running",
       };
@@ -596,7 +598,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
             model: state.activeModel,
             text: state.streaming.text,
             thinking: state.streaming.thinking || undefined,
-            isError: state.streaming.isError,
+
             time: formatTime(),
           })
         : state;
@@ -623,6 +625,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           activeModel: undefined,
           streaming: undefined,
           status: "idle",
+          scrollOffset: 0,
           blocks: [
             ...state.blocks,
             {
@@ -640,7 +643,9 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
       // 带前缀内容的 error（E77）：按轮边界收口——半截正文/思考合并为 isError 消息块，
       // 流式区清空、回空闲。协议流中断路径（厂商断流、超时中断、流内错误载荷收尾）发
       // error 后不再发 done，不收口则半截正文永滞流式区、下一条消息发出时被静默清掉
-      //（盘上有、界面没有）；路由切换场景下备选增量到达时重建流式区，与无内容分支同语义
+      //（盘上有、界面没有）。错误原因追加进块内正文（审查修正：优雅收尾路径不抛异常、
+      // 无 loop 级 catch 补错误块，不展示原因则用户只看到半截正文不知为何断；error 后
+      // 若同流继续增量——流内错误载荷场景——流式区照常重建）
       const blocks = [
         ...state.blocks,
         {
@@ -648,7 +653,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           id: `turn_${state.blocks.length}`,
           role: "assistant" as const,
           model: state.activeModel,
-          text: state.streaming.text,
+          text: `${state.streaming.text}\n[错误] ${modelErrorText(event.message)}`,
           thinking: state.streaming.thinking || undefined,
           isError: true,
           time: formatTime(),

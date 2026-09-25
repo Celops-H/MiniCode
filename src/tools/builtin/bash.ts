@@ -190,7 +190,7 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       openStreams++;
       stream.on("data", (chunk: Buffer) => collect(chunk, decoder));
       stream.on("close", () => {
-        // 流关闭 flush 解码器残料（E91）：尾端被劈开的多字节字符按原样补齐，不丢字
+        // 流关闭 flush 解码器残料（E91）：完整字符不丢、状态不跨流污染；真不完整的尾字节按 U+FFFD 产出
         appendText(decoder.end());
         openStreams--;
         maybeSettle();

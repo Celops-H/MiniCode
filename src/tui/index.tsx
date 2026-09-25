@@ -264,7 +264,8 @@ async function runTuiSession(opts: {
 }): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState }> {
   const { store, models, config, session, agents, thinkingLevelBox, permissionModeBox } = opts;
   // hook stderr 通道（E95）：可变盒子由 runTui 挂载后指向 toast，hook 观测输出不直写
-  // stderr（全屏渲染下会以裸文本插进渲染帧）
+  // stderr（全屏渲染下会以裸文本插进渲染帧）。盒子指向 toast 前的窗口期输出静默丢弃
+  // （当前装配顺序下无事件落在该窗口；若调整装配顺序需留意）
   const hookStderrBox: { value?: (text: string) => void } = {};
   const hooks = buildHookBus(config.hooks, { onStderr: (text) => hookStderrBox.value?.(text) }) ?? new HookBus();
   const modelId = session.meta.model;

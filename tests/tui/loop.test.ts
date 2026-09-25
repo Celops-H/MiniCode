@@ -469,7 +469,8 @@ describe("流中断 error 按轮边界收口（E77）", () => {
     expect(last).toMatchObject({
       kind: "message",
       role: "assistant",
-      text: "半截正文",
+      // 正文含错误原因（审查修正：优雅收尾路径无处展示原因）
+      text: "半截正文" + String.fromCharCode(10) + "[错误] 流意外结束（未收到 finish_reason）",
       isError: true,
     });
   });
