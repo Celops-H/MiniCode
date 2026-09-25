@@ -1,7 +1,7 @@
 /**
  * 厂商预设（种子模板）：CLI/TUI 同源共享——全局配置播种按这份列表写 providers，
  * /connect 弹窗按这份列表展示。key 不进预设：只写 baseUrl/apiKeyEnv（环境变量名），
- * key 由 /connect 写项目 .env 或用户自设环境变量。
+ * key 由 /connect 写用户级全局配置的 provider apiKey 字段（E27，项目目录不落 .env）或用户自设环境变量。
  */
 
 /** 供应商预设：id 即 provider id，写入 config.providers；apiKeyEnv 即写入 .env 的环境变量名 */

@@ -278,7 +278,7 @@ export interface TuiState {
   modelLabel: string;
   /** 当前权限模式（default/plan/bypassPermissions）：Shift+Tab 切换，回灌后端 PermissionPipeline；显示名见 permissionModeLabel */
   permissionMode: PermissionMode;
-  /** 思考等级（/@/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
+  /** 思考等级（/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
   /** 本轮实际产出模型（E18/E70）：轮开始（UserPromptSubmit）快照当前模型，回退事件覆盖；
    *  done 落块作署名，工具循环续轮保留、回合结束清除 */

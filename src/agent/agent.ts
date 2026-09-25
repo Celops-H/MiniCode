@@ -90,7 +90,7 @@ export interface AgentOptions {
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（DESIGN 9.1 ①，测试可注入 tmp 目录） */
   outputDir?: string;
-  /** 思考等级活引用（\`/@/model 左右调整实时生效\`）：每轮组装 Context 时读一次，透传 reasoning_effort（仅支持的厂商） */
+  /** 思考等级活引用（/model 左右调整实时生效）：每轮组装 Context 时读一次，透传 reasoning_effort（仅支持的厂商） */
   thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2）；缺省进程 cwd */
   cwd?: string;
@@ -102,7 +102,7 @@ export interface AgentOptions {
   checkpoint?: (messages: Message[]) => Promise<void> | void;
   /** 启用会话记忆（DESIGN 9.7）：每轮结束后模型增量维护记忆，压缩时用记忆替代现场摘要省模型调用 */
   memory?: boolean;
-  /** 只读快工具正常执行超时（ms）：glob/read/grep 等本应秒回，异常挂起时兜底强制失败；默认 10s */
+  /** 只读快工具正常执行超时（ms）：glob/read/grep 等本应秒回，异常挂起时兜底强制失败；默认 60s */
   toolTimeoutMs?: number;
   /** 归属的团队（DESIGN 11.1）：传入即在多 agent 环境注册协作工具，普通单 agent 会话不展示 */
   team?: Team;
