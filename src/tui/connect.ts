@@ -104,7 +104,9 @@ export async function connectProvider(
     // 先拉全量模型（10s 超时）：拉到即用真实列表写配置；key 无效/网络失败仅回落预设占位，
     // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）。
     // anthropic 协议端点无 OpenAI /models 拉取约定（Bearer + {data:[{id}]}），直接用
-    // 预设占位，不空耗一次注定失败的请求
+    // 预设占位，不空耗一次注定失败的请求。
+    // 拉取用固定 Bearer 认证，不带 provider 配置的 headers（E64 的 api-key 头类厂商
+    // 拉取会失败，静默回落预设占位，连接本身不受影响）
     let models = preset.models;
     let fetchedModels: number | undefined;
     if (preset.protocol !== "anthropic-messages") {

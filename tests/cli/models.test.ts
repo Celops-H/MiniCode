@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createContext } from "../../src/core/index.js";
+import { assistantMessage, createContext, toolResultMessage } from "../../src/core/index.js";
 import type { Config } from "../../src/config/index.js";
 import { buildModelClient, resolveMainModel } from "../../src/cli/models.js";
 import type { ChatCompletionsClient, ChatCompletionsClientFactory } from "../../src/llm/index.js";
@@ -326,6 +326,98 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     });
     const context = createContext("s", [], [], "high");
     for await (const _ of models.provider("my-qwen")!.stream("qwen-plus", context)) {
+      // 消费流
+    }
+    expect(requests[0]!.enable_thinking).toBe(true);
+  });
+
+  it("存量配置回填：能力位未写的预设厂商按预设默认值生效（审查补充）", async () => {
+    // 能力位进配置前播种的老 config 没有 reasoningContent 字段：按 undefined 一律当
+    // false 会让 DeepSeek 工具轮思考回传缺失 400 复发——缺省按同 id 预设回填
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "deepseek",
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "A_API_KEY",
+          models: [{ id: "deepseek-v4-pro" }],
+        },
+      ],
+    };
+    const requests: Record<string, unknown>[] = [];
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      createOpenAIClient: capturingFactory(requests),
+    });
+    const context = createContext("s", [
+      assistantMessage([
+        { type: "thinking", thinking: "先读文件" },
+        { type: "tool_call", id: "call_1", name: "read", input: { path: "a.ts" } },
+      ]),
+      toolResultMessage("call_1", "read", "内容"),
+    ]);
+    for await (const _ of models.provider("deepseek")!.stream("deepseek-v4-pro", context)) {
+      // 消费流
+    }
+    const assistant = (requests[0]!.messages as Array<Record<string, unknown>>)[1]!;
+    expect(assistant.reasoning_content).toBe("先读文件");
+  });
+
+  it("存量配置回填：用户显式写的值（含 false）优先于预设默认（审查补充）", async () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "deepseek",
+          baseUrl: "https://api.deepseek.com/v1",
+          apiKeyEnv: "A_API_KEY",
+          reasoningContent: false,
+          models: [{ id: "deepseek-v4-pro" }],
+        },
+      ],
+    };
+    const requests: Record<string, unknown>[] = [];
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      createOpenAIClient: capturingFactory(requests),
+    });
+    const context = createContext("s", [
+      assistantMessage([
+        { type: "thinking", thinking: "先读文件" },
+        { type: "tool_call", id: "call_1", name: "read", input: { path: "a.ts" } },
+      ]),
+      toolResultMessage("call_1", "read", "内容"),
+    ]);
+    for await (const _ of models.provider("deepseek")!.stream("deepseek-v4-pro", context)) {
+      // 消费流
+    }
+    // 显式 false：不回传 reasoning_content（退化为 <thinking> 文本在 content 里）
+    const assistant = requests[0]!.messages as Array<Record<string, unknown>>;
+    expect(assistant[1]!.reasoning_content).toBeUndefined();
+    expect(JSON.stringify(assistant[1])).toContain("<thinking>");
+  });
+
+  it("存量配置回填：模型 reasoning 标记按预设推理系列名单补齐（审查补充）", async () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "qwen",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          apiKeyEnv: "A_API_KEY",
+          models: [{ id: "qwen-plus" }],
+        },
+      ],
+    };
+    const requests: Record<string, unknown>[] = [];
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      createOpenAIClient: capturingFactory(requests),
+    });
+    // 模型未标 reasoning：按预设名单回填，思考等级经 enable_thinking 下发
+    const context = createContext("s", [], [], "high");
+    for await (const _ of models.provider("qwen")!.stream("qwen-plus", context)) {
       // 消费流
     }
     expect(requests[0]!.enable_thinking).toBe(true);

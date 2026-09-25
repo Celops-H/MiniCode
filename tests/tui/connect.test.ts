@@ -16,9 +16,18 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
   const file = path.join(dir, "config.json");
   try {
     await writeGlobalConfig(file, deepseek, "sk-123");
-    const parsed = JSON.parse(await readFile(file, "utf8")) as { providers: unknown[]; modelChain?: string[] };
+    const parsed = JSON.parse(await readFile(file, "utf8")) as {
+      providers: Array<{ id: string; apiKeyEnv: string; apiKey?: string; reasoningContent?: boolean; models: Array<{ id: string; reasoning?: boolean }> }>;
+      modelChain?: string[];
+    };
     expect(parsed.providers).toHaveLength(1);
     expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", apiKey: "sk-123" });
+    // 能力开关随预设落盘（E60）：推理厂商标记 + 预设内模型标 reasoning
+    expect(parsed.providers[0]?.reasoningContent).toBe(true);
+    expect(parsed.providers[0]?.models).toEqual([
+      { id: "deepseek-v4-pro", reasoning: true },
+      { id: "deepseek-v4-flash", reasoning: true },
+    ]);
     // 连接只把供应商加进列表，不改优先级链——当前会话与模型保持（用 /model 切模型）
     expect(parsed.modelChain).toBeUndefined();
   } finally {
