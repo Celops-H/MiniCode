@@ -16,6 +16,14 @@ describe("PROVIDER_PRESETS（厂商预设）", () => {
     }
   });
 
+  it("能力位名单自洽：reasoningModels 是 models 的子集（笔误会静默丢标记）", () => {
+    for (const p of PROVIDER_PRESETS) {
+      for (const id of p.reasoningModels ?? []) {
+        expect(p.models, `${p.id} 的 reasoningModels 含未声明模型 ${id}`).toContain(id);
+      }
+    }
+  });
+
   it("Anthropic 兼容条目显式标注协议，其余缺省 openai-chat-completions", () => {
     const anthropicIds = ["deepseek-anthropic", "moonshot-anthropic", "zhipu-coding"];
     for (const p of PROVIDER_PRESETS) {

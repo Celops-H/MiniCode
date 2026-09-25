@@ -40,13 +40,16 @@ export const providerConfigSchema = z
      *  无签名历史 thinking 块的二轮 400；GLM/Kimi/DeepSeek 兼容端点不校验，缺省 false */
     requireThinkingSignature: z.boolean().optional(),
     /** 推理厂商（DeepSeek 等）：assistant 思考回传为 reasoning_content 字段，工具调用后
-     *  必须回传否则厂商 400；有思考内容才发，缺省 false（E60） */
+     *  必须回传否则厂商 400；有思考内容才发，缺省 false。仅 openai-chat-completions
+     *  协议有意义（anthropic 协议不消费，E60） */
     reasoningContent: z.boolean().optional(),
     /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系）：随思考等级仅对 reasoning 模型
-     *  下发，其余厂商或非推理模型发该字段可能 400（E60） */
+     *  下发，其余厂商或非推理模型发该字段可能 400（E60）。仅 openai-chat-completions
+     *  协议有意义 */
     reasoningEffort: z.boolean().optional(),
     /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：随思考等级仅对
-     *  reasoning 模型发送，否则思考等级静默无效（E60） */
+     *  reasoning 模型发送，否则思考等级静默无效（E60）。仅 openai-chat-completions
+     *  协议有意义 */
     enableThinking: z.boolean().optional(),
     /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头、
      *  anthropic-beta 等，E64） */

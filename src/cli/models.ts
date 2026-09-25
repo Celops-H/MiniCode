@@ -1,4 +1,5 @@
 import type { Config } from "../config/index.js";
+import { PROVIDER_PRESETS } from "../config/presets.js";
 import { resolveAuth } from "../llm/auth.js";
 import {
   AnthropicCompatibleProvider,
@@ -11,6 +12,9 @@ import type { AnthropicMessagesClient, AnthropicMessagesClientFactory, ChatCompl
 /** 可用厂商为零时的启动报错（无任何兜底：列表里出现的模型一定有 key，无例外） */
 export const NO_PROVIDER_ERROR =
   "未配置任何可用厂商：请 /connect 连接供应商（或配置对应 API key 环境变量），或编辑 ~/.minicode/config.json";
+
+/** 预设按 provider id 索引：能力位缺省回填用（存量配置兼容，见 buildModelClient） */
+const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
 
 /**
  * 按配置构建模型客户端：config 配置了 providers → 注册多厂商 Provider（按 provider
@@ -62,6 +66,14 @@ export function buildModelClient(
   const seenModelIds = new Set<string>();
   for (const provider of usable) {
     const protocol = provider.protocol ?? "openai-chat-completions";
+    // 能力位缺省回填预设默认值（存量配置兼容）：能力位进配置前播种的老 config 没有
+    // 这些字段，若按 undefined 一律当 false，DeepSeek 工具轮思考回传缺失 400 等
+    // 已修问题会在存量用户上复发。字段未写（undefined）时按同 id 预设补默认，
+    // 用户显式写的值（含 false）优先——只填空不覆盖，用户配置仍是权威
+    const preset = PRESET_BY_ID.get(provider.id);
+    const reasoningContent = provider.reasoningContent ?? preset?.reasoningContent;
+    const reasoningEffort = provider.reasoningEffort ?? preset?.reasoningEffort;
+    const enableThinking = provider.enableThinking ?? preset?.enableThinking;
     const modelInfos = provider.models.map((m) => {
       const qualified = seenModelIds.has(m.id) ? `${m.id}@${provider.id}` : undefined;
       seenModelIds.add(m.id);
@@ -73,8 +85,9 @@ export function buildModelClient(
         providerId: provider.id,
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens,
-        // 推理系列模型能力位（E60）：思考类请求参数仅对推理系列模型下发
-        reasoning: m.reasoning,
+        // 推理系列模型能力位（E60）：思考类请求参数仅对推理系列模型下发；
+        // 未标记的模型按预设的推理系列名单回填
+        reasoning: m.reasoning ?? preset?.reasoningModels?.includes(m.id),
       };
     });
     if (protocol === "anthropic-messages") {
@@ -103,11 +116,12 @@ export function buildModelClient(
           apiKeyEnv: provider.apiKeyEnv,
           apiKey: provider.apiKey,
           env,
-          // 厂商能力开关（E60）：一律来自 provider 配置字段，不再按 provider.id 硬编码
-          // （自建 provider 与聚合商同样可表达；粒度与语义见 config schema 与 BACKEND §5）
-          reasoningContent: provider.reasoningContent,
-          reasoningEffort: provider.reasoningEffort,
-          enableThinking: provider.enableThinking,
+          // 厂商能力开关（E60）：一律来自 provider 配置字段（缺省按预设回填），
+          // 不再按 provider.id 硬编码（自建 provider 与聚合商同样可表达；粒度与语义
+          // 见 config schema 与 BACKEND §5）
+          reasoningContent,
+          reasoningEffort,
+          enableThinking,
           headers: provider.headers,
           models: modelInfos,
           // E68 诊断开关（调试排查「流活跃但零输出」的静默卡死）：config.debug.streamChunks

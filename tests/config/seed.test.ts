@@ -35,6 +35,17 @@ describe("ensureGlobalConfigSeed（全局配置播种）", () => {
       // key 不播种：只写环境变量名，不带 key 值
       expect(Object.keys(p).some((k) => /key/i.test(k) && k !== "apiKeyEnv")).toBe(false);
     }
+    // 能力开关与模型 reasoning 标记随预设播种（E60）：deepseek 标思考回传、
+    // openai 标 reasoning_effort、qwen 标 enable_thinking，名单内模型标 reasoning
+    const byId = new Map(providers.map((p) => [p.id as string, p]));
+    expect(byId.get("deepseek")).toMatchObject({ reasoningContent: true });
+    expect(byId.get("openai")).toMatchObject({ reasoningEffort: true });
+    expect(byId.get("qwen")).toMatchObject({ enableThinking: true });
+    expect(byId.get("deepseek")?.models).toEqual([
+      { id: "deepseek-v4-pro", reasoning: true },
+      { id: "deepseek-v4-flash", reasoning: true },
+    ]);
+    expect(byId.get("openai")?.models).toEqual([{ id: "gpt-4o" }, { id: "gpt-4o-mini" }]);
     // 种子必须能过配置 schema（播种即合法，loadConfig 不因种子报错）
     expect(() => configSchema.parse(raw)).not.toThrow();
   });
