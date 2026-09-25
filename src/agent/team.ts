@@ -31,7 +31,7 @@ export interface TeamOptions {
   maxAgents?: number;
   /** spawn 深度上限（root=0，递归防护）；缺省 2（main→子→孙，用户对齐 2026-08-27：树形协作） */
   maxDepth?: number;
-  /** 同时推进的 agent 数上限；缺省 4（DESIGN 11.7） */
+  /** 同时推进的 agent 数上限；缺省 4（DESIGN 11.2 并发调度） */
   maxConcurrent?: number;
   /** 启用 Git Worktree 隔离：子 agent 各自独立工作区（DESIGN 4.2）；非 git 仓库时自动忽略 */
   worktrees?: boolean;

@@ -370,7 +370,7 @@ export function createSessionAgent(options: {
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;
-  /** 思考等级活引用（/@/model 左右调整实时生效）：每轮读一次透传 reasoning_effort（仅支持的厂商） */
+  /** 思考等级活引用（/model 左右调整实时生效）：每轮读一次透传 reasoning_effort（仅支持的厂商） */
   thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论） */
   onRootEvent?: (event: StreamEvent) => void;

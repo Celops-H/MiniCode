@@ -1,7 +1,7 @@
 /**
  * TUI 驱动循环（R1b）：完整交互闭环——store 状态通道 + interact 接入 + 渲染挂载。
  * 交互经验继承 M4.3（tui-m43-ansi 的 loop.ts）：approver 待批队列一次放行全部、/compact 运行守卫、
- * 错误渲染进消息区不退出、turn 内打断、modal 态保留 Ctrl+C/D、双渲染流（onEvent/onRootEvent）都接。
+ * 错误渲染进消息区不退出、turn 内打断（Esc）、modal 态保留 Ctrl+D 退出、双渲染流（onEvent/onRootEvent）都接。
  * 渲染：runTui 挂载 <App/>（opentui renderer），键盘经 App useKeyboard → mapKey → handleAction。
  */
 import { createStore, reconcile } from "solid-js/store";
@@ -84,7 +84,7 @@ export interface TuiLoopOptions {
   permissionMode?: { value: PermissionMode };
   /** 思考等级可变盒子（/model 左右调整；装配层经 Agent.thinkingLevelRef 每轮透传 reasoning_effort） */
   thinkingLevel?: { value: ThinkingLevel | undefined };
-  /** 全部配置模型列表（/@/model 弹窗数据源） */
+  /** 全部配置模型列表（/model 弹窗数据源） */
   modelList?: Array<{ id: string }>;
   /** 已配置 MCP 服务（/mcp 面板数据源，BACKEND §19） */
   mcpServers?: Record<string, McpServerConfig>;
@@ -327,7 +327,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let lastEscAt = 0;
   /** 权限模式盒子（Shift+Tab 切换；装配层 PermissionPipeline 用它做活引用，见 assemble） */
   const modeBox: { value: PermissionMode } = options.permissionMode ?? { value: "default" };
-  /** 思考等级盒子（/@/model 左右调整；装配层 Agent.thinkingLevelRef 每轮读它透传） */
+  /** 思考等级盒子（/model 左右调整；装配层 Agent.thinkingLevelRef 每轮读它透传） */
   const thinkingBox: { value: ThinkingLevel | undefined } = options.thinkingLevel ?? { value: undefined };
 
   const commit = (next: TuiState): void => setState(reconcile(next));

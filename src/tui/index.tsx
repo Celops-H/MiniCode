@@ -162,7 +162,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // reconfigure 重建模型客户端时重置重收
   let modelWarnings: string[] = startup.warnings;
   let session = await resolveInitialSession(options, store, modelId);
-  // 思考等级盒子跨 reconfigure 持久：/@/model 设置后切模型/换厂商不丢
+  // 思考等级盒子跨 reconfigure 持久：/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
   // 权限模式盒子上提到入口层（批次 9~14 审查 4c）：carry 续接的 UI 权限模式与管线实际值一致
   const permissionModeBox: { value: PermissionMode } = { value: "default" };
@@ -347,7 +347,7 @@ async function runTuiSession(opts: {
           compactConfig,
           // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
           subagentPromptSections: [instructionsSection, extensions.promptSection],
-          // 思考等级活引用：/@/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
+          // 思考等级活引用：/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
           thinkingLevelRef: () => thinkingLevelBox.value,
           // root 后台驱动（子 agent 完成唤醒续跑）的事件喂进 TUI reducer（双渲染流两侧都接）
           onRootEvent: feedRoot,
