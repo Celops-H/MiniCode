@@ -21,6 +21,7 @@ import type { Config } from "../config/index.js";
 import type { Models } from "../llm/index.js";
 import { interact, renderStreamEvent } from "./interact.js";
 import { buildModelClient, resolveMainModel } from "./models.js";
+import { rebuildIfStale } from "./staleBuild.js";
 
 /** 系统提示词（与 tui/index.tsx 同文案，P2-5 打磨；CLI/TUI 共用）：终端纯文本不渲染 Markdown 是产品约定 */
 const SYSTEM_PROMPT = [
@@ -168,6 +169,9 @@ export async function main(): Promise<void> {
     killAllBackgroundTasks();
     killAllMcpServers();
   });
+  // dist 过期自动重建（E5）：产物早于最近提交时先 pnpm build 再进界面，防拿过期产物；
+  // 源码直跑（tsx dev）与非 git 环境静默跳过
+  await rebuildIfStale();
   // 全局配置播种（BACKEND §14）：任一入口装配配置前检测，config.json 缺失才按预设写种子
   await ensureGlobalConfigSeed();
   await loadDotEnv();
