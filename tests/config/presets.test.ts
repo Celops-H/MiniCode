@@ -25,7 +25,7 @@ describe("PROVIDER_PRESETS（厂商预设）", () => {
   });
 
   it("Anthropic 兼容条目显式标注协议，其余缺省 openai-chat-completions", () => {
-    const anthropicIds = ["deepseek-anthropic", "moonshot-anthropic", "zhipu-coding"];
+    const anthropicIds = ["moonshot-anthropic", "zhipu-coding"];
     for (const p of PROVIDER_PRESETS) {
       if (anthropicIds.includes(p.id)) {
         expect(p.protocol).toBe("anthropic-messages");
@@ -36,10 +36,10 @@ describe("PROVIDER_PRESETS（厂商预设）", () => {
     }
   });
 
-  it("覆盖对齐的厂商与接入方式：GLM 两条、DeepSeek/Kimi 含 Anthropic 条目", () => {
+  it("覆盖对齐的厂商与接入方式：GLM 两条、Kimi 含 Anthropic 条目", () => {
     const ids = PROVIDER_PRESETS.map((p) => p.id);
     expect(ids).toEqual(
-      expect.arrayContaining(["zhipu", "zhipu-coding", "deepseek", "deepseek-anthropic", "moonshot", "moonshot-anthropic"]),
+      expect.arrayContaining(["zhipu", "zhipu-coding", "deepseek", "moonshot", "moonshot-anthropic"]),
     );
   });
 });

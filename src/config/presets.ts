@@ -63,16 +63,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "deepseek-v4-pro",
   },
   {
-    // DeepSeek 官方 Anthropic 兼容端点（api-docs.deepseek.com/guides/anthropic_api）
-    id: "deepseek-anthropic",
-    name: "DeepSeek（Anthropic 兼容）",
-    baseUrl: "https://api.deepseek.com/anthropic",
-    apiKeyEnv: "DEEPSEEK_API_KEY",
-    protocol: "anthropic-messages",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
-    defaultModel: "deepseek-v4-pro",
-  },
-  {
     id: "moonshot",
     name: "Moonshot（Kimi，OpenAI 兼容）",
     baseUrl: "https://api.moonshot.cn/v1",

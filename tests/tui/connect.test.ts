@@ -78,7 +78,7 @@ it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预
   const globalFile = path.join(dir, "config.json");
   try {
     let fetchCalls = 0;
-    const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "deepseek-anthropic")!;
+    const anthropicPreset = PROVIDER_PRESETS.find((p) => p.id === "moonshot-anthropic")!;
     const ok = await connectProvider(anthropicPreset, "sk-123", {
       globalConfigFile: globalFile,
       fetchImpl: async () => {
@@ -91,7 +91,7 @@ it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预
     const config = JSON.parse(await readFile(globalFile, "utf8")) as {
       providers: Array<{ id: string; protocol?: string; models: { id: string }[] }>;
     };
-    expect(config.providers[0]).toMatchObject({ id: "deepseek-anthropic", protocol: "anthropic-messages" });
+    expect(config.providers[0]).toMatchObject({ id: "moonshot-anthropic", protocol: "anthropic-messages" });
     expect(config.providers[0]?.models.map((m) => m.id)).toEqual(anthropicPreset.models);
   } finally {
     await rm(dir, { recursive: true, force: true });
