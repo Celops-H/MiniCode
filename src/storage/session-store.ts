@@ -66,6 +66,10 @@ export class SessionStore {
     if (typeof parsed?.id !== "string" || parsed.id.length === 0) {
       throw new Error(`会话元数据损坏（${id}.meta.json 缺少会话 id）：无法加载，可删除该会话文件后重建`);
     }
+    if (parsed.id !== id) {
+      // meta.id 与文件名不一致（手改/拷贝改名）：后续 flush 会按 meta.id 写出另一对文件（审查补充）
+      throw new Error(`会话元数据损坏（${id}.meta.json 的 id 与文件名不一致）：无法加载，可删除该会话文件后重建`);
+    }
     // 旧会话无 formatVersion 字段，视为版本 1
     const meta: SessionMeta = { ...parsed, formatVersion: parsed.formatVersion ?? 1 };
     const messages = await readJsonl<Message>(this.messageFile(id));

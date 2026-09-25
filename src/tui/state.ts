@@ -1046,7 +1046,8 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
         historyIndex: -1,
         sel: null,
       };
-      return { ...state, queue: state.queue.slice(0, -1), prompt };
+      // 恢复后重算候选可能弹层残留（审查修正）：恢复文本未必以 / 开头，直接清掉候选
+      return { ...state, queue: state.queue.slice(0, -1), prompt, candidate: undefined };
     }
     case "clear-input":
       return { ...state, prompt: emptyPrompt(state.prompt.history), candidate: undefined };

@@ -258,7 +258,7 @@ export class McpClient {
       // 带 method 字段的一律跳过（E85）：JSON-RPC 响应必无 method——server→client 请求
       // （带 id 无 result）撞上在途请求 id 时此前会以 undefined resolve，tools/call 抛
       // TypeError、握手期误判启动失败；此判断同时滤掉通知与请求
-      if (msg.method !== undefined) continue;
+      if (typeof msg.method === "string") continue; // JSON-RPC 请求/通知的 method 为字符串；响应必无 method
       if (typeof msg.id !== "number") continue; // 无 id 的通知（如 tools/list_changed）：本版不处理
       const entry = this.pending.get(msg.id);
       if (!entry) continue;

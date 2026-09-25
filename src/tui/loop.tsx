@@ -311,8 +311,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     });
   };
   /** 排队命令逐个出队执行（E35/E52）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流；
-   *  出队同步移除排队条条目。root 空闲但子 agent 活跃时 handleCommand 的在途判定会重新入队，
-   *  等子 agent 收尾（AgentCompleted/Interrupted 触发 drain）再执行 */
+   *  出队同步移除排队条条目。调用方须先确认不在途（root Stop/子 agent 收尾触发点都带
+   *  inFlight 前置，审查修正）：否则 handleCommand 会把出队命令重新入队，顺序翻转且误清输入框 */
   const drainQueuedCommands = (): void => {
     if (pendingCommands.length === 0) return;
     const next = pendingCommands.shift()!;
@@ -454,7 +454,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           suppressPending = true;
           commit({
             ...state,
-            blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
+            blocks: [...state.blocks, { kind: "command", id: `cmd_${++queueSeq}`, text: command, time: formatTime() }],
             prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
             candidate: undefined,
           });
@@ -480,7 +480,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      void openSessionModal().catch(() => undefined);
+      // 面板数据读取失败（如 sessionsDir 不可读）给提示而非静默无反应（审查补充：
+      // listSessions 非 ENOENT 上抛后吞错会让权限问题更难排查）
+      void openSessionModal().catch((err) => showToast(`打开会话面板失败：${err instanceof Error ? err.message : String(err)}`));
       return;
     }
     if (command === "/connect") {
@@ -632,7 +634,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         const n = agent.getMessages().length;
         commit({
           ...state,
-          blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
+          blocks: [...state.blocks, { kind: "command", id: `cmd_${++queueSeq}`, text: command, time: formatTime() }],
         });
         showToast(`会话历史已压缩${guidance ? "（按压缩指导）" : ""}：当前 ${n} 条消息，关键上下文已保留`);
       } else {
@@ -996,12 +998,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
       case "queue-cancel": {
         // Ctrl+P 取消最后一个排队项（E72）：reducer 从排队条弹出并恢复到输入框；
-        // 传输队列（pendingInputs/pendingCommands）同步移除同文本末项，两边一致
+        // 传输队列（pendingInputs/pendingCommands）同步移除同文本末项，两边一致。
+        // 传输队列找不到（审查修正：消息已被 interact 取走、UserPromptSubmit 尚未消费的
+        // 毫秒级窗口）不动——「取消」只对尚未消费的项生效，防已发出的消息被恢复进输入框
         const item = state.queue.at(-1);
         if (!item) return;
         const transport = item.kind === "message" ? pendingInputs : pendingCommands;
         const idx = transport.lastIndexOf(item.text);
-        if (idx >= 0) transport.splice(idx, 1);
+        if (idx < 0) return;
+        transport.splice(idx, 1);
         commit(reduceAction(state, action));
         return;
       }
@@ -1124,10 +1129,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         });
       }
       commit(reduceHook(state, e));
-      // 排队命令出队（E35）：只认 root 的 Stop——子 agent 收尾不触发（运行中守卫会重复入队、
-      // 后台迟到 Stop 会在 root 空闲时抢跑命令）；一轮结束按序执行下一条（消息经 pendingInputs
-      // 由 interact 消费，其收尾 Stop 自然驱动后续出队；/compact 收尾在 compactAsync 里补触发）
-      if (isRoot) drainQueuedCommands();
+      // 排队命令出队（E35/E52）：只认 root 的 Stop，且仅在途判定满足（审查修正：子 agent/
+      // 压缩仍在途时出队会被 handleCommand 重新入队，排队顺序翻转并误清输入草稿——留在
+      // 队列等 AgentCompleted/压缩收尾触发 drain）。一轮结束按序执行下一条（消息经
+      // pendingInputs 由 interact 消费，其收尾 Stop 自然驱动后续出队；/compact 收尾在
+      // compactAsync 里补触发）
+      if (isRoot && !inFlight()) drainQueuedCommands();
     }),
   ];
 
