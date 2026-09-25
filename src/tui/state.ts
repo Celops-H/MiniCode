@@ -641,7 +641,33 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           ],
         };
       }
-      return { ...state, streaming: { ...state.streaming, isError: true } };
+      // 带前缀内容的 error（E77）：按轮边界收口——半截正文/思考合并为 isError 消息块，
+      // 流式区清空、回空闲。协议流中断路径（厂商断流、超时中断、流内错误载荷收尾）发
+      // error 后不再发 done，不收口则半截正文永滞流式区、下一条消息发出时被静默清掉
+      //（盘上有、界面没有）；路由切换场景下备选增量到达时重建流式区，与无内容分支同语义
+      const blocks = [
+        ...state.blocks,
+        {
+          kind: "message" as const,
+          id: `turn_${state.blocks.length}`,
+          role: "assistant" as const,
+          model: state.activeModel,
+          text: state.streaming.text,
+          thinking: state.streaming.thinking || undefined,
+          isError: true,
+          time: formatTime(),
+          thinkingCollapsed: true,
+        },
+      ];
+      return {
+        ...state,
+        activeModel: undefined,
+        streaming: undefined,
+        status: "idle",
+        scrollOffset: 0,
+        turnIndex: state.turnIndex + 1,
+        blocks,
+      };
     }
     case "model_fallback":
       // 模型路由切换观察事件：追加常驻通知行（主模型不可用自动切备选），消息列表展示而非一闪而过；
@@ -748,7 +774,16 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       const card = findToolById(state.blocks, event.toolCallId) ?? findPendingTool(state.blocks);
       const blocks = card
         ? state.blocks.map((b) =>
-            b === card ? { ...b, status: "running" as const, name: event.toolName || b.name } : b,
+            b === card
+              ? {
+                  ...b,
+                  status: "running" as const,
+                  name: event.toolName || b.name,
+                  // 兜底命中（无 id 厂商后端合成 call_N）时一并回填 id（E84）：
+                  // PostToolUse/Failure 按 id 配对，不回填则结果事件永久配不上、卡片停转
+                  id: b.id ?? event.toolCallId,
+                }
+              : b,
           )
         : [
             ...state.blocks,

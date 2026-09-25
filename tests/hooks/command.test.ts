@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCommandHook, HookBus } from "../../src/hooks/index.js";
 
 /** 生成一个读 stdin 事件并按脚本逻辑回应的 node 命令（避免 shell 引号转义） */
@@ -46,6 +46,27 @@ describe("命令 hook 适配器（DESIGN 13）", () => {
       { timeoutMs: 5000 },
     );
     expect(await ask({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {}, agentPath: "/root" })).toBe("ask");
+  });
+
+  it("stderr 观测输出经注入通道转发（E95），不再直写本进程 stderr", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "hook-test-"));
+    const command = makeHookCommand(
+      dir,
+      `process.stderr.write("hook 侧诊断信息");
+process.stdout.write(JSON.stringify({ verdict: "allow" }));`,
+    );
+    const captured: string[] = [];
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const handler = createCommandHook(command, { timeoutMs: 5000, onStderr: (text) => captured.push(text) });
+      const verdict = await handler({ type: "PreToolUse", toolCallId: "t1", toolName: "read", input: {}, agentPath: "/root" });
+      expect(verdict).toBe("allow");
+    } finally {
+      stderrSpy.mockRestore();
+    }
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain("hook 侧诊断信息");
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it("PreToolUse：非零退出 / 非 JSON 输出 / 超时 → 保守 deny", async () => {

@@ -6,6 +6,11 @@ import type { HookEvent, HookHandler, HookVerdict } from "./types.js";
 export interface CommandHookOptions {
   /** 命令超时 ms，默认 60000；超时视为失败 */
   timeoutMs?: number;
+  /**
+   * 命令 stderr 观测输出通道（E95）：宿主注入——CLI 缺省直写本进程 stderr，TUI 注入
+   * toast/日志通道（全屏渲染下直写 stderr 会以裸文本插进渲染帧）。不注入时保持直写。
+   */
+  onStderr?: (text: string) => void;
 }
 
 /**
@@ -24,7 +29,7 @@ export interface CommandHookOptions {
 export function createCommandHook(command: string, options: CommandHookOptions = {}): HookHandler<HookEvent> {
   const timeoutMs = options.timeoutMs ?? 60_000;
   return async (event) => {
-    const result = await runCommand(command, event, timeoutMs);
+    const result = await runCommand(command, event, timeoutMs, options.onStderr);
     if (event.type !== "PreToolUse") return undefined; // 观测事件：执行即完成
     if (!result.ok) return "deny"; // 命令失败/超时/解析失败：保守拒绝
     return result.verdict;
@@ -37,8 +42,13 @@ interface CommandResult {
   verdict: HookVerdict;
 }
 
-/** 执行命令：写事件 JSON 到 stdin，读 stdout 解析裁决 */
-function runCommand(command: string, event: HookEvent, timeoutMs: number): Promise<CommandResult> {
+/** 执行命令：写事件 JSON 到 stdin，读 stdout 解析裁决；stderr 经宿主通道转发（缺省直写） */
+function runCommand(
+  command: string,
+  event: HookEvent,
+  timeoutMs: number,
+  onStderr?: (text: string) => void,
+): Promise<CommandResult> {
   return new Promise((resolve) => {
     // Unix 用 detached 独立成进程组，便于超时按进程树终止（对齐后台任务的清理方式）
     const child = spawn(command, { shell: true, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
@@ -77,8 +87,11 @@ function runCommand(command: string, event: HookEvent, timeoutMs: number): Promi
       settled = true;
       clearTimeout(timer);
       if (stderr) {
-        // 命令 stderr 作观测输出转发，不影响裁决
-        process.stderr.write(`[hook] ${command}: ${stderr.trim()}\n`);
+        // 命令 stderr 作观测输出转发（E95）：经宿主注入的通道，不影响裁决；
+        // 缺省直写本进程 stderr（CLI 形态）
+        const text = `[hook] ${command}: ${stderr.trim()}`;
+        if (onStderr) onStderr(text);
+        else process.stderr.write(`${text}\n`);
       }
       if (code !== 0) {
         resolve({ ok: false, verdict: "deny" });

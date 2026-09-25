@@ -108,6 +108,9 @@ export interface TuiLoopOptions {
   carryState?: TuiState;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
+  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
+   *  全屏渲染下 hook stderr 直写会插花渲染帧，TUI 形态落 toast */
+  hookStderr?: { value?: (text: string) => void };
 }
 
 /** 共享 store 的 setter 类型：取 createStore 派生签名，保证 reconcile 等既有用法类型不变 */
@@ -237,6 +240,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         reconcile({
           ...(options.carryState ?? initState(session.getMessages(), session.meta.title)),
           modelLabel,
+          // 权限模式跨会话持久（modeBox 活读）：状态行显示与实际裁决一致（E78）——
+          // 此前 resetView 重建 state 硬编码 default，plan/auto 下切会话显示失真
+          permissionMode: options.permissionMode?.value ?? "default",
         }),
       );
     } else {
@@ -251,6 +257,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     );
     state = ownedState;
     setState = ownedSetState;
+    // 自建路径同样同步权限模式（E78）：initState 缺省 default，modeBox 已是 plan/auto 时
+    // 状态行与实际裁决一致
+    if (!options.carryState && options.permissionMode && options.permissionMode.value !== "default") {
+      setState({ permissionMode: options.permissionMode.value });
+    }
   }
 
   let agent: Agent;
@@ -340,6 +351,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }, TOAST_MS);
     }
   };
+  // hook stderr 通道指向 toast（E95）：命令 hook 的观测输出不再直写 stderr（全屏渲染
+  // 下以裸文本插进渲染帧），改落界面 toast
+  if (options.hookStderr) options.hookStderr.value = showToast;
   // 新轮接管上一轮遗留 toast（carry 续接保留界面内容）：旧轮退出已取消其 5 秒过期定时器，
   // 不重新挂会一直挂着；也不能在入口层 reconfigure 轮无条件清——那会把刚显示的成功提示
   //（模型已切换/已连接/配置已写入）一起吞掉。这里为其重新挂过期定时器，正常到期消失
@@ -795,6 +809,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             thinkingBox.value = state.modal.thinkingLevel;
             commit({ ...state, modal: undefined, thinkingLevel: state.modal.thinkingLevel });
             if (picked && picked.id !== session.meta.model) {
+              // 切模型先落盘再生效（E97）：写盘失败时回滚内存 meta——先改内存后写盘的
+              // 旧实现失败只 toast，下一次轮末 flush 把错值落盘，重启续跑与「切换失败」提示矛盾
+              const previousModel = session.meta.model;
               session.meta.model = picked.id;
               void store
                 .rewriteMessages(session, session.getMessages())
@@ -806,7 +823,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
                   // 此前带 switchTo 会让装配层清 carry 并按盘重建，出错轮的消息丢失
                   exitLoop();
                 })
-                .catch(() => showToast("切换模型失败：写入会话文件出错"));
+                .catch(() => {
+                  session.meta.model = previousModel;
+                  showToast("切换模型失败：写入会话文件出错（已还原原模型）");
+                });
             } else {
               showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
             }
