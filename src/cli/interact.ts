@@ -4,6 +4,7 @@ import type { Agent } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import type { HookBus } from "../hooks/index.js";
 import type { StreamEvent } from "../core/index.js";
+import { modelErrorText } from "../tui/state.js";
 
 /**
  * 渲染单个流式事件为文本（CLI 与 root 后台事件共用，DESIGN 15）：
@@ -50,6 +51,12 @@ export interface InteractOptions {
   hooks?: HookBus;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
+  /**
+   * 会话期错误回调（E82，CLI 注入）：run 消费抛错（单次模型链瞬时失败等）时渲染
+   * 后继续输入循环，不终止会话进程；文案经 modelErrorText 与装配期「启动失败」区分。
+   * 缺省不注入（TUI 宿主）：错误原样上抛，由 TUI 主循环 catch 渲染错误块（现状不变）。
+   */
+  onError?: (message: string) => void;
 }
 
 /**
@@ -79,6 +86,8 @@ export async function interact(options: InteractOptions): Promise<void> {
         // 带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径
         const guidance = input === "/compact" ? undefined : input.slice("/compact ".length).trim() || undefined;
         if (await agent.compactNow(guidance)) {
+          // 命令痕迹（E98）：与 TUI 同口径落命令消息，跨宿主续看同一会话命令痕迹一致
+          agent.appendCommand(guidance ? `/compact ${guidance}` : "/compact");
           await store.rewriteMessages(session, agent.getMessages());
           agent.consumeHistoryRewritten(); // 消费压缩置位的历史改写标记，防下轮误报重写
           write(guidance ? `\n[已压缩] 已按压缩指导重新摘要会话历史。\n` : "\n[已压缩] 会话历史已压缩，关键上下文已保留。\n");
@@ -90,13 +99,17 @@ export async function interact(options: InteractOptions): Promise<void> {
       if (input === "/init") {
         // 分析代码库生成/改进项目根 AGENTS.md：生成 init 提示词当作用户输入走正常回合
         // （模型用 write 工具落盘）；已存在时提示词要求不覆盖、先建议改进。
-        // 读文件失败（权限等）只报错不终止会话——命令失败不该带崩交互循环
+        // 读文件失败（权限等）只报错不终止会话——命令失败不该带崩交互循环，
+        // 且必须 continue 跳过本行（E76：字面 "/init" 落到下方会被当用户输入跑完整回合）
         try {
           const existing = await readInstructionFile(projectAgentsFile);
           write(existing ? "\n[init] 已存在 AGENTS.md，将分析并在其基础上建议改进（不覆盖）。\n" : "\n[init] 开始分析代码库，生成项目根 AGENTS.md。\n");
+          // 命令痕迹（E98）：与 TUI 同口径落命令消息（随本轮轮末落盘持久化）
+          agent.appendCommand(input);
           turnInput = buildInitPrompt(existing);
         } catch (err) {
           write(`\n[init] 读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}\n`);
+          continue;
         }
       } else if (input === "/help") {
         write("\n可用命令：/exit 退出；/compact [指导] 压缩会话历史（可附侧重指导）；/init 生成项目 AGENTS.md；/help 帮助\n");
@@ -125,6 +138,13 @@ export async function interact(options: InteractOptions): Promise<void> {
       for await (const event of agent.run()) {
         render(event);
       }
+    } catch (err) {
+      // 会话期错误（E82）：CLI 注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
+      // （429/5xx/网络）此前上抛穿到 main catch 按「启动失败」退出整个会话进程，
+      // 与 TUI 渲染错误块继续输入循环的行为不对称；未注入（TUI）保持原样上抛
+      if (!options.onError) throw err;
+      const error = err instanceof Error ? err.message : String(err);
+      options.onError(modelErrorText(error));
     } finally {
       const agentMessages = agent.getMessages();
       if (agent.consumeHistoryRewritten()) {
