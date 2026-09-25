@@ -15,17 +15,43 @@ async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
 
 const protocol = new OpenAICompletionsProtocol();
 
+/** 构造 ModelInfo（能力位测试用）：只需 id 与 reasoning 标记 */
+function modelInfo(reasoning?: boolean): { id: string; name: string; api: "openai-chat-completions"; providerId: string; reasoning?: boolean } {
+  return { id: "m", name: "m", api: "openai-chat-completions", providerId: "p", ...(reasoning ? { reasoning } : {}) };
+}
+
 describe("buildRequest：消息与工具转换", () => {
-  it("emitReasoningEffort 开关 + context.thinkingLevel → 请求体带 reasoning_effort；否则不带", () => {
+  it("emitReasoningEffort 开关 + 推理系列模型 + thinkingLevel → 带 reasoning_effort，否则不带（E60）", () => {
     const effProtocol = new OpenAICompletionsProtocol({ emitReasoningEffort: true });
-    const withEff = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium")) as { reasoning_effort?: string };
+    const withEff = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium"), modelInfo(true)) as { reasoning_effort?: string };
     expect(withEff.reasoning_effort).toBe("medium");
+    // 非推理系列模型（gpt-4o 类）：即使带 thinkingLevel 也不发（厂商对不支持的模型 400 且不可切换）
+    const notReasoning = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium"), modelInfo()) as { reasoning_effort?: string };
+    expect(notReasoning.reasoning_effort).toBeUndefined();
+    // 未传模型定义：等价于非推理模型，不发
+    const noModel = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium")) as { reasoning_effort?: string };
+    expect(noModel.reasoning_effort).toBeUndefined();
     // 无 thinkingLevel：不带该字段
-    const noLevel = effProtocol.buildRequest(createContext("s", [userMessage("hi")])) as { reasoning_effort?: string };
+    const noLevel = effProtocol.buildRequest(createContext("s", [userMessage("hi")]), modelInfo(true)) as { reasoning_effort?: string };
     expect(noLevel.reasoning_effort).toBeUndefined();
     // 未开 emit 的厂商（deepseek/qwen 等）：即使带 thinkingLevel 也不发（防 400）
-    const notEmit = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high")) as { reasoning_effort?: string };
+    const notEmit = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { reasoning_effort?: string };
     expect(notEmit.reasoning_effort).toBeUndefined();
+  });
+
+  it("enableThinking 开关 + 推理系列模型 + thinkingLevel → 带 enable_thinking: true，否则不带（E60）", () => {
+    const dashscopeProtocol = new OpenAICompletionsProtocol({ enableThinking: true });
+    const withParam = dashscopeProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
+    expect(withParam.enable_thinking).toBe(true);
+    // 非推理系列模型：不发（DashScope 对不支持思考的模型发该参数无意义）
+    const notReasoning = dashscopeProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo()) as { enable_thinking?: boolean };
+    expect(notReasoning.enable_thinking).toBeUndefined();
+    // 未设思考等级：不发（厂商默认行为）
+    const noLevel = dashscopeProtocol.buildRequest(createContext("s", [userMessage("hi")]), modelInfo(true)) as { enable_thinking?: boolean };
+    expect(noLevel.enable_thinking).toBeUndefined();
+    // 未开开关的厂商：即使带 thinkingLevel 也不发
+    const notEnabled = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
+    expect(notEnabled.enable_thinking).toBeUndefined();
   });
   it("user / assistant / tool_result 消息转换", () => {
     const context = createContext(

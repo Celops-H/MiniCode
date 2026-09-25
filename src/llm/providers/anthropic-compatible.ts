@@ -12,6 +12,13 @@ export interface AnthropicMessagesClient {
   };
 }
 
+/** Anthropic 兼容 client 工厂：headers 为 provider 配置的附加请求头（E64，经 SDK defaultHeaders 透传） */
+export type AnthropicMessagesClientFactory = (
+  apiKey: string,
+  baseUrl: string,
+  headers?: Record<string, string>,
+) => AnthropicMessagesClient;
+
 export interface AnthropicCompatibleOptions {
   id: string;
   name: string;
@@ -22,6 +29,8 @@ export interface AnthropicCompatibleOptions {
   apiKey?: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
+  /** 附加请求头，经 SDK defaultHeaders 透传（anthropic-beta 等场景，E64） */
+  headers?: Record<string, string>;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
   /** 收尾宽限窗（ms，E47）：stop_reason/message_stop 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
@@ -29,7 +38,7 @@ export interface AnthropicCompatibleOptions {
   /** Anthropic 请求默认 max_tokens（请求体必填，模型未定义时兜底） */
   defaultMaxTokens?: number;
   /** 创建 client 的工厂（测试注入 mock） */
-  createClient?: (apiKey: string, baseUrl: string) => AnthropicMessagesClient;
+  createClient?: AnthropicMessagesClientFactory;
 }
 
 /**
@@ -46,12 +55,13 @@ export class AnthropicCompatibleProvider implements Provider {
 
   private readonly protocol: AnthropicMessagesProtocol;
   private readonly modelList: ModelInfo[];
-  private readonly createClient: (apiKey: string, baseUrl: string) => AnthropicMessagesClient;
+  private readonly createClient: AnthropicMessagesClientFactory;
   private readonly streamIdleTimeoutMs: number;
   private readonly streamTailGraceMs: number;
   private readonly defaultMaxTokens: number;
   private readonly apiKeyEnv: string;
   private readonly apiKey?: string;
+  private readonly headers?: Record<string, string>;
   private client?: AnthropicMessagesClient;
 
   constructor(options: AnthropicCompatibleOptions) {
@@ -67,6 +77,7 @@ export class AnthropicCompatibleProvider implements Provider {
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
+    this.headers = options.headers;
     this.createClient = options.createClient ?? defaultAnthropicCreateClient;
   }
 
@@ -140,7 +151,7 @@ export class AnthropicCompatibleProvider implements Provider {
       // E59：文案带上具体环境变量名，用户可直接定位要配的变量
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
-    this.client ??= this.createClient(this.apiKey, this.baseUrl);
+    this.client ??= this.createClient(this.apiKey, this.baseUrl, this.headers);
     return this.client;
   }
 }
@@ -189,12 +200,18 @@ export function anthropicThinkingParam(
  * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址（Anthropic 兼容端点）
+ * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传，E64）
  * @returns Anthropic 兼容 client
  */
-export function defaultAnthropicCreateClient(apiKey: string, baseUrl: string): AnthropicMessagesClient {
+export function defaultAnthropicCreateClient(
+  apiKey: string,
+  baseUrl: string,
+  headers?: Record<string, string>,
+): AnthropicMessagesClient {
   return new Anthropic({
     baseURL: baseUrl,
     apiKey,
+    ...(headers && Object.keys(headers).length > 0 ? { defaultHeaders: headers } : {}),
     timeout: REQUEST_TIMEOUT_MS,
     maxRetries: 0,
   }) as unknown as AnthropicMessagesClient;

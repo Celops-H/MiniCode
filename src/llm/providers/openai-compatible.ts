@@ -17,6 +17,13 @@ export interface ChatCompletionsClient {
   };
 }
 
+/** OpenAI 兼容 client 工厂：headers 为 provider 配置的附加请求头（E64，经 SDK defaultHeaders 透传） */
+export type ChatCompletionsClientFactory = (
+  apiKey: string,
+  baseUrl: string,
+  headers?: Record<string, string>,
+) => ChatCompletionsClient;
+
 export interface OpenAICompatibleOptions {
   id: string;
   name: string;
@@ -29,8 +36,12 @@ export interface OpenAICompatibleOptions {
   env?: NodeJS.ProcessEnv;
   /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
   reasoningContent?: boolean;
-  /** 支持 reasoning_effort 请求参数的厂商（仅 OpenAI 系；其余厂商发该字段可能 400，不 emit） */
+  /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系；且仅对 reasoning 模型随思考等级下发，E60） */
   reasoningEffort?: boolean;
+  /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope；仅对 reasoning 模型随思考等级发送，E60） */
+  enableThinking?: boolean;
+  /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头等，E64） */
+  headers?: Record<string, string>;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
   /** 收尾宽限窗（ms，E47）：finish_reason 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
@@ -38,7 +49,7 @@ export interface OpenAICompatibleOptions {
   /** E68 诊断开关（调试排查用）：记录流解析中未产出事件的被丢弃 chunk 样本，来自 config.debug.streamChunks */
   debugDroppedChunks?: boolean;
   /** 创建 client 的工厂（测试注入 mock） */
-  createClient?: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
+  createClient?: ChatCompletionsClientFactory;
 }
 
 /** OpenAI 兼容厂商 Provider：复用 openai-chat-completions 协议，只改 baseUrl */
@@ -50,11 +61,12 @@ export class OpenAICompatibleProvider implements Provider {
 
   private readonly protocol: OpenAICompletionsProtocol;
   private readonly modelList: ModelInfo[];
-  private readonly createClient: (apiKey: string, baseUrl: string) => ChatCompletionsClient;
+  private readonly createClient: ChatCompletionsClientFactory;
   private readonly streamIdleTimeoutMs: number;
   private readonly streamTailGraceMs: number;
   private readonly apiKeyEnv: string;
   private readonly apiKey?: string;
+  private readonly headers?: Record<string, string>;
   private client?: ChatCompletionsClient;
 
   constructor(options: OpenAICompatibleOptions) {
@@ -65,6 +77,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.protocol = new OpenAICompletionsProtocol({
       reasoningContent: options.reasoningContent,
       emitReasoningEffort: options.reasoningEffort,
+      enableThinking: options.enableThinking,
       debugDroppedChunks: options.debugDroppedChunks,
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
@@ -73,6 +86,7 @@ export class OpenAICompatibleProvider implements Provider {
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
     this.apiKey = resolved.apiKey;
+    this.headers = options.headers;
     this.createClient = options.createClient ?? defaultCreateClient;
   }
 
@@ -95,7 +109,6 @@ export class OpenAICompatibleProvider implements Provider {
     context: Context,
     options?: { signal?: AbortSignal },
   ): AsyncIterable<StreamEvent> {
-    const request = this.protocol.buildRequest(context);
     // SDK 的 timeout 只覆盖响应头到达前，读流式响应体没有超时——厂商 SSE 中途静默挂起
     // （连接保持、不再推数据、也不关闭）会无限挂起（真机「卡住不返回」根因）。这里补一个
     // 流空闲超时：N 秒无新 chunk 主动中断底层请求并报错。
@@ -108,8 +121,11 @@ export class OpenAICompatibleProvider implements Provider {
       if (userSignal.aborted) controller.abort();
       else userSignal.addEventListener("abort", forwardAbort, { once: true });
     }
-    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）
-    const vendorModelId = this.modelList.find((m) => m.id === modelId)?.vendorId ?? modelId;
+    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）；
+    // 模型定义随请求传给协议——思考类请求参数按模型能力位（reasoning）决定是否下发（E60）
+    const info = this.modelList.find((m) => m.id === modelId);
+    const vendorModelId = info?.vendorId ?? modelId;
+    const request = this.protocol.buildRequest(context, info);
     try {
       const stream = await this.getClient().chat.completions.create(
         {
@@ -140,7 +156,7 @@ export class OpenAICompatibleProvider implements Provider {
       // E59：文案带上具体环境变量名，用户可直接定位要配的变量
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
-    this.client ??= this.createClient(this.apiKey, this.baseUrl);
+    this.client ??= this.createClient(this.apiKey, this.baseUrl, this.headers);
     return this.client;
   }
 }
@@ -166,12 +182,18 @@ function openaiChunkFinished(chunk: unknown): boolean {
  * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址
+ * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传，E64）
  * @returns OpenAI 兼容 client
  */
-export function defaultCreateClient(apiKey: string, baseUrl: string): ChatCompletionsClient {
+export function defaultCreateClient(
+  apiKey: string,
+  baseUrl: string,
+  headers?: Record<string, string>,
+): ChatCompletionsClient {
   return new OpenAI({
     baseURL: baseUrl,
     apiKey,
+    ...(headers && Object.keys(headers).length > 0 ? { defaultHeaders: headers } : {}),
     timeout: REQUEST_TIMEOUT_MS,
     maxRetries: 0,
   }) as unknown as ChatCompletionsClient;

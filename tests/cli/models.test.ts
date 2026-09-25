@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createContext } from "../../src/core/index.js";
 import type { Config } from "../../src/config/index.js";
 import { buildModelClient, resolveMainModel } from "../../src/cli/models.js";
+import type { ChatCompletionsClient, ChatCompletionsClientFactory } from "../../src/llm/index.js";
 
 const KEYS = { A_API_KEY: "k-a", B_API_KEY: "k-b" };
 
@@ -250,5 +252,117 @@ describe("落盘 apiKey 与环境变量同权（E33）", () => {
     };
     expect(() => buildModelClient(bare, undefined, { env: {} })).toThrow();
     expect(() => resolveMainModel(bare, undefined, { env: {} })).toThrow();
+  });
+});
+
+describe("厂商能力位与请求头接线（E60/E64）", () => {
+  /** 记录请求的 mock client 工厂：请求体收进 requests，返回单 chunk 正常收尾流 */
+  function capturingFactory(requests: Record<string, unknown>[]): ChatCompletionsClientFactory {
+    return () => ({
+      chat: {
+        completions: {
+          async create(request) {
+            requests.push(request);
+            return (async function* () {
+              yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+            })();
+          },
+        },
+      },
+    }) satisfies ChatCompletionsClient;
+  }
+
+  it("能力开关来自配置字段而非 provider.id（E60）：思考参数仅对 reasoning 模型下发", async () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "my-openai",
+          baseUrl: "https://my.example.com/v1",
+          apiKeyEnv: "A_API_KEY",
+          reasoningEffort: true,
+          models: [
+            { id: "gpt-4o" },
+            { id: "o-series", reasoning: true },
+          ],
+        },
+      ],
+    };
+    const requests: Record<string, unknown>[] = [];
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      createOpenAIClient: capturingFactory(requests),
+    });
+    const context = createContext("s", [], [], "medium");
+    // 非推理模型（如 gpt-4o）：思考等级不再照发 reasoning_effort（厂商会 400 且不可切换）
+    for await (const _ of models.provider("my-openai")!.stream("gpt-4o", context)) {
+      // 消费流
+    }
+    // 推理系列模型：思考等级经 reasoning_effort 下发
+    for await (const _ of models.provider("my-openai")!.stream("o-series", context)) {
+      // 消费流
+    }
+    expect(requests[0]!.reasoning_effort).toBeUndefined();
+    expect(requests[1]!.reasoning_effort).toBe("medium");
+  });
+
+  it("enableThinking 配置对 reasoning 模型随思考等级发送 enable_thinking（E60）", async () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "my-qwen",
+          baseUrl: "https://my.example.com/v1",
+          apiKeyEnv: "A_API_KEY",
+          enableThinking: true,
+          models: [{ id: "qwen-plus", reasoning: true }],
+        },
+      ],
+    };
+    const requests: Record<string, unknown>[] = [];
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      createOpenAIClient: capturingFactory(requests),
+    });
+    const context = createContext("s", [], [], "high");
+    for await (const _ of models.provider("my-qwen")!.stream("qwen-plus", context)) {
+      // 消费流
+    }
+    expect(requests[0]!.enable_thinking).toBe(true);
+  });
+
+  it("headers 配置经 Provider 传给 client 工厂（E64）", async () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "azure",
+          baseUrl: "https://my.example.com/v1",
+          apiKeyEnv: "A_API_KEY",
+          headers: { "api-key": "k", "x-custom": "v" },
+          models: [{ id: "m-1" }],
+        },
+      ],
+    };
+    const seen: Array<Record<string, string> | undefined> = [];
+    const factory: ChatCompletionsClientFactory = (_apiKey, _baseUrl, headers) => {
+      seen.push(headers);
+      return {
+        chat: {
+          completions: {
+            async create() {
+              return (async function* () {
+                yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+              })();
+            },
+          },
+        },
+      } satisfies ChatCompletionsClient;
+    };
+    const models = buildModelClient(config, undefined, { env: KEYS, createOpenAIClient: factory });
+    for await (const _ of models.provider("azure")!.stream("m-1", createContext("s"))) {
+      // 消费流
+    }
+    expect(seen[0]).toEqual({ "api-key": "k", "x-custom": "v" });
   });
 });

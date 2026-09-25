@@ -44,7 +44,15 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
       apiKeyEnv: preset.apiKeyEnv,
       ...(apiKey ? { apiKey } : {}),
       ...(preset.protocol ? { protocol: preset.protocol } : {}),
-      models: preset.models.map((id) => ({ id })),
+      // 厂商能力开关默认值随预设落盘（E60）：连接即带上该厂商的正确能力配置
+      ...(preset.reasoningContent ? { reasoningContent: true } : {}),
+      ...(preset.reasoningEffort ? { reasoningEffort: true } : {}),
+      ...(preset.enableThinking ? { enableThinking: true } : {}),
+      // /models 拉取替换后的列表没有能力位信息，reasoning 标记只对预设内模型保留
+      models: preset.models.map((id) => ({
+        id,
+        ...(preset.reasoningModels?.includes(id) ? { reasoning: true } : {}),
+      })),
     },
   ];
   // 只追加/替换 provider，不动 modelChain：连接供应商只是让它的模型进入列表，当前模型保持、

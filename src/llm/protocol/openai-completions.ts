@@ -1,6 +1,6 @@
 import type { Context, Message, StreamEvent } from "../../core/index.js";
 import type { TextContent, ThinkingContent, ToolCall, ToolDefinition } from "../../core/index.js";
-import type { Protocol } from "../types.js";
+import type { ModelInfo, Protocol } from "../types.js";
 import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
 /** delta 的字段形状（E62 兜底 b：choice.message 同形，delta 缺失时回落读它） */
@@ -46,38 +46,54 @@ export class OpenAICompletionsProtocol implements Protocol {
 
   /** DeepSeek 等推理厂商：assistant 的 thinking 块回传为 reasoning_content 字段 */
   private readonly reasoningContent: boolean;
-  /** 支持 reasoning_effort 请求参数的厂商（仅 OpenAI 系；其余厂商发该字段可能 400，不 emit） */
+  /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系；其余厂商发该字段可能 400，不 emit） */
   private readonly emitReasoningEffort: boolean;
+  /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：不发送则思考等级静默无效 */
+  private readonly enableThinking: boolean;
   /** E68 诊断开关（调试排查用）：记录流解析中未产出任何事件的被丢弃 chunk 样本 */
   private readonly debugDroppedChunks: boolean;
 
   constructor(
-    options: { reasoningContent?: boolean; emitReasoningEffort?: boolean; debugDroppedChunks?: boolean } = {},
+    options: {
+      reasoningContent?: boolean;
+      emitReasoningEffort?: boolean;
+      enableThinking?: boolean;
+      debugDroppedChunks?: boolean;
+    } = {},
   ) {
     this.reasoningContent = options.reasoningContent ?? false;
     this.emitReasoningEffort = options.emitReasoningEffort ?? false;
+    this.enableThinking = options.enableThinking ?? false;
     this.debugDroppedChunks = options.debugDroppedChunks ?? false;
   }
 
   /**
    * 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装。
+   * 思考类请求参数（reasoning_effort/enable_thinking）仅对推理系列模型（model.reasoning）
+   * 随思考等级下发：同一厂商混排思考/非思考模型，对不支持该参数的模型照发会 400（E60）。
    * @param context 一次模型调用的完整输入
+   * @param model 本次请求的模型定义（能力位来源），可省略（等价于非推理模型）
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
-  buildRequest(context: Context): unknown {
+  buildRequest(context: Context, model?: ModelInfo): unknown {
     // 跳过既无 content 也无 tool_calls 的 assistant：完整轮无任何产出时 runTurn 会落 content:[] 的
     // 空 assistant，续跑把它带给厂商会 400（与 A400 同类残留面）——无信息的消息直接不发更安全
     const converted = context.messages
       .map((message) => toOpenAIMessage(message, this.reasoningContent))
       .filter((m) => !(m.role === "assistant" && m.content == null && m.tool_calls == null));
+    const reasoning = model?.reasoning === true;
     return {
       // 系统提示词作为首条 system 消息进请求体（空则不占位，厂商拒空 system）
       messages: context.systemPrompt
         ? [{ role: "system", content: context.systemPrompt }, ...converted]
         : converted,
       ...(context.tools.length > 0 ? { tools: context.tools.map(toOpenAITool) } : {}),
-      // 思考等级：仅支持的厂商按用户设定透传 reasoning_effort（@/model 左右调整）
-      ...(this.emitReasoningEffort && context.thinkingLevel ? { reasoning_effort: context.thinkingLevel } : {}),
+      // 思考等级：支持该参数的厂商对推理系列模型按用户设定透传 reasoning_effort（/model 左右调整）
+      ...(this.emitReasoningEffort && reasoning && context.thinkingLevel
+        ? { reasoning_effort: context.thinkingLevel }
+        : {}),
+      // DashScope 等厂商需显式开启思考：仅推理系列模型随思考等级发送
+      ...(this.enableThinking && reasoning && context.thinkingLevel ? { enable_thinking: true } : {}),
     };
   }
 
