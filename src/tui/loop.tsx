@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
-import type { Message } from "../core/index.js";
+import { modelErrorText, type Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -19,7 +19,7 @@ import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, s
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, modelErrorText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type TuiState } from "./state.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";

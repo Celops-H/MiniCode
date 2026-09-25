@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, modelErrorText, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -72,20 +72,6 @@ describe("sessionModalTarget：/session 面板确认目标（P6-4 新建置顶�
   it("越界 selected 兜底为新建（防御，正常由 loop clamp）", () => {
     expect(sessionModalTarget(5, sessions)).toEqual({ kind: "new" });
     expect(sessionModalTarget(-1, sessions)).toEqual({ kind: "new" });
-  });
-});
-
-describe("modelErrorText：模型调用失败的可读引导（C2 /model 边界）", () => {
-  it("认证/未配置/未知模型类错误追加换模型与配 key 引导", () => {
-    expect(modelErrorText("Provider openai 未配置认证：请设置环境变量")).toContain("/model 换模型");
-    expect(modelErrorText("Incorrect API key provided. 401")).toContain("/connect");
-    expect(modelErrorText("未知模型：gpt-9")).toContain("/model 换模型");
-    // 厂商侧模型下架/改名（404 / 英文未找到）：同样给换模型引导
-    expect(modelErrorText("404 The model 'gpt-9' does not exist")).toContain("/model 换模型");
-    expect(modelErrorText("model not found")).toContain("/model 换模型");
-  });
-  it("其它错误保持原样，不误导", () => {
-    expect(modelErrorText("会话存储写入失败")).toBe("会话存储写入失败");
   });
 });
 
