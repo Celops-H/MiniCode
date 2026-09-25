@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import { validateInput, type ExecuteContext } from "../base.js";
 import type { ExecuteResult, Tool } from "../base.js";
@@ -153,12 +154,20 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       signal?.removeEventListener("abort", onAbort);
     };
 
-    const collect = (chunk: Buffer): void => {
+    // 输出解码（E91）：stdout/stderr 各用 StringDecoder 按流累积解码——chunk.toString()
+    // 按段解码会把恰在 chunk 边界被劈开的多字节字符（中文输出常见）解成 U+FFFD 乱码
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    const appendText = (text: string): void => {
       if (output.length >= MAX_BASH_OUTPUT_CHARS) {
         if (!output.endsWith("[输出已截断]")) output += "\n[输出已截断]";
         return;
       }
-      output += chunk.toString();
+      output += text;
+    };
+
+    const collect = (chunk: Buffer, decoder: StringDecoder): void => {
+      appendText(decoder.write(chunk));
     };
 
     const settle = (): void => {
@@ -184,12 +193,16 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       if (exited && openStreams === 0) settle();
     };
 
-    const streams = [child.stdout, child.stderr];
-    for (const stream of streams) {
-      if (!stream) continue;
+    const streams: Array<[NonNullable<typeof child.stdout>, StringDecoder]> = [
+      [child.stdout!, stdoutDecoder],
+      [child.stderr!, stderrDecoder],
+    ];
+    for (const [stream, decoder] of streams) {
       openStreams++;
-      stream.on("data", collect);
+      stream.on("data", (chunk: Buffer) => collect(chunk, decoder));
       stream.on("close", () => {
+        // 流关闭 flush 解码器残料（E91）：尾端被劈开的多字节字符按原样补齐，不丢字
+        appendText(decoder.end());
         openStreams--;
         maybeSettle();
       });
@@ -214,7 +227,7 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       // exit 不来，仍靠超时/打断救回）：给一个排水窗口收剩余输出，到点销毁流强制收尾，
       // 保证调用必然返回
       drainTimer = setTimeout(() => {
-        for (const stream of streams) stream?.destroy();
+        for (const [stream] of streams) stream.destroy();
         maybeSettle();
       }, DRAIN_WINDOW_MS);
       maybeSettle();

@@ -32,6 +32,15 @@ describe("文件类内置工具", () => {
     expect(out).toBe("1\t第一行\n2\t第二行\n3\t第三行");
   });
 
+  it("read offset 超出文件行数时返回越界提示（E93）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "一\n二\n三");
+    const out = await tool("read").execute({ path: file, offset: 10 });
+    expect(out).toContain("超出文件行数");
+    expect(out).toContain("3 行");
+  });
+
   it("read 支持行范围", async () => {
     const dir = setup();
     const file = path.join(dir, "a.txt");
@@ -55,6 +64,16 @@ describe("文件类内置工具", () => {
     const out = await tool("glob").execute({ pattern: "**/*.ts", path: dir });
     expect(out).toContain("a.ts");
     expect(out).not.toContain("b.js");
+  });
+
+  it("grep 跳过二进制文件（E90）：NUL 嗅探，乱码不再喂给模型", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "real.txt"), "has match here");
+    // 二进制文件：NUL 字节开头 + 内文含匹配词（旧实现乱码行会命中正则）
+    writeFileSync(path.join(dir, "bin.dat"), Buffer.concat([Buffer.from([0x00, 0x01, 0x02]), Buffer.from("has match garbage")]));
+    const out = await tool("grep").execute({ pattern: "match", path: dir });
+    expect(out).toContain("real.txt");
+    expect(out).not.toContain("bin.dat");
   });
 
   it("grep 按正则搜索内容", async () => {
