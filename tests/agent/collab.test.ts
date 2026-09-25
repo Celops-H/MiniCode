@@ -1027,3 +1027,57 @@ const waitTool = collabTool(team, "wait_agent");
     expect(await waitTool.execute({ target: "/root" })).toContain("不能等待自己");
   });
 });
+
+
+describe("子 agent 失败终态（E81）", () => {
+  it("模型流失败：AgentCompleted 带 failed 标记，回灌明确失败文本而非半截结论", async () => {
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    const hooks = new HookBus();
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    // AgentCompleted 由 team 发射，总线须挂到 Team（Agent 侧总线走工具/轮次事件）
+    const team = new Team({ hooks });
+    const root = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          // 子 agent 的系统提示词带协作提示，借它区分父子：子 agent 直接抛模型流失败
+          if (context.systemPrompt.includes("团队工作 agent")) {
+            throw new Error("模型链耗尽");
+          }
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "spawn_agent" };
+            yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ agentName: "worker", prompt: "查一下" }) };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "收到" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.registerRoot(root);
+    root.start("派活");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    // 等子 agent 驱动失败 → watcher 失败终态回灌
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBe(true);
+    expect(completed[0]!.conclusion).toContain("模型链耗尽");
+    // 父 agent 收到的是明确失败文本（不带 worktree 合并信息、不拿「未产出结论」顶包）
+    const finalMail = root
+      .getMessages()
+      .find((m) => m.role === "user" && m.source === "system" && m.content.includes("【任务结论】"));
+    expect(finalMail).toBeDefined();
+    expect((finalMail as { content: string }).content).toContain("执行失败");
+    expect((finalMail as { content: string }).content).toContain("模型链耗尽");
+  });
+});

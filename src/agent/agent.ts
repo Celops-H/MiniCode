@@ -348,8 +348,15 @@ export class Agent {
           this.interruptController = new AbortController();
           continue;
         }
-        // 收件箱空且终态（本轮模型回复无工具调用，或续跑预算耗尽）→ 会话结束
-        if (this.stopped || this.turnCount >= this.maxTurns) return;
+        // 收件箱空且终态（本轮模型回复无工具调用 → stopped；或续跑预算耗尽 → E83 补发 Stop）
+        // → 会话结束；两者皆否则继续下一轮（工具循环续轮）
+        if (this.stopped) return;
+        if (this.turnCount >= this.maxTurns) {
+          // maxTurns 耗尽收尾（E83）：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
+          // 界面永远「运行中」、排队命令不 drain——与「回复无工具调用」分支同形发射
+          await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+          return;
+        }
       }
     } finally {
       this.active = false;
@@ -392,7 +399,14 @@ export class Agent {
    */
   async *runTurn(): AsyncGenerator<StreamEvent> {
     if (this.stopped) return;
-    if (this.turnCount >= this.maxTurns) return;
+    if (this.turnCount >= this.maxTurns) {
+      // maxTurns 耗尽收尾（E83）：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
+      // 界面永远「运行中」、排队命令不 drain——契约约定 Stop 由主循环触发，这里与
+      // 「回复无工具调用」分支同形发射
+      this.stopped = true;
+      await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+      return;
+    }
 
     await this.maybeCompact();
     // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本，DESIGN 11.3）
@@ -893,38 +907,45 @@ export class Agent {
     try {
       // 工具中断看门狗：interrupt 后工具若不响应 signal（非 bash 类挂起）3s 强制转失败，
       // 与 withInterruptTimeout 配套保证打断后本轮必然收尾；
-      // 只读快工具（glob/read/grep 等）另加正常执行超时：本应秒回却挂起不转圈（不依赖打断触发）
+      // 只读快工具（glob/read/grep 等）另加正常执行超时：本应秒回却挂起不转圈（不依赖打断触发）。
+      // 执行超时定时器在 race settle 后清理（E75），残留定时器会拖住 TUI 自然退出
+      const execute = tool.isReadOnly ? executeDeadline(this.toolTimeoutMs) : undefined;
       const deadlines: Promise<never>[] = [interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS)];
-      if (tool.isReadOnly) deadlines.push(executeDeadline(this.toolTimeoutMs));
-      const result = await Promise.race([
-        withCwd(this.cwd, () =>
-          withFileState(
-            this.fileState,
-            () => tool.execute(call.input, { signal: this.interruptController.signal }),
+      if (execute) deadlines.push(execute.promise);
+      try {
+        const result = await Promise.race([
+          withCwd(this.cwd, () =>
+            withFileState(
+              this.fileState,
+              () => tool.execute(call.input, { signal: this.interruptController.signal }),
+            ),
           ),
-        ),
-        ...deadlines,
-      ]);
-      const { output, contextModifier, isError } =
-        typeof result === "string"
-          ? { output: result, contextModifier: undefined, isError: undefined }
-          : result;
-      const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
-      const finalOutput = truncated.content;
-      // PostToolUse：工具执行完成（含标记失败的结果），供观测
-      await this.safeEmit({
-        type: "PostToolUse",
-        toolCallId: call.id,
-        toolName: call.name,
-        input: call.input,
-        output: finalOutput,
-        isError: Boolean(isError),
-        agentPath,
-      });
-      return {
-        message: toolResultMessage(call.id, call.name, finalOutput, isError),
-        contextModifier,
-      };
+          ...deadlines,
+        ]);
+        const { output, contextModifier, isError } =
+          typeof result === "string"
+            ? { output: result, contextModifier: undefined, isError: undefined }
+            : result;
+        const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
+        const finalOutput = truncated.content;
+        // PostToolUse：工具执行完成（含标记失败的结果），供观测
+        await this.safeEmit({
+          type: "PostToolUse",
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.input,
+          output: finalOutput,
+          isError: Boolean(isError),
+          agentPath,
+        });
+        return {
+          message: toolResultMessage(call.id, call.name, finalOutput, isError),
+          contextModifier,
+        };
+      } finally {
+        // 无论结果/异常都清理执行超时定时器（E75）
+        execute?.cancel();
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       // PostToolUseFailure：工具执行抛错，供观测
@@ -1050,7 +1071,7 @@ function interruptDeadline(signal: AbortSignal, timeoutMs: number): Promise<neve
   const promise = new Promise<never>((_resolve, reject) => {
     const rejectNow = (): void => reject(new DOMException("Aborted", "AbortError"));
     if (signal.aborted) rejectNow();
-    else signal.addEventListener("abort", () => setTimeout(rejectNow, timeoutMs), { once: true });
+    else signal.addEventListener("abort", () => setTimeout(rejectNow, timeoutMs).unref(), { once: true });
   });
   // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
   promise.catch(() => undefined);
@@ -1062,15 +1083,26 @@ function interruptDeadline(signal: AbortSignal, timeoutMs: number): Promise<neve
  * （glob/read/grep 等异常卡死不转圈、不因不响应中断而无限等）。与中断看门狗独立：
  * 该超时在正常运行期也生效，不依赖打扰信号；打断场景仍由 interruptDeadline 收尾。
  * @param timeoutMs 工具执行超时窗口
- * @returns 永不 resolve 的 promise（超时后 reject）
+ * @returns 永不 resolve 的 promise（超时后 reject）与取消函数
  */
-function executeDeadline(timeoutMs: number): Promise<never> {
+export function executeDeadline(timeoutMs: number): { promise: Promise<never>; cancel: () => void } {
+  let timer: NodeJS.Timeout | undefined;
   const promise = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => reject(new Error(`工具执行超时：${timeoutMs / 1000}s 未返回`)), timeoutMs);
+    timer = setTimeout(() => reject(new Error(`工具执行超时：${timeoutMs / 1000}s 未返回`)), timeoutMs);
   });
   // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
   promise.catch(() => undefined);
-  return promise;
+  return {
+    promise,
+    // race settle（工具返回/中断/超时任一）后清理定时器（E75）：残留的 ref'd 定时器会
+    // 吊住事件循环，TUI 自然退出（全程无 process.exit）后 shell 提示符延迟最长 60s 才返回
+    cancel: () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 /**

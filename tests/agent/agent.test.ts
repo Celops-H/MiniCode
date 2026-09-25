@@ -1,13 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER, MEMORY_REQUEST_MARKER } from "../../src/context/index.js";
 import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage, type Context, type ThinkingLevel } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
+import { HookBus } from "../../src/hooks/index.js";
+import { executeDeadline } from "../../src/agent/agent.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
@@ -1365,5 +1367,85 @@ describe("Agent 主循环：模型对话闭环", () => {
       /* 消费事件 */
     }
     expect(captured2).toBeUndefined();
+  });
+});
+
+
+describe("maxTurns 耗尽收尾（E83）", () => {
+  it("maxTurns 耗尽时发 Stop Hook 事件（TUI 不会永远停在运行中）", async () => {
+    const tool: Tool = {
+      name: "echo",
+      description: "回显",
+      inputSchema: z.object({ text: z.string() }),
+      isReadOnly: false,
+      requiresUserInteraction: false,
+      maxResultSizeChars: 1000,
+      execute: (input) => String((input as { text: string }).text),
+    };
+    // 模型永远调工具：第 1 轮执行工具后 turnCount=1 达 maxTurns，循环收尾补发 Stop
+    const client: ModelClient = {
+      async *stream() {
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      },
+    };
+    // Stop 是 Hook 事件（TUI 靠它回空闲并驱动排队出队），经 HookBus 断言
+    const hooks = new HookBus();
+    let stopFired = false;
+    hooks.on("Stop", () => {
+      stopFired = true;
+    });
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [tool],
+      maxTurns: 1,
+      hooks,
+    });
+    const events: StreamEvent[] = [];
+    agent.start("跑");
+    for await (const e of agent.run()) {
+      events.push(e);
+    }
+    expect(stopFired).toBe(true);
+    // 事件流照常以 done(tool_calls) 结束，Stop 由 hook 通道补发
+    expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "tool_calls" });
+  });
+});
+
+
+describe("只读工具执行超时定时器清理（E75）", () => {
+  it("cancel 后定时器不再触发（race settle 后不残留 ref'd 定时器拖住退出）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise, cancel } = executeDeadline(1000);
+      let rejected = false;
+      promise.catch(() => {
+        rejected = true;
+      });
+      cancel();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(rejected).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("未取消时超时正常触发拒绝（超时兜底语义不变）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise } = executeDeadline(1000);
+      let message = "";
+      promise.catch((err: Error) => {
+        message = err.message;
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(message).toContain("工具执行超时");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
