@@ -17,7 +17,6 @@ export const globTool: Tool = {
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 10000,
   async execute(input) {
     const { pattern, path: cwd } = validateInput<{ pattern: string; path?: string }>(globTool, input);

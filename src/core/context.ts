@@ -37,12 +37,3 @@ export function createContext(
   return { systemPrompt, messages, tools, ...(thinkingLevel ? { thinkingLevel } : {}) };
 }
 
-/**
- * 追加消息，返回新 Context（不修改原对象，不可变更新）。
- * @param context 原 Context
- * @param message 待追加的消息
- * @returns 追加后的新 Context
- */
-export function appendMessage(context: Context, message: Message): Context {
-  return { ...context, messages: [...context.messages, message] };
-}

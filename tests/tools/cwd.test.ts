@@ -56,7 +56,6 @@ describe("工具执行上下文 cwd（DESIGN 4.2）", () => {
           description: "写文件",
           inputSchema: z.object({ path: z.string(), content: z.string() }),
           isReadOnly: false,
-          requiresUserInteraction: false,
           maxResultSizeChars: 100,
           execute: async (input) => {
             const { path: p, content } = input as { path: string; content: string };

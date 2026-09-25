@@ -103,7 +103,6 @@ describe("Agent 主循环：turn 内真打断", () => {
           description: "执行命令",
           inputSchema: z.object({ command: z.string() }),
           isReadOnly: false,
-          requiresUserInteraction: false,
           maxResultSizeChars: 1000,
           execute: (input) => String((input as { command: string }).command),
         },
@@ -145,7 +144,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "模拟长命令",
       inputSchema: z.object({ command: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 5000,
       execute(_input, options) {
         markStarted!();
@@ -290,7 +288,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "模拟长命令",
       inputSchema: z.object({ command: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 5000,
       // 两个调用判定并发安全，进同一并发批（批内并行执行）
       isConcurrencySafe: () => true,
@@ -372,7 +369,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "挂起工具",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute() {
         markStarted!();
@@ -417,7 +413,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "只读快工具",
       inputSchema: z.object({}),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute() {
         markStarted!();
@@ -470,7 +465,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "只读快工具",
       inputSchema: z.object({}),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "找到文件 A",
     };
@@ -510,7 +504,6 @@ describe("Agent 主循环：turn 内真打断", () => {
       description: "只读但需要点时间",
       inputSchema: z.object({}),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => new Promise((resolve) => setTimeout(() => resolve("慢但完成"), 50)),
     };

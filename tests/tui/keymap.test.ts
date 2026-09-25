@@ -97,15 +97,13 @@ it("connect-key 弹窗：字符→input、Backspace→backspace、Enter→modal-
   expect(mapKey({ kind: "ctrl-c" }, m)).toEqual({ type: "noop" });
 });
 
-it("decideEsc：聚焦先取消 → 运行中打断 → 空闲双击退出", () => {
-  // 有折叠聚焦：取消聚焦优先
-  expect(decideEsc({ hasFocus: true, running: true, lastEscAt: 0, now: 0 })).toBe("focus-clear");
+it("decideEsc：运行中打断 → 空闲双击退出（E100：折叠聚焦半成品链路已删）", () => {
   // 运行中：打断（不消耗计时）
-  expect(decideEsc({ hasFocus: false, running: true, lastEscAt: 0, now: 0 })).toBe("interrupt");
+  expect(decideEsc({ running: true, lastEscAt: 0, now: 0 })).toBe("interrupt");
   // 空闲第一次：arm
-  expect(decideEsc({ hasFocus: false, running: false, lastEscAt: 0, now: 0 })).toBe("arm-exit");
+  expect(decideEsc({ running: false, lastEscAt: 0, now: 0 })).toBe("arm-exit");
   // 空闲窗口内第二次：退出
-  expect(decideEsc({ hasFocus: false, running: false, lastEscAt: 100, now: 400, windowMs: 800 })).toBe("exit");
+  expect(decideEsc({ running: false, lastEscAt: 100, now: 400, windowMs: 800 })).toBe("exit");
   // 超窗：重新 arm
-  expect(decideEsc({ hasFocus: false, running: false, lastEscAt: 100, now: 1000, windowMs: 800 })).toBe("arm-exit");
+  expect(decideEsc({ running: false, lastEscAt: 100, now: 1000, windowMs: 800 })).toBe("arm-exit");
 });

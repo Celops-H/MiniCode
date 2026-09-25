@@ -23,7 +23,6 @@ export const grepTool: Tool = {
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input) {
     const { pattern, path: dir, glob: fileGlob } = validateInput<{

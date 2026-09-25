@@ -25,7 +25,7 @@ export type PermissionDecision =
 /** 用户审批函数：ask 时调用，由宿主注入（CLI 弹窗 / 测试 mock） */
 export type PermissionApprover = (request: PermissionRequest) => Promise<PermissionDecision>;
 
-/** PreToolUse 钩子插入点：M3 接入 Hook 系统 */
+/** PreToolUse 钩子插入点（Agent 接入 Hook 事件用，构造项无消费方不开放配置） */
 export type PreToolUseHook = (
   request: PermissionRequest,
 ) => Promise<PermissionBehavior | undefined>;
@@ -33,7 +33,6 @@ export type PreToolUseHook = (
 export interface PermissionPipelineOptions {
   rules: PermissionRule[];
   approver?: PermissionApprover;
-  preToolUseHook?: PreToolUseHook;
   /** 权限模式，缺省 default（正常审批） */
   mode?: PermissionMode;
   /** plan 模式放行的只读工具集合（宿主从 Tool.isReadOnly 收集） */
@@ -60,7 +59,7 @@ export class PermissionPipeline {
  * 对一次工具调用做权限裁决。
  * 规则层 deny 优先；仅 ask 时进入决策链（Hook → 用户审批）。
  * @param request 权限请求（工具名 + 参数）
- * @param hook 本次调用注入的 PreToolUse 钩子（优先于构造时的 preToolUseHook），Agent 用它接入 Hook 事件
+ * @param hook 本次调用注入的 PreToolUse 钩子（Agent 用它接入 Hook 事件）
  * @returns 裁决结果（是否放行 + 来源 + 拒绝原因）
  */
 async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<PermissionResult> {
@@ -100,9 +99,8 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
     if (this.cache.get(cacheKey)) return { allowed: true, source: "cache" };
 
     // Hook 环节（DESIGN 8.1 决策链）：规则层 ask 时介入，deny 拒绝 / allow 放行 / ask 继续走用户审批
-    const effectiveHook = hook ?? this.options.preToolUseHook;
-    if (effectiveHook) {
-      const hookVerdict = await effectiveHook(request);
+    if (hook) {
+      const hookVerdict = await hook(request);
       if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
       if (hookVerdict === "allow") return { allowed: true, source: "hook" };
     }
@@ -129,7 +127,7 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
    * 但保留 plan 模式只读约束与 PreToolUse hook 拦截——低影响工具（如 agent 消息投递）
    * 不打扰用户审批，仍可被 plan 模式约束与 hook 观测/拦截。
    * @param request 权限请求（工具名 + 参数）
-   * @param hook 本次调用注入的 PreToolUse 钩子（优先于构造时的 preToolUseHook）
+   * @param hook 本次调用注入的 PreToolUse 钩子
    * @returns 裁决结果
    */
   async checkSkipsPermission(
@@ -145,9 +143,8 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
       return { allowed: false, reason: `plan 模式只读：${request.toolName} 不可用`, source: "mode" };
     }
     // PreToolUse hook：可 deny 拦截（allow/ask 不升级用户审批，免审批语义）
-    const effectiveHook = hook ?? this.options.preToolUseHook;
-    if (effectiveHook) {
-      const hookVerdict = await effectiveHook(request);
+    if (hook) {
+      const hookVerdict = await hook(request);
       if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
     }
     return { allowed: true, source: "rule" };

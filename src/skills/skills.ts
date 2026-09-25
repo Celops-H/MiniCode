@@ -130,7 +130,6 @@ export function createSkillTool(skills: SkillInfo[]): Tool {
       "取回后按正文内容执行该技能。",
     inputSchema: nameSchema,
     isReadOnly: true,
-    requiresUserInteraction: false,
     maxResultSizeChars: 20_000,
     async execute(input) {
       const { name } = nameSchema.parse(input);

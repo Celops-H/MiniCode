@@ -8,7 +8,6 @@ const readTool: Tool = {
   description: "读取文件内容",
   inputSchema: z.object({ path: z.string(), startLine: z.number().optional() }),
   isReadOnly: true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 1000,
   execute: () => "内容",
 };
@@ -18,7 +17,6 @@ const globTool: Tool = {
   description: "按模式匹配文件",
   inputSchema: z.object({ pattern: z.string() }),
   isReadOnly: true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 1000,
   execute: () => "[]",
 };
@@ -30,7 +28,6 @@ const mcpTool: Tool = {
   inputSchema: z.unknown(),
   inputJsonSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   isReadOnly: false,
-  requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   execute: () => "外部内容",
 };

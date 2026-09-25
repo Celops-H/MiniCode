@@ -8,7 +8,6 @@ const readTool: Tool = {
   description: "读取文件内容",
   inputSchema: z.object({ path: z.string() }),
   isReadOnly: true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 1000,
   execute: (input) => {
     const { path } = validateInput<{ path: string }>(readTool, input);
@@ -29,7 +28,6 @@ describe("工具基类", () => {
     expect(readTool).toMatchObject({
       name: "read",
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
     });
   });

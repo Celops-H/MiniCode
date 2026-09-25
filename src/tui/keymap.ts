@@ -34,12 +34,10 @@ export type TuiAction =
   | { type: "extensions-toggle" }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
-  | { type: "toggle-focus" }
   /** Ctrl+C 复制：应用内选区文本复制到系统剪贴板（无选区不动作；打断已由 Esc 承担） */
   | { type: "copy" }
   /** 鼠标左键点指定块（下标）任意部位：直接翻该块折叠态（Web 交互：展开/收起改鼠标点击，整块可点） */
   | { type: "fold-at"; index: number }
-  | { type: "interrupt" }
   | { type: "exit" }
   /** Esc：运行中打断；空闲连按两次退出（loop 层处理计时与状态） */
   | { type: "esc" }
@@ -290,15 +288,13 @@ function mapCandidateKey(key: Key): TuiAction {
   }
 }
 
-/** Esc 按键的落地判定（纯函数，loop 层调用）：有折叠聚焦先取消；运行中打断；空闲双击退出 */
+/** Esc 按键的落地判定（纯函数，loop 层调用）：运行中打断；空闲双击退出 */
 export function decideEsc(c: {
-  hasFocus: boolean;
   running: boolean;
   lastEscAt: number;
   now: number;
   windowMs?: number;
-}): "focus-clear" | "interrupt" | "arm-exit" | "exit" {
-  if (c.hasFocus) return "focus-clear";
+}): "interrupt" | "arm-exit" | "exit" {
   if (c.running) return "interrupt";
   const windowMs = c.windowMs ?? 800;
   if (c.lastEscAt !== 0 && c.now - c.lastEscAt <= windowMs) return "exit";

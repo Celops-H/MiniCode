@@ -128,7 +128,6 @@ export class McpManager {
       inputSchema: z.unknown(),
       inputJsonSchema: info.inputSchema,
       isReadOnly: false, // 外部副作用不可判：走完整审批链（BACKEND §19）
-      requiresUserInteraction: false,
       maxResultSizeChars: MCP_MAX_RESULT_CHARS,
       async execute(input, options) {
         const args = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};

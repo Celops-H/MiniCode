@@ -34,25 +34,6 @@ describe("Mailbox（agent 邮箱）", () => {
     expect(mailbox.hasPending()).toBe(false);
   });
 
-  it("triggerTurn 判定（唤醒型消息）", () => {
-    const mailbox = new Mailbox();
-    expect(mailbox.hasTriggerTurn()).toBe(false);
-    mailbox.enqueue({
-      type: "MESSAGE",
-      from: AgentPath.root(),
-      content: "排队",
-      triggerTurn: false,
-    });
-    expect(mailbox.hasTriggerTurn()).toBe(false);
-    mailbox.enqueue({
-      type: "FINAL_ANSWER",
-      from: AgentPath.root(),
-      content: "结论",
-      triggerTurn: true,
-    });
-    expect(mailbox.hasTriggerTurn()).toBe(true);
-  });
-
   it("formatMailMessage 按类型格式化", () => {
     expect(formatMailMessage({ type: "MESSAGE", from: AgentPath.root(), content: "hi", triggerTurn: false }))
       .toBe("【消息】from /root:\nhi");
