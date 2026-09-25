@@ -81,6 +81,21 @@ describe("buildRequest：消息与工具转换", () => {
     expect("system" in noSys).toBe(false);
   });
 
+  it("空 assistant（无文本/无工具/无思考）续跑时从请求体丢弃（E55，与 openai 侧对称）", () => {
+    // 完整轮无产出落下的空 assistant 跨协议续跑会被严格校验端点 400
+    const context = createContext("s", [
+      userMessage("hi"),
+      assistantMessage([]),
+      toolResultMessage("call_1", "read", "内容"),
+    ]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages).toEqual([
+      { role: "user", content: "hi" },
+      // 空 assistant 被跳过；后面的 tool_result 仍正常归并进 user 消息
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "内容", is_error: false }] },
+    ]);
+  });
+
   it("无工具时不带 tools 字段", () => {
     const req = protocol.buildRequest(createContext("s")) as Record<string, unknown>;
     expect("tools" in req).toBe(false);
@@ -152,14 +167,30 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("error 事件转为错误事件", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen({ type: "error", error: { type: "overloaded_error" } }),
-    )) {
-      events.push(e);
+  it("error 事件取可读消息（E96）：对象取 message ?? type，字符串直用，不再 [object Object]", async () => {
+    async function collect(...chunks: unknown[]): Promise<StreamEvent[]> {
+      const events: StreamEvent[] = [];
+      for await (const e of protocol.parseStream(chunkGen(...chunks))) {
+        events.push(e);
+      }
+      return events;
     }
-    expect(events[0]).toMatchObject({ type: "error" });
+    // 官方 overloaded_error 形态：对象带 type，无 message
+    expect(await collect({ type: "error", error: { type: "overloaded_error" } })).toEqual([
+      { type: "error", message: "overloaded_error" },
+    ]);
+    // 对象带 message：优先取 message（api_error 等形态）
+    expect(
+      await collect({ type: "error", error: { type: "api_error", message: "Internal server error" } }),
+    ).toEqual([{ type: "error", message: "Internal server error" }]);
+    // 字符串直用（部分兼容端点）
+    expect(await collect({ type: "error", error: "过载" })).toEqual([{ type: "error", message: "过载" }]);
+    // 无 message/type 的对象：序列化保留错误信号
+    expect(await collect({ type: "error", error: { code: 1302 } })).toEqual([
+      { type: "error", message: '{"code":1302}' },
+    ]);
+    // error 缺失：通用文案
+    expect(await collect({ type: "error" })).toEqual([{ type: "error", message: "未知错误" }]);
   });
 
   it("流意外结束（未收到 message_stop）报 error 标记异常轮", async () => {

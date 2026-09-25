@@ -35,6 +35,10 @@ export const providerConfigSchema = z
     apiKey: z.string().optional(),
     /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂（BACKEND §5） */
     protocol: z.enum(PROVIDER_PROTOCOLS).optional(),
+    /** 端点按 Anthropic 官方语义强制校验 thinking 块签名（仅 anthropic-messages 协议，
+     *  E61）：为 true 时请求带 tools 期间不发 thinking 参数，避免真 Anthropic API 对
+     *  无签名历史 thinking 块的二轮 400；GLM/Kimi/DeepSeek 兼容端点不校验，缺省 false */
+    requireThinkingSignature: z.boolean().optional(),
     /** 推理厂商（DeepSeek 等）：assistant 思考回传为 reasoning_content 字段，工具调用后
      *  必须回传否则厂商 400；有思考内容才发，缺省 false（E60） */
     reasoningContent: z.boolean().optional(),

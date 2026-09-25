@@ -146,6 +146,70 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(seen[0]).toEqual({ "anthropic-beta": "interleaved-thinking" });
   });
 
+  it("requireThinkingSignature 端点带 tools 期间不发 thinking 参数（E61 廉价缓解）", async () => {
+    let lastRequest: Record<string, unknown> | undefined;
+    const client: AnthropicMessagesClient = {
+      messages: {
+        async create(request) {
+          lastRequest = request;
+          return chunkGen(...RAW_CHUNKS);
+        },
+      },
+    };
+    const make = () =>
+      new AnthropicCompatibleProvider({
+        id: "anthropic",
+        name: "Anthropic",
+        baseUrl: "https://api.anthropic.com",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        env: { ANTHROPIC_API_KEY: "sk" },
+        requireThinkingSignature: true,
+        models: MODELS,
+        createClient: () => client,
+      });
+    const toolContext = createContext("s", [userMessage("q")], [
+      { name: "read", description: "读文件", inputSchema: { type: "object", properties: {} } },
+    ], "high");
+    // 带 tools：不发 thinking（历史 thinking 块无签名，二轮会被官方 API 400）
+    for await (const _ of make().stream("claude-sonnet-4-5", toolContext)) {
+      // 消费流
+    }
+    expect("thinking" in lastRequest!).toBe(false);
+    // 不带 tools：thinking 正常下发（首轮请求无历史，签名要求不触发）
+    for await (const _ of make().stream("claude-sonnet-4-5", createContext("s", [userMessage("q")], [], "high"))) {
+      // 消费流
+    }
+    expect(lastRequest!.thinking).toEqual({ type: "enabled", budget_tokens: 7168 });
+  });
+
+  it("缺省（兼容端点）带 tools 也照发 thinking，工具循环思考不受影响（E61）", async () => {
+    let lastRequest: Record<string, unknown> | undefined;
+    const client: AnthropicMessagesClient = {
+      messages: {
+        async create(request) {
+          lastRequest = request;
+          return chunkGen(...RAW_CHUNKS);
+        },
+      },
+    };
+    const provider = new AnthropicCompatibleProvider({
+      id: "zhipu-coding",
+      name: "GLM Coding Plan",
+      baseUrl: "https://open.bigmodel.cn/api/anthropic",
+      apiKeyEnv: "ZHIPU_API_KEY",
+      env: { ZHIPU_API_KEY: "sk" },
+      models: MODELS,
+      createClient: () => client,
+    });
+    const toolContext = createContext("s", [userMessage("q")], [
+      { name: "read", description: "读文件", inputSchema: { type: "object", properties: {} } },
+    ], "high");
+    for await (const _ of provider.stream("claude-sonnet-4-5", toolContext)) {
+      // 消费流
+    }
+    expect(lastRequest!.thinking).toEqual({ type: "enabled", budget_tokens: 7168 });
+  });
+
   it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
     const client = defaultAnthropicCreateClient("sk", "https://open.bigmodel.cn/api/anthropic") as unknown as {
       timeout: number;
