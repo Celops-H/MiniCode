@@ -218,6 +218,9 @@ export class AnthropicMessagesProtocol implements Protocol {
  * 统一消息 → Anthropic 消息；工具结果归并进 user 消息（Anthropic 要求）。
  * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过（E55）：与 openai 侧
  * buildRequest 的过滤对称，跨协议切模型续跑不再把它发给严格校验端点吃 400。
+ * 跳过（以及错误轮紧跟工具轮等形态）会让历史出现相邻同角色的 user 消息，而严格
+ * 校验端点要求角色交替——相邻 user 合并为一条（内容块数组并列，顺序不变），
+ * 请求体不再产生相邻同角色消息。
  * @param messages 统一格式消息数组
  * @returns Anthropic 消息参数数组
  */
@@ -225,9 +228,22 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
   let pendingToolResults: Array<Record<string, unknown>> = [];
 
+  /** 推入 user 消息；与上一条同为 user 时合并内容块，不产生相邻同角色消息 */
+  const pushUser = (content: string | Array<Record<string, unknown>>) => {
+    const last = out.at(-1) as { role?: string; content?: unknown } | undefined;
+    if (last?.role === "user") {
+      const lastBlocks =
+        typeof last.content === "string" ? [{ type: "text", text: last.content }] : (last.content as unknown[]);
+      const nextBlocks = typeof content === "string" ? [{ type: "text", text: content }] : content;
+      last.content = [...lastBlocks, ...nextBlocks];
+      return;
+    }
+    out.push({ role: "user", content });
+  };
+
   const flushToolResults = () => {
     if (pendingToolResults.length > 0) {
-      out.push({ role: "user", content: pendingToolResults });
+      pushUser(pendingToolResults);
       pendingToolResults = [];
     }
   };
@@ -236,7 +252,7 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
     switch (message.role) {
       case "user":
         flushToolResults();
-        out.push({ role: "user", content: message.content });
+        pushUser(message.content);
         break;
       case "assistant":
         if (message.content.length === 0) break;
@@ -306,19 +322,20 @@ function anthropicUsage(
 /**
  * 流内 error 事件的 error 字段 → 可读消息（E96）：官方 overloaded_error 等载荷的
  * error 是对象，String() 直转得 "[object Object]" 并经 assemble 写进持久化 stopReason、
- * 透传界面上屏。对象取 message ?? type，字符串直用；无 message/type 的对象序列化保留
- * 错误信号（与 openai 侧 chunkErrorMessage 同口径）；error 缺失时给通用文案。
+ * 透传界面上屏。对象取 message ?? type，非空字符串直用；空串/0/false 等退化形态与
+ * openai 侧同判为占位噪声，报「未知错误」而非「0」「false」这类无信息消息。与 openai
+ * 的差异仅在 error 是本协议的终止事件、不能像 openai 的 chunk 噪声那样静默跳过，
+ * 故退化形态统一落通用文案。
  * @param error 流内 error 事件的 error 字段值
  * @returns 可读错误消息
  */
 function anthropicErrorMessage(error: unknown): string {
-  if (error === undefined || error === null) return "未知错误";
-  if (typeof error === "string") return error;
-  if (typeof error === "object") {
+  if (typeof error === "string") return error || "未知错误";
+  if (typeof error === "object" && error !== null) {
     const fields = error as { message?: unknown; type?: unknown };
     if (typeof fields.message === "string" && fields.message) return fields.message;
     if (typeof fields.type === "string" && fields.type) return fields.type;
     return Object.keys(error).length > 0 ? JSON.stringify(error) : "未知错误";
   }
-  return String(error);
+  return "未知错误";
 }

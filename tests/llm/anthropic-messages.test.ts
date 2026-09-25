@@ -89,10 +89,47 @@ describe("buildRequest：消息与工具转换", () => {
       toolResultMessage("call_1", "read", "内容"),
     ]);
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    // 空 assistant 被跳过；相邻的 user 正文与工具结果合并为一条 user 消息
+    //（严格校验端点要求角色交替），内容块顺序不变
     expect(req.messages).toEqual([
-      { role: "user", content: "hi" },
-      // 空 assistant 被跳过；后面的 tool_result 仍正常归并进 user 消息
-      { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "内容", is_error: false }] },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hi" },
+          { type: "tool_result", tool_use_id: "call_1", content: "内容", is_error: false },
+        ],
+      },
+    ]);
+  });
+
+  it("空 assistant 过滤后相邻 user 合并为一条（错误轮后继续对话的真实序列）", () => {
+    // 真实形态：错误轮（无产出 assistant）之后用户再发消息，历史为
+    // [user, assistant([]), user]——不合并会发出相邻同角色 user，严格校验端点 400
+    const context = createContext("s", [
+      userMessage("第一条"),
+      assistantMessage([]),
+      userMessage("继续"),
+    ]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "第一条" }, { type: "text", text: "继续" }],
+      },
+    ]);
+  });
+
+  it("非相邻 user 不受合并影响（中间隔非空 assistant）", () => {
+    const context = createContext("s", [
+      userMessage("第一条"),
+      assistantMessage([{ type: "text", text: "回复" }]),
+      userMessage("继续"),
+    ]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages).toEqual([
+      { role: "user", content: "第一条" },
+      { role: "assistant", content: [{ type: "text", text: "回复" }] },
+      { role: "user", content: "继续" },
     ]);
   });
 
@@ -185,6 +222,10 @@ describe("parseStream：SSE → 统一事件", () => {
     ).toEqual([{ type: "error", message: "Internal server error" }]);
     // 字符串直用（部分兼容端点）
     expect(await collect({ type: "error", error: "过载" })).toEqual([{ type: "error", message: "过载" }]);
+    // 退化形态（空串/0/false）：占位噪声报通用文案，不产出「0」「false」「空串」误导
+    expect(await collect({ type: "error", error: "" })).toEqual([{ type: "error", message: "未知错误" }]);
+    expect(await collect({ type: "error", error: 0 })).toEqual([{ type: "error", message: "未知错误" }]);
+    expect(await collect({ type: "error", error: false })).toEqual([{ type: "error", message: "未知错误" }]);
     // 无 message/type 的对象：序列化保留错误信号
     expect(await collect({ type: "error", error: { code: 1302 } })).toEqual([
       { type: "error", message: '{"code":1302}' },
