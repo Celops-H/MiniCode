@@ -10,6 +10,11 @@ import type { HookBus } from "../hooks/index.js";
 import type { MailMessage } from "./mailbox.js";
 import { abortWorktree, completeWorktree, createWorktree, resolveGitRoot, type WorktreeInfo } from "./worktree.js";
 
+/** 路径末段（展示名）：/root/task_1 → task_1（失败回灌文案用） */
+function agentNameOf(path: AgentPath): string {
+  return path.toString().split("/").filter(Boolean).at(-1) ?? path.toString();
+}
+
 export interface TeamMember {
   /** agent 实例；预留未提交时为 undefined */
   agent: Agent | undefined;
@@ -234,6 +239,9 @@ export class Team {
 
   /** 消费单个 agent 的续跑循环；结束后释放槽位、重试待驱动队列并回灌结论（watcher） */
   private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
+    // 驱动失败捕获（E81）：模型流失败等错误不再吞掉——带失败语义回灌，父 agent 拿到
+    // 明确失败文本而不是半截文本/「未产出结论」当结论
+    let failure: unknown;
     try {
       // 后台驱动起点发派生观测事件（P9）：初次派生与 followup 唤醒都经这里——
       // TUI 树靠该事件把条目置为运行态（唤醒一个已完成/中断的 agent 时树重新亮起）；
@@ -259,22 +267,26 @@ export class Team {
           }
         }
       }
-    } catch {
-      // 模型流等错误不外泄为未处理 rejection（Node 默认会崩进程）；
-      // 工具执行错误已由 executeTool 捕获回灌，这里只兜底驱动路径
+    } catch (err) {
+      // 驱动路径兜底：错误不外泄为未处理 rejection（Node 默认会崩进程），
+      // 记为失败终态交 notifyCompletion 处理；工具执行错误已由 executeTool 捕获回灌
+      failure = err;
     } finally {
       release();
       this.retryPendingDrives();
     }
-    await this.notifyCompletion(agent);
+    await this.notifyCompletion(agent, failure);
   }
 
   /**
    * completion watcher（DESIGN 11.5）：子 agent 达到终态（resume 结束）时，
    * 把其结论以 FINAL_ANSWER 回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源。
    * wait_agent 只挂起不消费结论，避免重复投递。
+   * @param agent 完成的子 agent
+   * @param failure 驱动失败（E81）：非 undefined 时走失败终态——不合并 worktree、
+   *   回灌明确失败文本（半截文本/「未产出结论」不再被当结论误导父 agent）
    */
-  private async notifyCompletion(agent: Agent): Promise<void> {
+  private async notifyCompletion(agent: Agent, failure?: unknown): Promise<void> {
     const path = agent.agentPath;
     if (!path) return;
     const member = this.members.get(path.toString());
@@ -288,6 +300,26 @@ export class Team {
         type: "AgentInterrupted",
         path: path.toString(),
         parentPath: parentPath.toString(),
+      });
+      return;
+    }
+    const name = agentNameOf(path);
+    if (failure !== undefined) {
+      // 失败终态（E81）：模型链耗尽等驱动失败——不合并 worktree（产出不完整），
+      // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本当结论
+      const message = failure instanceof Error ? failure.message : String(failure);
+      await this.safeEmit({
+        type: "AgentCompleted",
+        path: path.toString(),
+        parentPath: parentPath.toString(),
+        conclusion: `子代理 ${name} 失败：${message}`,
+        failed: true,
+      });
+      await this.sendMessage(parentPath, {
+        type: "FINAL_ANSWER",
+        from: path,
+        content: `子代理 ${name} 执行失败（${message}），任务未完成。请基于当前进展决定重试、换方式或放弃该子任务。`,
+        triggerTurn: true,
       });
       return;
     }
