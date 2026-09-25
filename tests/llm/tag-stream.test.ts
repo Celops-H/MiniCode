@@ -97,6 +97,26 @@ describe("InlineTagFilter（正文标签状态机）", () => {
   });
 });
 
+describe("flush 边界：恰在开标签后零内容断流（E99）", () => {
+  it("正文以完整裸 <tool_call> 结尾且标签后零内容：flush 回发开标签本体", () => {
+    const f = new InlineTagFilter(() => 0);
+    expect(feed(f, "前文<tool_call>")).toEqual([
+      { type: "text_delta", text: "前文" },
+      { type: "text_delta", text: "<tool_call>" },
+    ]);
+  });
+
+  it("正文以完整裸 <thinking> 结尾且标签后零内容：flush 按思考增量回发开标签", () => {
+    const f = new InlineTagFilter(() => 0);
+    expect(feed(f, "<thinking>")).toEqual([{ type: "thinking_delta", thinking: "<thinking>" }]);
+  });
+
+  it("normal 态零残料 flush 仍返回空（不变量不变）", () => {
+    const f = new InlineTagFilter(() => 0);
+    expect(feed(f, "正文")).toEqual([{ type: "text_delta", text: "正文" }]);
+  });
+});
+
 describe("PrefixDeltaGuard（累积全文防滚雪球）", () => {
   it("厂商发累积全文时剥离已发前缀，只发余量", () => {
     const g = new PrefixDeltaGuard();

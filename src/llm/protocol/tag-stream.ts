@@ -38,6 +38,9 @@ export class InlineTagFilter {
   private mode: TagMode = "normal";
   /** 未定缓冲：normal 态是可能成标签前缀的尾部，thinking/toolcall 态是段内容 */
   private buf = "";
+  /** 当前段内是否已发出过内容（E99）：thinking 态内容即时发出后 buf 为空与「开标签后零内容」
+   *  无法从 buf 区分，靠此标志判断 flush 时要不要回发开标签本体 */
+  private segmentEmitted = false;
   /** 标签工具调用的分配序号（与协议原生工具调用共用计数器，防撞号） */
   private readonly allocateToolIndex: () => number;
 
@@ -67,7 +70,10 @@ export class InlineTagFilter {
         // 未见闭合标签：发出确定不属于闭合标签前缀的部分，缓冲可能是 `</thinking>` 前缀的尾部
         const hold = holdbackLength(this.buf, THINKING_CLOSE);
         const safe = this.buf.slice(0, this.buf.length - hold);
-        if (safe) events.push({ type: "thinking_delta", thinking: safe });
+        if (safe) {
+          this.segmentEmitted = true;
+          events.push({ type: "thinking_delta", thinking: safe });
+        }
         this.buf = this.buf.slice(this.buf.length - hold);
         return events;
       }
@@ -96,6 +102,7 @@ export class InlineTagFilter {
       if (openTag) {
         this.buf = this.buf.slice(openTag.length);
         this.mode = openTag === THINKING_OPEN ? "thinking" : "toolcall";
+        this.segmentEmitted = false;
         continue;
       }
       if (OPEN_TAGS.some((t) => t.startsWith(this.buf))) return events; // 半截开标签：等更多数据
@@ -112,7 +119,18 @@ export class InlineTagFilter {
   flush(): StreamEvent[] {
     const rest = this.buf;
     this.buf = "";
-    if (!rest) return [];
+    if (!rest) {
+      // 恰在开标签后零内容断流（E99）：开标签已从 normal 缓冲消费、段内零内容
+      //（segmentEmitted 为 false——thinking 态内容即时发出后 buf 同样为空，靠标志区分），
+      // 按 mode 回发开标签本体，标签不凭空消失
+      if (this.mode === "thinking" && !this.segmentEmitted) {
+        return [{ type: "thinking_delta", thinking: THINKING_OPEN }];
+      }
+      if (this.mode === "toolcall" && !this.segmentEmitted) {
+        return [{ type: "text_delta", text: TOOLCALL_OPEN }];
+      }
+      return [];
+    }
     if (this.mode === "thinking") return [{ type: "thinking_delta", thinking: rest }];
     // 未闭合的 tool_call 段带开标签按正文发出（保留意图痕迹，内容不丢）
     return [{ type: "text_delta", text: `${TOOLCALL_OPEN}${rest}` }];
