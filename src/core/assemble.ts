@@ -56,13 +56,18 @@ export async function assembleAssistantMessage(
     }
   }
 
-  // 按固定顺序组装内容块：文本 → 思考 → 工具调用（按 index 升序）
+  // 按固定顺序组装内容块：文本 → 思考 → 工具调用（按 index 升序）。
+  // 拼接后 trim 为空的不产生内容块（E69）：部分厂商对无思考的轮发占位思考增量
+  // （glm-4.5-air 工具循环续轮发 reasoning_content="\n"），如实组装会渲染出展开
+  // 全空白的「思考」折叠块；正文纯空白同理处理
   const content: ContentBlock[] = [];
-  if (textParts.length > 0) {
-    content.push({ type: "text", text: textParts.join("") });
+  const text = textParts.join("");
+  if (text.trim()) {
+    content.push({ type: "text", text });
   }
-  if (thinkingParts.length > 0) {
-    content.push({ type: "thinking", thinking: thinkingParts.join("") });
+  const thinking = thinkingParts.join("");
+  if (thinking.trim()) {
+    content.push({ type: "thinking", thinking });
   }
   for (const index of [...toolCalls.keys()].sort((a, b) => a - b)) {
     const call = toolCalls.get(index)!;
