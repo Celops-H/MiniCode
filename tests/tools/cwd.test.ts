@@ -12,14 +12,18 @@ describe("工具执行上下文 cwd（DESIGN 4.2）", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("resolvePath：相对路径基于上下文 cwd，绝对路径原样", async () => {
+  it("resolvePath：相对路径基于上下文 cwd，绝对路径归一化（E94）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "cwd-"));
     await withCwd(dir, () => {
       expect(resolvePath("a.txt")).toBe(path.join(dir, "a.txt"));
       expect(resolvePath("./x/y.txt")).toBe(path.join(dir, "x", "y.txt"));
+      // E94：绝对路径统一过 path.resolve，`.`/`..` 段与分隔符写法归一到同一键
+      //（read 记的键与 write 校验的键因拼写差异错开会绕过 CAS）
+      expect(resolvePath(path.join(dir, "sub", "..", "a.txt"))).toBe(path.join(dir, "a.txt"));
     });
     expect(resolvePath("a.txt")).toBe(path.resolve("a.txt")); // 上下文外退回进程 cwd
-    expect(resolvePath("/abs/path.txt")).toBe("/abs/path.txt");
+    // 绝对路径归一化后仍是同一文件（分隔符/冗余段不同写法收敛为同一结果）
+    expect(resolvePath("/abs/path.txt")).toBe(path.resolve("/abs/path.txt"));
   });
 
   it("Agent 指定 cwd：read/write/bash 在 cwd 内工作", async () => {

@@ -1,9 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
+import { open, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
 import { currentCwd, resolvePath } from "../file-state.js";
+
+/** 二进制嗅探读取的字节数（git 同款 8000）：前段出现 NUL 字节即判定二进制 */
+const BINARY_SNIFF_BYTES = 8000;
 
 const schema = z.object({
   pattern: z.string(),
@@ -42,9 +45,12 @@ export const grepTool: Tool = {
       if (fileGlob && !matchesGlob(path.basename(file), fileGlob)) continue;
       let content: string;
       try {
+        // 二进制文件嗅探跳过（E90）：readFile("utf8") 对二进制不抛错，整读大体积二进制
+        // 进内存且乱码行会命中正则给模型喂假匹配——前段含 NUL 即视为二进制（git 同款做法）
+        if (await isBinaryFile(file)) continue;
         content = await readFile(file, "utf8");
       } catch {
-        continue; // 非文本文件跳过
+        continue; // 读取失败跳过
       }
       const lines = content.split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -64,6 +70,22 @@ export const grepTool: Tool = {
         : "未找到匹配内容";
   },
 };
+
+/**
+ * NUL 字节二进制嗅探（E90）：只读文件前段（BINARY_SNIFF_BYTES）判 NUL，不整读大文件。
+ * @param file 文件路径
+ * @returns 是否判定为二进制
+ */
+async function isBinaryFile(file: string): Promise<boolean> {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(BINARY_SNIFF_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, BINARY_SNIFF_BYTES, 0);
+    return buffer.subarray(0, bytesRead).includes(0);
+  } finally {
+    await handle.close();
+  }
+}
 
 /** 递归收集文本文件，跳过 node_modules 与 .git，限制深度；深度超限时 truncated 置位 */
 async function listTextFiles(

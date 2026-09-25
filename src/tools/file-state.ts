@@ -139,9 +139,11 @@ export async function withCwd<T>(cwd: string, fn: () => T | Promise<T>): Promise
 }
 
 /**
- * 按当前工具执行上下文解析路径：绝对路径原样，相对路径基于当前 cwd。
- * 工具统一经此解析用户输入的路径（Worktree 场景下子 agent 的 cwd 是独立工作区）。
+ * 按当前工具执行上下文解析路径：相对路径基于当前 cwd；统一过一次 path.resolve
+ * （E94）——绝对路径原样返回会让 C:\a\.\b.txt、C:\a\..\a\b.txt、正斜杠写法各占
+ * 键，read 记的键与 write 校验的键因拼写差异错开，绕过「后写拒绝」CAS 静默覆盖
+ * （与已修大小写绕过 a888e06 同根）。
  */
 export function resolvePath(p: string): string {
-  return path.isAbsolute(p) ? p : path.resolve(currentCwd(), p);
+  return path.resolve(currentCwd(), p);
 }

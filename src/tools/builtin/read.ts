@@ -42,6 +42,11 @@ export const readTool: Tool = {
     const lines = content.split("\n");
     const end = limit !== undefined ? offset + limit : lines.length;
     const selected = lines.slice(offset, end);
+    if (selected.length === 0) {
+      // 越界反馈（E93）：offset 超出行数时返回空串与「读到空文件」不可区分，
+      // 模型得不到反馈可能反复调 offset 空转
+      return `起始行超出文件行数（共 ${lines.length} 行，offset 从 0 起）`;
+    }
     return selected.map((line, i) => `${offset + i + 1}\t${line}`).join("\n");
   },
 };

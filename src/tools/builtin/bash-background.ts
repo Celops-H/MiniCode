@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { currentCwd } from "../file-state.js";
 
 /** 后台任务状态：运行中 / 完成 / 失败 / 已终止 */
@@ -51,13 +52,24 @@ export function startBackgroundTask(command: string): BackgroundTask {
     detached: process.platform !== "win32",
     cwd: currentCwd(), // 绑定工具执行上下文 cwd（后台命令与前台一致，Worktree 隔离不绕过）
   });
-  child.stdout?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
-  child.stderr?.on("data", (chunk: Buffer) => appendOutput(task, chunk));
+  // 输出解码（E91）：stdout/stderr 各用 StringDecoder 按流累积解码，chunk 边界劈开的
+  // 多字节字符不再解成 U+FFFD；与前台 bash 同口径
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+  child.stdout?.on("data", (chunk: Buffer) => appendOutput(task, stdoutDecoder.write(chunk)));
+  child.stderr?.on("data", (chunk: Buffer) => appendOutput(task, stderrDecoder.write(chunk)));
+  // 立即关闭 stdin（E92）：与前台 bash 对称——非交互语义下裸 cat 类命令读到 EOF 即退出，
+  // 不再挂着直到占用任务位
+  child.stdin?.on("error", () => {});
+  child.stdin?.end();
   child.on("error", (err) => {
     task.status = "failed";
     task.error = err.message;
   });
   child.on("close", (code) => {
+    // 流关闭 flush 解码器残料（E91）
+    appendOutput(task, stdoutDecoder.end());
+    appendOutput(task, stderrDecoder.end());
     // killed 已由 killBackgroundTask 标记，这里不再覆盖
     if (task.status === "running") {
       task.status = code === 0 ? "completed" : "failed";
@@ -85,6 +97,9 @@ export function getBackgroundTask(id: string): BackgroundTask | undefined {
 export function killBackgroundTask(id: string): BackgroundTask | undefined {
   const entry = tasks.get(id);
   if (!entry) return undefined;
+  // 仅运行中可终止（E92）：对已 completed/failed 的任务覆盖成 killed 会丢真实退出码，
+  // 后续查询误报「已终止」；与 killAllBackgroundTasks 的 running 守卫对齐
+  if (entry.task.status !== "running") return entry.task;
   entry.task.status = "killed";
   const pid = entry.child?.pid;
   if (pid !== undefined) killProcessTree(pid);
@@ -107,12 +122,12 @@ export function killAllBackgroundTasks(): number {
   return count;
 }
 
-function appendOutput(task: BackgroundTask, chunk: Buffer) {
+function appendOutput(task: BackgroundTask, text: string) {
   if (task.output.length >= MAX_OUTPUT_CHARS) {
     if (!task.output.endsWith("[输出已截断]")) task.output += "\n[输出已截断]";
     return;
   }
-  task.output += chunk.toString();
+  task.output += text;
 }
 
 /** 跨平台按进程树强杀：Unix 杀新进程组（负 pid），Windows 用 taskkill /T */
