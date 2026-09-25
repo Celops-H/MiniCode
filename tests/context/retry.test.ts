@@ -134,6 +134,35 @@ describe("peelToolGroups", () => {
     ]);
   });
 
+  it("gap 剥多组时组间夹的用户输入不被卷入组区间（E74）", () => {
+    // gap 覆盖多组时更旧工具组的剥离区间不得包含组间的用户输入——
+    // 旧实现 tail=i+1 把游离消息卷进更旧组区间 [start,tail)，静默删除用户上下文
+    const messages = [
+      userMessage("第一轮"),
+      ...toolRound("r1"),
+      userMessage("第二轮输入"),
+      ...toolRound("r2"),
+      ...toolRound("r3"),
+      assistantMessage([{ type: "text", text: "总结" }]),
+    ];
+    // 剥到累计覆盖缺口：剥光 3 组（每 组≈15 token 量级，gap 足够大触发剥光）
+    const peeled = peelToolGroups(messages, 10_000);
+    expectSameShape(peeled, [
+      userMessage("第一轮"),
+      userMessage("第二轮输入"),
+      assistantMessage([{ type: "text", text: "总结" }]),
+    ]);
+    // 同样只剥到覆盖缺口的部分剥离（剥 1 组）时，两组间的用户输入也不受影响
+    const peeledOne = peelToolGroups(messages, 1);
+    expectSameShape(peeledOne, [
+      userMessage("第一轮"),
+      ...toolRound("r1"),
+      userMessage("第二轮输入"),
+      ...toolRound("r2"),
+      assistantMessage([{ type: "text", text: "总结" }]),
+    ]);
+  });
+
   it("剥光全部组仍保留第一条，不为空", () => {
     const messages = [userMessage("开始"), ...toolRound("r1")];
     const peeled = peelToolGroups(messages);

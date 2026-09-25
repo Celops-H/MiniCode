@@ -53,6 +53,8 @@ function hasToolCalls(message: Message): boolean {
  * （assistant 调用与其 tool_result 配对成组、配对不拆，并行调用同组），
  * 让请求变小后由上层重发当前轮，不做摘要。
  * 有 gapTokens 时剥到累计估算 token 覆盖缺口（一次重试到位），否则剥一组。
+ * 组间夹的游离消息（用户输入等）不属于任何组、剥离时保留（E74：旧实现把游离消息
+ * 卷进更旧组的区间一并删除，静默丢上下文）。
  * @param messages 当前消息数组
  * @param gapTokens 超出的 token 数（可解析时传入）
  * @returns 剥组后的新数组；无完整组可剥时返回 null（上层放弃重试直接报错）
@@ -70,7 +72,7 @@ export function peelToolGroups(messages: Message[], gapTokens?: number): Message
       groups.push({ start: i, end: tail });
       tail = i;
     } else {
-      tail = i + 1; // 游离消息：组下界拉回其之后
+      tail = i; // 游离消息（E74）：更旧组的上界收到游离消息处，组间游离消息不进任何组
     }
   }
   if (groups.length === 0) return null;

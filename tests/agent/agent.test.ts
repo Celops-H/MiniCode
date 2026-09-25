@@ -840,7 +840,8 @@ describe("Agent 主循环：模型对话闭环", () => {
       initialMessages: longResults,
       tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
       // 全部裁剪后仅剩裁剪标记，估算低于可用窗口，不触发摘要
-      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      //（窗口按 E79 分段计价口径重校准：10 条裁剪标记为 CJK 文本、比旧系数更大）
+      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -1121,9 +1122,9 @@ describe("Agent 主循环：模型对话闭环", () => {
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
-      // 窗口：首次撞线（10 条历史约 900 token）；摘要后增量（恢复上下文+大输入约 364 token）不撞线，
-      // 第二次压缩由 compactNow 显式触发
-      compactConfig: { contextWindow: 500, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      // 窗口：首次撞线（10 条历史约 2250 token，E79 分段计价）；摘要后增量（恢复上下文+大输入）
+      // 远低于可用窗口不撞线，第二次压缩由 compactNow 显式触发
+      compactConfig: { contextWindow: 2300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
     });
     agent.start("第一轮");
     for await (const _ of agent.run()) {
