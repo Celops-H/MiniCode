@@ -318,13 +318,16 @@ export async function assembleSessionExtensions(
 /**
  * 按 config.hooks 装配 Hook 总线（DESIGN 13）：每条命令包装成对应事件的处理器；
  * 未配置 hooks 时返回 undefined（Hook 系统不启用）。
+ * @param hooks hook 配置
+ * @param opts.onStderr hook 命令 stderr 的观测输出通道（E95）：CLI 缺省直写本进程
+ *   stderr；TUI 宿主注入界面通道（全屏渲染下直写 stderr 会插花渲染帧）
  */
-export function buildHookBus(hooks?: Config["hooks"]): HookBus | undefined {
+export function buildHookBus(hooks?: Config["hooks"], opts: { onStderr?: (text: string) => void } = {}): HookBus | undefined {
   if (!hooks) return undefined;
   const bus = new HookBus();
   for (const eventType of HOOK_EVENT_TYPES) {
     for (const command of hooks[eventType] ?? []) {
-      bus.on(eventType, createCommandHook(command));
+      bus.on(eventType, createCommandHook(command, { onStderr: opts.onStderr }));
     }
   }
   return bus;

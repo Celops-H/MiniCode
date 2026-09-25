@@ -263,7 +263,10 @@ async function runTuiSession(opts: {
   projectAgentsFile?: string;
 }): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState }> {
   const { store, models, config, session, agents, thinkingLevelBox, permissionModeBox } = opts;
-  const hooks = buildHookBus(config.hooks) ?? new HookBus();
+  // hook stderr 通道（E95）：可变盒子由 runTui 挂载后指向 toast，hook 观测输出不直写
+  // stderr（全屏渲染下会以裸文本插进渲染帧）
+  const hookStderrBox: { value?: (text: string) => void } = {};
+  const hooks = buildHookBus(config.hooks, { onStderr: (text) => hookStderrBox.value?.(text) }) ?? new HookBus();
   const modelId = session.meta.model;
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
   // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
@@ -298,6 +301,7 @@ async function runTuiSession(opts: {
       startupConnect: opts.startupConnect,
       shared: opts.shared,
       resetView: opts.resetView,
+      hookStderr: hookStderrBox,
       terminal: opts.terminal,
       projectAgentsFile: opts.projectAgentsFile,
       assemble: ({ approver, feedRoot }) => {

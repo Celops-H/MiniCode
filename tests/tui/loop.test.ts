@@ -458,3 +458,49 @@ describe("在途排队（E52/E72）", () => {
     expect(s.prompt.lines).toEqual([""]);
   });
 });
+
+describe("流中断 error 按轮边界收口（E77）", () => {
+  it("error 带流式内容：半截正文合并为 isError 消息块，流式区清空回空闲", () => {
+    let s = reduceHook(initState([]), { type: "UserPromptSubmit", input: "写个长回复" });
+    s = reduceEvent(s, { type: "text_delta", text: "半截正文" });
+    s = reduceEvent(s, { type: "error", message: "流意外结束（未收到 finish_reason）" });
+    expect(s.status).toBe("idle");
+    expect(s.streaming).toBeUndefined();
+    const last = s.blocks.at(-1)!;
+    expect(last).toMatchObject({
+      kind: "message",
+      role: "assistant",
+      text: "半截正文",
+      isError: true,
+    });
+  });
+
+  it("error 无流式内容：仍走独立错误块分支（不变）", () => {
+    const s = reduceEvent(initState([]), { type: "error", message: "boom" });
+    expect(s.status).toBe("idle");
+    const last = s.blocks.at(-1)!;
+    expect(last).toMatchObject({ kind: "message", isError: true });
+    expect((last as { text?: string }).text).toContain("boom");
+  });
+});
+
+describe("PreToolUse 兜底回填 id（E84）", () => {
+  it("无 id 工具卡兜底命中时回填 toolCallId，PostToolUse 按 id 配对成功", () => {
+    let s = reduceEvent(initState([]), {
+      type: "toolcall_start",
+      index: 0,
+      // 无 id 厂商：start 不带 id
+      name: "read",
+    });
+    s = reduceEvent(s, { type: "toolcall_delta", index: 0, partialJson: "{}" });
+    // PreToolUse 携带后端合成的 call_id：兜底命中 pending 卡并回填
+    s = reduceHook(s, { type: "PreToolUse", toolCallId: "call_0", toolName: "read", input: {}, agentPath: "/root" });
+    const running = s.blocks.find((b) => b.kind === "tool") as { id?: string; status: string };
+    expect(running.status).toBe("running");
+    expect(running.id).toBe("call_0");
+    // 结果事件按 id 配对：卡片转成功而非停转
+    s = reduceHook(s, { type: "PostToolUse", toolCallId: "call_0", toolName: "read", input: {}, output: "ok", isError: false, agentPath: "/root" });
+    const done = s.blocks.find((b) => b.kind === "tool") as { status: string };
+    expect(done.status).toBe("success");
+  });
+});
