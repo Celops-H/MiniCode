@@ -45,6 +45,8 @@ export type TuiAction =
   | { type: "esc" }
   /** Shift+Tab 切换权限模式（default/plan/bypassPermissions，显示名见 permissionModeLabel） */
   | { type: "mode-cycle" }
+  /** Ctrl+P 取消最后一个排队项（消息/命令恢复到输入框，E72；loop 层同步移除传输队列） */
+  | { type: "queue-cancel" }
   | { type: "noop" };
 
 /** 键位上下文：当前有没有弹层、输入是否为空、是否在历史浏览 */
@@ -134,6 +136,9 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       return { type: "delete-to-end" };
     case "ctrl-w":
       return { type: "delete-word" };
+    case "ctrl-p":
+      // 取消最后一个排队项（E72）：reducer 从展示队列弹出并恢复到输入框，loop 层同步移除传输队列
+      return { type: "queue-cancel" };
     case "esc":
       // 运行中打断；空闲时连按两次退出（loop 层处理状态与计时）
       return { type: "esc" };

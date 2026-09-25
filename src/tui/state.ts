@@ -84,6 +84,14 @@ export interface AgentNode {
 /** agent 生命周期 HookEvent 附带的时刻（loop 注入，state reducer 保持纯函数） */
 export type AgentEventMeta = HookEvent & { spawnedAt?: number; completedAt?: number };
 
+/** 排队项（E52/E72）：在途操作结束前暂存的用户消息或命令，输入框上方排队条展示，
+ *  Ctrl+P 取消末项；消费（消息被轮次真正提交 / 命令真正执行）时从队列移除 */
+export interface QueuedItem {
+  id: string;
+  kind: "message" | "command";
+  text: string;
+}
+
 /** 输入行上限（UI-SPEC §1：多行输入最多 20 行，超出不再增高，靠光标移动查看） */
 export const MAX_PROMPT_LINES = 20;
 
@@ -277,6 +285,8 @@ export interface TuiState {
   activeModel?: string;
   /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
+  /** 排队项（E52/E72）：在途期间新消息与统一入队的命令，展示在输入框上方、不混进消息区 */
+  queue: QueuedItem[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
   /** 可折叠块聚焦（Tab 切换、Enter 翻折）：-1 无聚焦（Enter 发送） */
@@ -449,6 +459,7 @@ export function initState(messages: Message[], title = "", modelLabel = ""): Tui
     permissionMode: "default",
     thinkingLevel: undefined,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
+    queue: [],
     scrollOffset: 0,
     turnIndex: 0,
     focusIndex: -1,
@@ -708,32 +719,17 @@ function appendMessageBlock(
 export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
   switch (event.type) {
     case "UserPromptSubmit": {
-      // 排队消息转正（E35）：send 时已上屏的 queued_ 块在此消费——改 id 为正式块不再重复追加；
-      // 无排队块（CLI/空闲路径）按原逻辑追加。
+      // 排队消息转正（E52/E72）：输入框上方排队条里的同文本消息在此消费——从队列移除并
+      // 追加正式用户消息块；非排队输入（空闲直接发送 / CLI 路径）队列无匹配，只追加块。
       // 轮开始快照当前模型进 activeModel（E70）：普通轮 done 落块也有署名可用——此前只在
       // model_fallback 事件赋值，普通轮是 undefined，渲染回落「当前模型名」，/model 切换后
       // 历史块署名跟着全翻转；回退事件仍会覆盖快照，署名始终是实际产出模型
-      const blocks = state.blocks;
-      const queuedIndex = blocks.findIndex(
-        (b) => b.kind === "message" && b.id.startsWith("queued_") && b.role === "user" && b.text === event.input,
-      );
-      if (queuedIndex >= 0) {
-        return {
-          ...state,
-          activeModel: state.modelLabel,
-          streaming: undefined,
-          blocks: blocks.map((b, i) =>
-            i === queuedIndex && b.kind === "message"
-              ? { ...b, id: `user_${queuedIndex}` }
-              : b,
-          ),
-          status: "running",
-        };
-      }
+      const queueIndex = state.queue.findIndex((q) => q.kind === "message" && q.text === event.input);
       return {
         ...state,
         activeModel: state.modelLabel,
         streaming: undefined,
+        queue: queueIndex >= 0 ? state.queue.filter((_, i) => i !== queueIndex) : state.queue,
         blocks: [
           ...state.blocks,
           {
@@ -993,8 +989,8 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, candidate: undefined };
     case "send": {
       // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）。
-      // 运行中发送（E35 排队）：消息块即时上屏标记 queued_ 前缀，UserPromptSubmit 消费时
-      // 转正（去重，防排队块与提交块双份）；空闲发送仍由 UserPromptSubmit 统一上屏
+      // 运行中发送（E52/E72 排队）：消息进排队条（输入框上方，不混进消息区），轮次真正
+      // 提交时（UserPromptSubmit 消费到）才转正为消息块；空闲发送由 UserPromptSubmit 统一上屏
       const sent = state.prompt.lines.join("\n").trim();
       const history = sent ? [...state.prompt.history, sent] : state.prompt.history;
       if (state.status === "running" && sent) {
@@ -1002,17 +998,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
           ...state,
           prompt: emptyPrompt(history),
           candidate: undefined,
-          blocks: [
-            ...state.blocks,
-            {
-              kind: "message" as const,
-              id: `queued_${state.blocks.length}`,
-              role: "user" as const,
-              text: sent,
-              time: formatTime(),
-              thinkingCollapsed: true,
-            },
-          ],
+          queue: [...state.queue, { id: `queue_${Date.now()}_${state.queue.length}`, kind: "message" as const, text: sent }],
         };
       }
       return {
@@ -1021,6 +1007,24 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
         status: "running",
         candidate: undefined,
       };
+    }
+    case "queue-cancel": {
+      // Ctrl+P 取消最后一个排队项（E72）：从队列弹出并恢复到输入框供编辑重发——
+      // 恢复文本置于现有输入内容之前（换行相接，受 20 行上限截断），光标落在恢复文本末尾
+      const last = state.queue.at(-1);
+      if (!last) return state;
+      const restored = last.text.split("\n");
+      const current = state.prompt.lines;
+      const merged = [...restored, ...current].slice(0, MAX_PROMPT_LINES);
+      const prompt: PromptState = {
+        lines: merged,
+        curLine: Math.min(restored.length - 1, merged.length - 1),
+        curCol: Array.from(merged[Math.min(restored.length - 1, merged.length - 1)] ?? "").length,
+        history: state.prompt.history,
+        historyIndex: -1,
+        sel: null,
+      };
+      return { ...state, queue: state.queue.slice(0, -1), prompt };
     }
     case "clear-input":
       return { ...state, prompt: emptyPrompt(state.prompt.history), candidate: undefined };

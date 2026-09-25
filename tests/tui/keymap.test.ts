@@ -35,6 +35,10 @@ it("Shift+方向键：输入态扩展选区；历史浏览态仍导航历史（�
   expect(mapKey({ kind: "shift-down" }, { inputEmpty: true })).toEqual({ type: "history", dir: 1 });
 });
 
+it("Ctrl+P 取消排队项（E72，normal 态）", () => {
+  expect(mapKey({ kind: "ctrl-p" })).toEqual({ type: "queue-cancel" });
+});
+
 it("编辑键在模态/候选态不落入输入：Ctrl+A/E/U/K/W → noop", () => {
   const m = { popup: "modal" as const };
   const c = { popup: "candidate" as const };

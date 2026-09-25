@@ -52,6 +52,10 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
     case "w":
       if (ctrl) return { kind: "ctrl-w" };
       return shift ? { kind: "char", char: "W" } : { kind: "char", char: "w" };
+    case "p":
+      // Ctrl+P 取消排队项（E72）；无 ctrl 时按普通字符处理
+      if (ctrl) return { kind: "ctrl-p" };
+      return shift ? { kind: "char", char: "P" } : { kind: "char", char: "p" };
     case "tab":
       return { kind: shift ? "shift-tab" : "tab" };
     case "escape":
