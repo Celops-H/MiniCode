@@ -23,13 +23,16 @@ export interface ModelInfo {
   providerId: string;
   contextWindow?: number;
   maxTokens?: number;
+  /** 推理系列模型（支持思考输出）：思考类请求参数仅对推理系列模型下发（E60，来自 provider 配置） */
+  reasoning?: boolean;
 }
 
 /** 协议：统一格式 ↔ 厂商格式双向转换 */
 export interface Protocol {
   readonly type: ProtocolType;
-  /** 统一 Context → 厂商请求体（含消息、工具 schema 转换） */
-  buildRequest(context: Context): unknown;
+  /** 统一 Context → 厂商请求体（含消息、工具 schema 转换）；model 供协议按模型能力位
+   *  决定请求参数（如思考类参数仅对 reasoning 模型下发），可省略 */
+  buildRequest(context: Context, model?: ModelInfo): unknown;
   /** 厂商流式响应 → 统一事件流 */
   parseStream(stream: AsyncIterable<unknown>): AsyncIterable<StreamEvent>;
 }

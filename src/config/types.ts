@@ -10,6 +10,10 @@ export const modelConfigSchema = z
     contextWindow: z.number().optional(),
     /** 厂商单次回复输出上限（anthropic-messages 协议请求体必填 max_tokens，取此值兜底 8192） */
     maxTokens: z.number().optional(),
+    /** 推理系列模型（支持思考输出）：思考类请求参数（reasoning_effort/enable_thinking）
+     *  仅对推理系列模型随思考等级下发——同一厂商混排思考/非思考模型，对不支持的模型
+     *  照发会被厂商 400 拒绝（E60） */
+    reasoning: z.boolean().optional(),
   })
   .strict();
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
@@ -22,12 +26,27 @@ export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 export const providerConfigSchema = z
   .object({
     id: z.string(),
+    /** API 端点。两种拼接约定不同：openai-chat-completions 需含 /v1（SDK 在其下追加
+     *  /chat/completions）；anthropic-messages 不带 /v1（SDK 自动追加 /v1/messages），
+     *  多写会请求到 /v1/v1/messages 404（E67）。不做自动归一化（猜前缀风险大于收益） */
     baseUrl: z.string().url(),
     apiKeyEnv: z.string(),
     /** 落盘 API key（/connect 写用户级全局配置，E27）；环境变量 key 同权且优先（E33） */
     apiKey: z.string().optional(),
     /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂（BACKEND §5） */
     protocol: z.enum(PROVIDER_PROTOCOLS).optional(),
+    /** 推理厂商（DeepSeek 等）：assistant 思考回传为 reasoning_content 字段，工具调用后
+     *  必须回传否则厂商 400；有思考内容才发，缺省 false（E60） */
+    reasoningContent: z.boolean().optional(),
+    /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系）：随思考等级仅对 reasoning 模型
+     *  下发，其余厂商或非推理模型发该字段可能 400（E60） */
+    reasoningEffort: z.boolean().optional(),
+    /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：随思考等级仅对
+     *  reasoning 模型发送，否则思考等级静默无效（E60） */
+    enableThinking: z.boolean().optional(),
+    /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头、
+     *  anthropic-beta 等，E64） */
+    headers: z.record(z.string(), z.string()).optional(),
     models: z.array(modelConfigSchema),
   })
   .strict();

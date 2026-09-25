@@ -118,6 +118,34 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     }).rejects.toThrow("请设置环境变量 ZHIPU_API_KEY");
   });
 
+  it("headers 配置经工厂透传（defaultHeaders，E64）", async () => {
+    const seen: Array<Record<string, string> | undefined> = [];
+    const factory = (apiKey: string, baseUrl: string, headers?: Record<string, string>) => {
+      seen.push(headers);
+      return {
+        messages: {
+          async create() {
+            return chunkGen(...RAW_CHUNKS);
+          },
+        },
+      } satisfies AnthropicMessagesClient;
+    };
+    const provider = new AnthropicCompatibleProvider({
+      id: "zhipu-anthropic",
+      name: "GLM（Anthropic 端点）",
+      baseUrl: "https://open.bigmodel.cn/api/anthropic",
+      apiKeyEnv: "ZHIPU_API_KEY",
+      env: { ZHIPU_API_KEY: "sk" },
+      headers: { "anthropic-beta": "interleaved-thinking" },
+      models: MODELS,
+      createClient: factory,
+    });
+    for await (const _ of provider.stream("claude-sonnet-4-5", createContext("s"))) {
+      // 消费流
+    }
+    expect(seen[0]).toEqual({ "anthropic-beta": "interleaved-thinking" });
+  });
+
   it("默认 client 带请求超时（防厂商请求挂起无限等待）", () => {
     const client = defaultAnthropicCreateClient("sk", "https://open.bigmodel.cn/api/anthropic") as unknown as {
       timeout: number;

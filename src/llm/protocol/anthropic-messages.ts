@@ -1,5 +1,5 @@
 import type { Context, ContentBlock, Message, StreamEvent, ToolDefinition } from "../../core/index.js";
-import type { Protocol } from "../types.js";
+import type { ModelInfo, Protocol } from "../types.js";
 import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
 interface AnthropicChunk {
@@ -23,9 +23,11 @@ export class AnthropicMessagesProtocol implements Protocol {
   /**
    * 统一 Context → Anthropic messages 请求体；model 与 stream 参数由 Provider 组装。
    * @param context 一次模型调用的完整输入
+   * @param _model 本次请求的模型定义（Protocol 接口统一签名；anthropic 协议的思考参数
+   *   在 Provider 层组装，模型能力位此处不消费）
    * @returns Anthropic messages 请求体（不含 model / stream）
    */
-  buildRequest(context: Context): unknown {
+  buildRequest(context: Context, _model?: ModelInfo): unknown {
     return {
       // 系统提示词放顶层 system 字段（Anthropic 约定；空串不占位，厂商拒空 system）
       ...(context.systemPrompt ? { system: context.systemPrompt } : {}),

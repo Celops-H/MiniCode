@@ -24,7 +24,14 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       baseUrl: p.baseUrl,
       apiKeyEnv: p.apiKeyEnv,
       ...(p.protocol ? { protocol: p.protocol } : {}),
-      models: p.models.map((id) => ({ id })),
+      // 厂商能力开关默认值（E60）：仅非缺省值落盘，种子保持最小
+      ...(p.reasoningContent ? { reasoningContent: true } : {}),
+      ...(p.reasoningEffort ? { reasoningEffort: true } : {}),
+      ...(p.enableThinking ? { enableThinking: true } : {}),
+      models: p.models.map((id) => ({
+        id,
+        ...(p.reasoningModels?.includes(id) ? { reasoning: true } : {}),
+      })),
     })),
   };
   await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });

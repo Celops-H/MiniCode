@@ -162,6 +162,70 @@ describe("请求超时", () => {
   });
 });
 
+describe("provider 配置能力位与请求头（E60/E64）", () => {
+  it("headers 配置经工厂透传（defaultHeaders），缺省不传", async () => {
+    const seen: Array<Record<string, string> | undefined> = [];
+    const factory = (apiKey: string, baseUrl: string, headers?: Record<string, string>) => {
+      seen.push(headers);
+      return {
+        chat: { completions: { async create() { return chunkGen({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] }); } } },
+      } satisfies ChatCompletionsClient;
+    };
+    const withHeaders = new OpenAICompatibleProvider({
+      id: "azure",
+      name: "Azure",
+      baseUrl: "https://x.openai.azure.com/v1",
+      apiKeyEnv: "AZURE_API_KEY",
+      env: { AZURE_API_KEY: "sk" },
+      headers: { "api-key": "sk" },
+      models: MODELS,
+      createClient: factory,
+    });
+    for await (const _ of withHeaders.stream("deepseek-chat", createContext("s"))) {
+      // 消费流
+    }
+    expect(seen[0]).toEqual({ "api-key": "sk" });
+
+    const withoutHeaders = new OpenAICompatibleProvider({
+      id: "a", name: "A", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY",
+      env: { A_API_KEY: "sk" }, models: MODELS, createClient: factory,
+    });
+    for await (const _ of withoutHeaders.stream("deepseek-chat", createContext("s"))) {
+      // 消费流
+    }
+    expect(seen[1]).toBeUndefined();
+  });
+
+  it("模型能力位随请求传给协议：reasoning_effort 仅对 reasoning 模型下发（E60）", async () => {
+    let lastRequest: Record<string, unknown> | undefined;
+    const client: ChatCompletionsClient = {
+      chat: { completions: { async create(request) { lastRequest = request; return chunkGen({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] }); } } },
+    };
+    const provider = new OpenAICompatibleProvider({
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OPENAI_API_KEY",
+      env: { OPENAI_API_KEY: "sk" },
+      reasoningEffort: true,
+      models: [
+        { id: "gpt-4o", name: "gpt-4o", api: "openai-chat-completions", providerId: "openai" },
+        { id: "o-series", name: "o-series", api: "openai-chat-completions", providerId: "openai", reasoning: true },
+      ],
+      createClient: () => client,
+    });
+    const context = createContext("s", [userMessage("q")], [], "medium");
+    for await (const _ of provider.stream("gpt-4o", context)) {
+      // 消费流
+    }
+    expect(lastRequest?.reasoning_effort).toBeUndefined();
+    for await (const _ of provider.stream("o-series", context)) {
+      // 消费流
+    }
+    expect(lastRequest?.reasoning_effort).toBe("medium");
+  });
+});
+
 describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
   /** 挂起流：先产出一个 chunk 后不再产出，直到 signal 中止才释放（模拟厂商断流但连接不关） */
   function hangingStream(signal?: AbortSignal): AsyncIterable<unknown> {

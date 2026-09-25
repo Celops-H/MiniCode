@@ -6,6 +6,7 @@ import {
   Models,
   OpenAICompatibleProvider,
 } from "../llm/index.js";
+import type { AnthropicMessagesClient, AnthropicMessagesClientFactory, ChatCompletionsClient, ChatCompletionsClientFactory } from "../llm/index.js";
 
 /** 可用厂商为零时的启动报错（无任何兜底：列表里出现的模型一定有 key，无例外） */
 export const NO_PROVIDER_ERROR =
@@ -24,6 +25,8 @@ export const NO_PROVIDER_ERROR =
  * @param config 配置（providers / modelChain 可选）
  * @param modelId 模型 id 覆盖（-m 选项），可省略
  * @param opts.env 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
+ * @param opts.createOpenAIClient / opts.createAnthropicClient client 工厂注入（测试用；
+ *   缺省用各 Provider 的默认 SDK 工厂），可端到端断言配置 → 请求体的能力位接线
  * @param opts.onWarning 装配告警回调（modelChain 死条目等非致命问题）；缺省输出到 stderr，
  *   TUI 宿主注入收集器转为界面提示（console 直写在全屏界面下会花屏）
  * @returns 注册了 Provider 的 Models 集合
@@ -31,7 +34,12 @@ export const NO_PROVIDER_ERROR =
 export function buildModelClient(
   config: Config | undefined,
   modelId?: string,
-  opts: { env?: NodeJS.ProcessEnv; onWarning?: (message: string) => void } = {},
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    createOpenAIClient?: ChatCompletionsClientFactory;
+    createAnthropicClient?: AnthropicMessagesClientFactory;
+    onWarning?: (message: string) => void;
+  } = {},
 ): Models {
   const env = opts.env ?? process.env;
   // key 过滤：无 key 的厂商不注册（调用了也必然认证失败，进列表只会误导 /model 选择）。
@@ -65,6 +73,8 @@ export function buildModelClient(
         providerId: provider.id,
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens,
+        // 推理系列模型能力位（E60）：思考类请求参数仅对推理系列模型下发
+        reasoning: m.reasoning,
       };
     });
     if (protocol === "anthropic-messages") {
@@ -77,7 +87,9 @@ export function buildModelClient(
           apiKeyEnv: provider.apiKeyEnv,
           apiKey: provider.apiKey,
           env,
+          headers: provider.headers,
           models: modelInfos,
+          createClient: opts.createAnthropicClient,
         }),
       );
     } else {
@@ -89,13 +101,16 @@ export function buildModelClient(
           apiKeyEnv: provider.apiKeyEnv,
           apiKey: provider.apiKey,
           env,
-          // DeepSeek 等推理厂商：thinking 必须回传 reasoning_content，否则工具调用后下一轮 400
-          reasoningContent: provider.id === "deepseek",
-          // 仅 OpenAI 官方支持 reasoning_effort 请求参数；其余厂商发该字段可能 400，不开
-          reasoningEffort: provider.id === "openai",
+          // 厂商能力开关（E60）：一律来自 provider 配置字段，不再按 provider.id 硬编码
+          // （自建 provider 与聚合商同样可表达；粒度与语义见 config schema 与 BACKEND §5）
+          reasoningContent: provider.reasoningContent,
+          reasoningEffort: provider.reasoningEffort,
+          enableThinking: provider.enableThinking,
+          headers: provider.headers,
           models: modelInfos,
           // E68 诊断开关（调试排查「流活跃但零输出」的静默卡死）：config.debug.streamChunks
           debugDroppedChunks: config?.debug?.streamChunks === true,
+          createClient: opts.createOpenAIClient,
         }),
       );
     }
