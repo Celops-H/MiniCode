@@ -148,7 +148,7 @@ it("子 agent 结论展开后显示结论与合并（默认折叠，点击展开
 });
 
 it("流式尾显示思考与增量文本", async () => {
-  const setup = await app([], { text: "正在处理…", thinking: "展开中", isError: false });
+  const setup = await app([], { text: "正在处理…", thinking: "展开中" });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("正在处理");

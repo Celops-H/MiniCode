@@ -37,7 +37,13 @@ export const bashTaskTool: Tool = {
       return `任务 ${task_id} 不存在`;
     }
     if (action === "kill") {
-      killBackgroundTask(task_id);
+      const killed = killBackgroundTask(task_id)!;
+      // 守卫后对已完成/失败任务是无操作（审查修正）：按实际终态反馈，不再无条件宣称
+      // 「已终止」与后续 status 查询自相矛盾（上方 getBackgroundTask 已确认任务存在）
+      if (killed.status !== "killed") {
+        const exitText = killed.exitCode !== undefined ? `（退出码 ${killed.exitCode}）` : "";
+        return `任务 ${task_id} 已于先前结束：${STATUS_TEXT[killed.status]}${exitText}，无需终止`;
+      }
       return `任务 ${task_id} 已终止`;
     }
     // status：状态行 + 累积输出
