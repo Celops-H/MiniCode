@@ -53,9 +53,13 @@ describe("buildRequest：消息与工具转换", () => {
     const notEnabled = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
     expect(notEnabled.enable_thinking).toBeUndefined();
   });
-  it("请求体带 stream_options.include_usage（E63 真实用量）", () => {
+  it("includeUsage 开关决定请求体是否带 stream_options.include_usage（E63 能力位）", () => {
+    // 缺省（未开能力位）：不带该参数——严格网关对未知参数 400 且不可切换
     const req = protocol.buildRequest(createContext("s", [userMessage("hi")])) as { stream_options?: { include_usage?: boolean } };
-    expect(req.stream_options).toEqual({ include_usage: true });
+    expect(req.stream_options).toBeUndefined();
+    const usageProtocol = new OpenAICompletionsProtocol({ includeUsage: true });
+    const withUsage = usageProtocol.buildRequest(createContext("s", [userMessage("hi")])) as { stream_options?: { include_usage?: boolean } };
+    expect(withUsage.stream_options).toEqual({ include_usage: true });
   });
 
   it("user / assistant / tool_result 消息转换", () => {
@@ -170,36 +174,6 @@ describe("buildRequest：消息与工具转换", () => {
     expect(req.messages).toEqual([{ role: "system", content: "s" }]);
   });
 
-  it("流尾 usage chunk 转统一用量挂 done（E63）", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen(
-        { choices: [{ delta: { content: "hi" }, index: 0 }] },
-        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
-        // include_usage 的流尾 chunk：无 choices，仅带用量
-        { usage: { prompt_tokens: 120, completion_tokens: 45 } },
-      ),
-    )) {
-      events.push(e);
-    }
-    expect(events).toEqual([
-      { type: "text_delta", text: "hi" },
-      { type: "done", stopReason: "stop", usage: { inputTokens: 120, outputTokens: 45 } },
-    ]);
-  });
-
-  it("无 usage chunk 的流 done 不带 usage（厂商未给时契约不变）", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen(
-        { choices: [{ delta: { content: "hi" }, index: 0 }] },
-        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
-      ),
-    )) {
-      events.push(e);
-    }
-    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
-  });
 
   it("工具 schema 转换为 function 格式", () => {
     const context = createContext("s", [], [
@@ -873,5 +847,89 @@ describe("parseStream：E68 零产出 chunk 诊断", () => {
     });
     const report = writes.join("");
     expect(report).toContain("...(len ");
+  });
+});
+
+describe("parseStream：真实用量挂 done（E63）", () => {
+  it("流尾 usage chunk 转统一用量挂 done", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        // include_usage 的流尾 chunk：无 choices，仅带用量
+        { usage: { prompt_tokens: 120, completion_tokens: 45 } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "done", stopReason: "stop", usage: { inputTokens: 120, outputTokens: 45 } },
+    ]);
+  });
+
+  it("无 usage chunk 的流 done 不带 usage（厂商未给时契约不变）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
+  });
+
+  it("常规 chunk 的 usage: null 不当用量（OpenAI 规范非末尾 chunk 的 usage 为 null）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }], usage: null },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
+  });
+
+  it("部分字段用量保留（仅 prompt_tokens / 仅 completion_tokens）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        { usage: { prompt_tokens: 7 } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop", usage: { inputTokens: 7 } });
+  });
+
+  it("usage chunk 不计入 E68 零产出诊断（解析用量即有产出意义）", async () => {
+    const usageProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((line: unknown) => {
+      writes.push(String(line));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      for await (const _ of usageProtocol.parseStream(
+        chunkGen(
+          { choices: [{ delta: { role: "assistant" }, index: 0 }] },
+          { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+          { usage: { prompt_tokens: 1, completion_tokens: 1 } },
+        ),
+      )) {
+        // 消费流
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    // 仅 role chunk 与 finish_reason chunk 算零产出（2 个），usage chunk 不算
+    expect(writes.join("")).toContain("2 个未产出任何事件");
   });
 });

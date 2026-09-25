@@ -362,6 +362,8 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     }
     const assistant = (requests[0]!.messages as Array<Record<string, unknown>>)[1]!;
     expect(assistant.reasoning_content).toBe("先读文件");
+    // includeUsage 同走预设回填（E63 能力位）
+    expect(requests[0]!.stream_options).toEqual({ include_usage: true });
   });
 
   it("存量配置回填：用户显式写的值（含 false）优先于预设默认（审查补充）", async () => {

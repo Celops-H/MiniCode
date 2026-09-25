@@ -21,6 +21,8 @@ export interface ProviderPreset {
   reasoningEffort?: boolean;
   /** 厂商能力开关默认值（E60）：需显式 enable_thinking 参数才开启思考（对 reasoning 模型发送） */
   enableThinking?: boolean;
+  /** 厂商能力开关默认值（E63）：请求流式真实用量（stream_options.include_usage） */
+  includeUsage?: boolean;
   /** models 中属于推理系列（支持思考输出）的模型 id：写配置时对应模型标 reasoning: true */
   reasoningModels?: string[];
 }
@@ -42,6 +44,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     // 支持 reasoning_effort 的厂商（E60）：预设模型 gpt-4o 系非推理系列不带该参数，
     // 用户加推理系列模型（reasoning: true）后思考等级经此参数下发
     reasoningEffort: true,
+    includeUsage: true,
     models: ["gpt-4o", "gpt-4o-mini"],
     defaultModel: "gpt-4o",
   },
@@ -54,6 +57,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     // 旧名 deepseek-chat/deepseek-reasoner 已于 2026-07-24 停用
     // 推理厂商（E60）：thinking 必须以 reasoning_content 字段回传，否则工具轮 400
     reasoningContent: true,
+    includeUsage: true,
     reasoningModels: ["deepseek-v4-pro", "deepseek-v4-flash"],
     models: ["deepseek-v4-pro", "deepseek-v4-flash"],
     defaultModel: "deepseek-v4-pro",
@@ -73,6 +77,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "Moonshot（Kimi，OpenAI 兼容）",
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "MOONSHOT_API_KEY",
+    includeUsage: true,
     models: ["moonshot-v1-8k", "moonshot-v1-32k"],
     defaultModel: "moonshot-v1-32k",
   },
@@ -94,6 +99,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     // DashScope 需显式 enable_thinking 才开启思考（E60）：随思考等级对 reasoning 模型发送，
     // 不发送则思考等级静默无效
     enableThinking: true,
+    includeUsage: true,
     reasoningModels: ["qwen-plus", "qwen-max"],
     models: ["qwen-plus", "qwen-max"],
     defaultModel: "qwen-plus",
@@ -130,6 +136,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "OpenRouter（聚合）",
     baseUrl: "https://openrouter.ai/api/v1",
     apiKeyEnv: "OPENROUTER_API_KEY",
+    includeUsage: true,
     models: ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"],
     defaultModel: "anthropic/claude-sonnet-4-5",
   },
