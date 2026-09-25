@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AssistantMessage, ContentBlock } from "./message.js";
+import type { AssistantMessage, ContentBlock, ModelUsage } from "./message.js";
 import type { StreamEvent } from "./events.js";
 
 /**
@@ -18,6 +18,8 @@ export async function assembleAssistantMessage(
   const toolCalls = new Map<number, { id?: string; name?: string; json: string[] }>();
   let stopReason: string | undefined;
   let error: string | undefined;
+  // 真实用量（E63）：随 done 事件到达，回填 meta.usage 供观测与压缩阈值校准
+  let usage: ModelUsage | undefined;
 
   for await (const event of stream) {
     switch (event.type) {
@@ -44,6 +46,7 @@ export async function assembleAssistantMessage(
       }
       case "done":
         stopReason = event.stopReason;
+        usage = event.usage;
         break;
       case "error":
         error = event.message;
@@ -71,14 +74,16 @@ export async function assembleAssistantMessage(
     });
   }
 
-  // 有停因或错误时记入 meta，供后续观测与续跑
+  // 有停因或错误时记入 meta，供后续观测与续跑；真实用量一并回填（E63）
   const meta = stopReason ?? error;
   return {
     role: "assistant",
     id: randomUUID(),
     content,
     timestamp: new Date().toISOString(),
-    ...(meta ? { meta: { stopReason: stopReason ?? `error: ${error}` } } : {}),
+    ...(meta
+      ? { meta: { stopReason: stopReason ?? `error: ${error}`, ...(usage ? { usage } : {}) } }
+      : {}),
   };
 }
 

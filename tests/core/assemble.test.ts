@@ -96,4 +96,21 @@ describe("事件收集器", () => {
     const msg = await assembleAssistantMessage(events({ type: "error", message: "连接失败" }));
     expect(msg.meta?.stopReason).toBe("error: 连接失败");
   });
+
+  it("done 携带的 usage 回填 meta.usage（E63 真实用量）", async () => {
+    const msg = await assembleAssistantMessage(
+      events(
+        { type: "text_delta", text: "回复" },
+        { type: "done", stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 45 } },
+      ),
+    );
+    expect(msg.meta).toEqual({ stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 45 } });
+  });
+
+  it("done 不带 usage 时 meta 无 usage 字段（厂商未给时契约不变）", async () => {
+    const msg = await assembleAssistantMessage(
+      events({ type: "text_delta", text: "回复" }, { type: "done", stopReason: "end_turn" }),
+    );
+    expect(msg.meta).toEqual({ stopReason: "end_turn" });
+  });
 });
