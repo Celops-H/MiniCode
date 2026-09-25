@@ -4,7 +4,7 @@
  * key 由 /connect 写用户级全局配置的 provider apiKey 字段（E27，项目目录不落 .env）或用户自设环境变量。
  */
 
-/** 供应商预设：id 即 provider id，写入 config.providers；apiKeyEnv 即写入 .env 的环境变量名 */
+/** 供应商预设：id 即 provider id，写入 config.providers；apiKeyEnv 是读取 key 的环境变量名（key 本体由 /connect 写用户级配置或用户自设环境变量） */
 export interface ProviderPreset {
   id: string;
   name: string;

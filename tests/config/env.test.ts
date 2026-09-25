@@ -39,6 +39,19 @@ describe("parseEnvFile（.env 解析）", () => {
     expect(vars.QUOTED).toBe("x");
   });
 
+  it("引号与注释组合形态不产出损坏值（E88 审查补充）", () => {
+    const vars = parseEnvFile('K1="a # b" # tail' + String.fromCharCode(10) + "K2='ab # cd' # note" + String.fromCharCode(10) + 'K3="a" # "b"' + String.fromCharCode(10) + 'K4= # c' + String.fromCharCode(10) + 'K5=v#x' + String.fromCharCode(10));
+    // 引号值内含 # 且后跟注释：不截断引号内内容、不残留引号
+    expect(vars.K1).toBe("a # b");
+    expect(vars.K2).toBe("ab # cd");
+    // 注释以引号结尾：不误判整段为引号值
+    expect(vars.K3).toBe("a");
+    // = 后紧跟注释：空串
+    expect(vars.K4).toBe("");
+    // 无空格的 #：保留（密码含 # 更安全）
+    expect(vars.K5).toBe("v#x");
+  });
+
   it("忽略无 = 号的行", () => {
     expect(parseEnvFile("JUST_WORDS\nKEY=value", {})).toEqual({ KEY: "value" });
   });
