@@ -79,7 +79,10 @@ async function scanOneDir(source: SkillInfo["source"], dir: string): Promise<Ski
  * @returns 属性表（CRLF 归一后解析）与正文（frontmatter 之后的全部内容）
  */
 export function parseFrontmatter(text: string): { attrs: Record<string, string>; body: string } {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  // 前导 BOM 剥离（E87）：Windows 记事本等工具写出的 SKILL.md 常带 BOM，首行变成
+  // "\uFEFF---" 判否后 frontmatter 整体落进正文（name 回退目录名、description 回退
+  // 字面 "---"，全程无报错）；扫描与工具两条路径都经本函数，一处剥两处修好
+  const lines = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n");
   if (lines[0] !== "---") return { attrs: {}, body: lines.join("\n") };
   // 收尾分隔线须整行恰为 ---（---- 、---abc 等是普通行，不当收尾）
   const close = lines.indexOf("---", 1);

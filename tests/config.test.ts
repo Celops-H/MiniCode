@@ -23,7 +23,9 @@ describe("resolveSessionsDir", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "my proj", "app-v2"));
     const dir = resolveSessionsDir({ homedir: "/home/tester", cwd });
     const name = dir.split(path.sep).pop()!;
-    expect(name).toBe(`${cwd.replace(/[^a-zA-Z0-9]/g, "-")}-${name.split("-").pop()}`);
+    // win32 编码前统一小写（E89）：期望值按同口径归一
+    const normalized = process.platform === "win32" ? cwd.toLowerCase() : cwd;
+    expect(name).toBe(`${normalized.replace(/[^a-zA-Z0-9]/g, "-")}-${name.split("-").pop()}`);
     // 有损编码撞名的路径（project-a 与 project_a）哈希不同：隔离不失效
     const sibling = resolveSessionsDir({
       homedir: "/home/tester",
@@ -37,12 +39,14 @@ describe("resolveSessionsDir", () => {
     const dir = resolveSessionsDir({ homedir: "/home/tester", root: "/custom/sessions", cwd });
     const name = dir.split(path.sep).pop()!;
     expect(dir.startsWith(path.join("/custom/sessions"))).toBe(true);
-    expect(name).toContain(cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+    const normalized = process.platform === "win32" ? cwd.toLowerCase() : cwd;
+    expect(name).toContain(normalized.replace(/[^a-zA-Z0-9]/g, "-"));
   });
 
   it("XDG_CONFIG_HOME 优先于 homedir", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "w"));
-    const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    const normalized = process.platform === "win32" ? cwd.toLowerCase() : cwd;
+    const encoded = normalized.replace(/[^a-zA-Z0-9]/g, "-");
     expect(resolveSessionsDir({ homedir: "/home/tester", xdgConfigHome: "/etc/xdg", cwd })).toMatch(
       new RegExp(`^${path.join("/etc/xdg", "minicode", "sessions", encoded).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-z]+$`),
     );

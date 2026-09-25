@@ -30,6 +30,15 @@ describe("parseEnvFile（.env 解析）", () => {
     });
   });
 
+  it("未加引号值的行内注释剥 \" #\" 后缀（E88，标准 dotenv 语义）", () => {
+    const vars = parseEnvFile('KEY=value # prod\nOTHER="a # b"\nQUOTED="x" # tail\n');
+    expect(vars.KEY).toBe("value");
+    // 引号内的 # 是内容，不剥
+    expect(vars.OTHER).toBe("a # b");
+    // 引号值后跟行内注释：先剥注释再剥引号
+    expect(vars.QUOTED).toBe("x");
+  });
+
   it("忽略无 = 号的行", () => {
     expect(parseEnvFile("JUST_WORDS\nKEY=value", {})).toEqual({ KEY: "value" });
   });

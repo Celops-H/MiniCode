@@ -25,7 +25,17 @@ export function parseEnvFile(
     if (key === "") continue;
     if (env[key] !== undefined) continue; // 已有环境变量优先，.env 不覆盖
 
-    result[key] = stripQuotes(withoutExport.slice(eqIdx + 1).trim());
+    let value = withoutExport.slice(eqIdx + 1).trim();
+    // 行内注释（E88，标准 dotenv 语义）：未加引号的值剥 " #" 起的注释尾巴——该加载器
+    // 主要为 API key 服务，用户按通行习惯写 `KEY=value # prod` 会拿到静默损坏的 key，
+    // 401 时难排查；加引号的值不剥（引号内的 # 是内容），引号后跟注释同样生效
+    const hashIdx = value.indexOf(" #");
+    const quoted =
+      (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    if (hashIdx >= 0 && !quoted) {
+      value = value.slice(0, hashIdx).trim();
+    }
+    result[key] = stripQuotes(value);
   }
   return result;
 }

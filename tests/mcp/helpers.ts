@@ -29,6 +29,13 @@ rl.on("line", (line) => {
     if (process.env.FAKE_MODE === "bigtext") { reply(msg.id, { content: [{ type: "text", text: "汉".repeat(70000) }] }); return; }
     if (process.env.FAKE_MODE === "flood") { process.stdout.write("x".repeat(2 * 1024 * 1024) + "\\n"); reply(msg.id, { content: [{ type: "text", text: "洪水后正常" }] }); return; }
     const text = msg.params?.arguments?.text;
+    if (process.env.FAKE_MODE === "server-request") {
+      // 先发一条 server→client 请求（id 与客户端在途 tools/call 撞号、无 result）再正常回复：
+      // 旧实现会把该请求当响应以 undefined resolve，tools/call 拿不到真结果（E85）
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, method: "sampling/createMessage", params: {} }) + "\\n");
+      reply(msg.id, { content: [{ type: "text", text: "echo: " + text }] });
+      return;
+    }
     if (msg.params?.name === "boom") reply(msg.id, { content: [{ type: "text", text: "工具内部失败" }], isError: true });
     else reply(msg.id, { content: [{ type: "text", text: "echo: " + text }, { type: "text", text: "第二段" }] });
   }
