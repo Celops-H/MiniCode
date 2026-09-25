@@ -19,7 +19,6 @@ export const readTool: Tool = {
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
-  requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input) {
     const { path, offset = 0, limit } = validateInput<{

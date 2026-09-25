@@ -70,7 +70,6 @@ describe("CLI 多 Agent 组装", () => {
       description: "读取文件",
       inputSchema: z.object({ path: z.string() }),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 100,
       execute: () => "内容",
     };
@@ -426,7 +425,6 @@ describe("CLI /compact 命令", () => {
       description: "读取文件",
       inputSchema: z.object({ path: z.string() }),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: async () => {
         const { readFile } = await import("node:fs/promises");
@@ -491,7 +489,6 @@ describe("CLI /compact 命令", () => {
       description: "回显",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 100,
       execute: (input) => `echo:${(input as { text: string }).text}`,
     };
@@ -753,7 +750,6 @@ describe("CLI 交互循环", () => {
       description: "读取文件",
       inputSchema: z.object({ path: z.string() }),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "文件内容",
     };
@@ -841,7 +837,6 @@ describe("CLI 交互循环", () => {
       description: "读取文件",
       inputSchema: z.object({ path: z.string() }),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "文件内容",
     };

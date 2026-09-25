@@ -42,8 +42,6 @@ export interface Tool {
   readonly inputJsonSchema?: Record<string, unknown>;
   /** 只读工具：权限快速放行 */
   readonly isReadOnly: boolean;
-  /** 需要用户交互：升级审批 */
-  readonly requiresUserInteraction: boolean;
   /** 免审批放行：低影响工具（如 agent 消息投递）不进入权限审批链（DESIGN 7.1） */
   readonly skipsPermission?: boolean;
   /** 最大结果字符数：超出截断 */

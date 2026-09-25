@@ -63,7 +63,6 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       prompt: z.string(),
     }),
     isReadOnly: false,
-    requiresUserInteraction: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { agentName, prompt } = input as { agentName: string; prompt: string };
@@ -102,7 +101,6 @@ function sendMessageTool(deps: CollabDeps): Tool {
       message: z.string(),
     }),
     isReadOnly: false,
-    requiresUserInteraction: false,
     skipsPermission: true,
     maxResultSizeChars: 500,
     execute: async (input) => {
@@ -132,7 +130,6 @@ function followupTaskTool(deps: CollabDeps): Tool {
       message: z.string(),
     }),
     isReadOnly: false,
-    requiresUserInteraction: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { target, message } = input as { target: string; message: string };
@@ -157,7 +154,6 @@ function listAgentsTool(deps: CollabDeps): Tool {
     description: "列出团队中的成员（层级路径，含自己与尚未激活的成员）",
     inputSchema: z.object({}),
     isReadOnly: true,
-    requiresUserInteraction: false,
     skipsPermission: true,
     maxResultSizeChars: 2000,
     execute: () => {
@@ -193,7 +189,6 @@ function waitAgentTool(deps: CollabDeps): Tool {
       timeoutMs: z.number().optional(),
     }),
     isReadOnly: false,
-    requiresUserInteraction: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { target, timeoutMs } = input as { target: string; timeoutMs?: number };
@@ -225,7 +220,6 @@ function interruptAgentTool(deps: CollabDeps): Tool {
       target: z.string(),
     }),
     isReadOnly: false,
-    requiresUserInteraction: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { target } = input as { target: string };

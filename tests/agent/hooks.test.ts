@@ -55,7 +55,6 @@ function makeReadTool(execute: Tool["execute"]): Tool {
     description: "读取文件",
     inputSchema: z.object({}),
     isReadOnly: true,
-    requiresUserInteraction: false,
     maxResultSizeChars: 1000,
     execute,
   };
@@ -180,7 +179,6 @@ describe("Agent 接入 Hook 事件", () => {
           description: "读取文件",
           inputSchema: z.object({}),
           isReadOnly: true,
-          requiresUserInteraction: false,
           maxResultSizeChars: 1000,
           execute: () => "内容",
         },

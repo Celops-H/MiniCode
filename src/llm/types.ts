@@ -10,7 +10,7 @@ export type ProtocolType =
 /** 认证状态 */
 export interface ProviderAuth {
   configured: boolean;
-  source?: "env" | "stored" | "oauth";
+  source?: "env" | "stored";
 }
 
 /** 模型定义（纯数据、可序列化） */

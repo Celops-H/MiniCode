@@ -26,7 +26,6 @@ export const bashTaskTool: Tool = {
   description: "查询或终止后台 bash 任务（配合 bash 工具的 background 参数使用）",
   inputSchema: schema,
   isReadOnly: false,
-  requiresUserInteraction: false,
   maxResultSizeChars: 10000,
   async execute(input) {
     const { task_id, action } = validateInput<{ task_id: string; action: "status" | "kill" }>(

@@ -951,20 +951,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           showToast("已打断压缩");
           return;
         }
-        // Esc：有折叠聚焦先取消聚焦；运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
+        // Esc：运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
         // 子 agent 活跃时主状态可能非 running（主 agent 在等结论）——判定并入 agent 树运行态，
         // 否则 Esc 会被 arm 成双击退出、按两次才打断（P8）
         const verdict = decideEsc({
-          hasFocus: state.focusIndex >= 0,
           running: state.status === "running" || hasRunningAgent(state.agents),
           lastEscAt,
           now: Date.now(),
           windowMs: ESC_EXIT_WINDOW_MS,
         });
-        if (verdict === "focus-clear") {
-          commit({ ...state, focusIndex: -1 });
-          return;
-        }
         if (verdict === "interrupt") {
           doInterrupt();
           return;
@@ -975,11 +970,6 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         }
         lastEscAt = Date.now();
         showToast("再按一次 Esc 退出");
-        return;
-      }
-      case "interrupt": {
-        if (state.status === "running") doInterrupt();
-        else exitLoop();
         return;
       }
       case "exit": {

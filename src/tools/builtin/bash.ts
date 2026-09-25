@@ -32,16 +32,6 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 
 /**
- * 判断命令是否因超时/中止被强杀：Node 杀进程后错误对象置 killed 与 signal。
- * @param err 命令执行错误
- * @returns 是否被强杀（超时或中断）
- */
-export function isExecTimeoutError(err: unknown): boolean {
-  const e = err as { killed?: boolean; signal?: string };
-  return e?.killed === true && e.signal !== undefined;
-}
-
-/**
  * 判断 bash 命令是否只读安全（可并发执行）。
  * 只认简单命令 + 命令名在白名单；出现重定向、管道、连接符、后台、
  * 子 shell、命令替换、变量赋值前缀等任何可能修改状态的结构，一律非只读（保守）。
@@ -82,7 +72,6 @@ export const bashTool: Tool = {
     if (parsed.data.background) return false;
     return isReadOnlyBashCommand(parsed.data.command);
   },
-  requiresUserInteraction: false,
   maxResultSizeChars: 30000,
   async execute(input, options?: ExecuteContext) {
     const { command, timeoutMs = 30000, background } = validateInput<{

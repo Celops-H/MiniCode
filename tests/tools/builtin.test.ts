@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createFileTools } from "../../src/tools/index.js";
+import { createBuiltinTools } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
 describe("文件类内置工具", () => {
@@ -19,7 +19,7 @@ describe("文件类内置工具", () => {
   }
 
   function tool(name: string): Tool {
-    const t = createFileTools().find((x) => x.name === name);
+    const t = createBuiltinTools().find((x) => x.name === name);
     if (!t) throw new Error(`工具不存在：${name}`);
     return t;
   }

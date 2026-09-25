@@ -10,11 +10,6 @@ import { createTodoTool } from "./todo.js";
 import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "./collab.js";
 export { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT };
 
-/** 文件类内置工具集合 */
-export function createFileTools(): Tool[] {
-  return [readTool, writeTool, globTool, grepTool];
-}
-
 /** 全部内置工具集合 */
 export function createBuiltinTools(): Tool[] {
   return [readTool, writeTool, globTool, grepTool, bashTool, bashTaskTool, editTool, createTodoTool()];

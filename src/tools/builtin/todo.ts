@@ -28,7 +28,6 @@ export function createTodoTool(): Tool {
     description: "维护任务待办清单：传入完整待办列表整体替换，返回最新清单",
     inputSchema: todoSchema,
     isReadOnly: false,
-    requiresUserInteraction: false,
     maxResultSizeChars: 10000,
     async execute(input) {
       const { todos } = todoSchema.parse(input);

@@ -121,7 +121,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显文本",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: (input) => `回显：${(input as { text: string }).text}`,
     };
@@ -245,7 +244,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: "读取文件",
         inputSchema: z.object({ path: z.string() }),
         isReadOnly: true,
-        requiresUserInteraction: false,
         maxResultSizeChars: 100,
         execute: () => {
           toolRan = true;
@@ -324,7 +322,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: `只读工具 ${name}`,
         inputSchema: z.object({}),
         isReadOnly: true,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         isConcurrencySafe: () => true,
         execute: async () => {
@@ -386,7 +383,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: `并发工具 ${name}`,
         inputSchema: z.object({}),
         isReadOnly: true,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         isConcurrencySafe: () => true,
         execute: () => ({
@@ -432,7 +428,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显文本",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: (input) => `回显：${(input as { text: string }).text}`,
     };
@@ -484,7 +479,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "返回超长输出",
       inputSchema: z.object({}),
       isReadOnly: true,
-      requiresUserInteraction: false,
       maxResultSizeChars: 10,
       execute: () => "一二三四五六七八九十十一十二十三十四十五",
     };
@@ -540,7 +534,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "标记失败的工具",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => ({ output: "执行超时，已终止", isError: true }),
     };
@@ -584,7 +577,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显文本",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => {
         executed = true;
@@ -632,7 +624,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显文本",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "回显",
     };
@@ -676,7 +667,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "执行即抛错",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => {
         throw new Error("磁盘写入失败");
@@ -736,7 +726,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "回显",
     };
@@ -783,7 +772,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "回显",
     };
@@ -831,7 +819,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "回显",
     };
@@ -878,7 +865,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: "回显",
         inputSchema: z.object({}),
         isReadOnly: false,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
@@ -945,7 +931,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: "回显",
         inputSchema: z.object({}),
         isReadOnly: false,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
@@ -1060,7 +1045,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: "回显",
         inputSchema: z.object({}),
         isReadOnly: false,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
@@ -1120,7 +1104,6 @@ describe("Agent 主循环：模型对话闭环", () => {
         description: "回显",
         inputSchema: z.object({}),
         isReadOnly: false,
-        requiresUserInteraction: false,
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
@@ -1204,7 +1187,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "回显",
       inputSchema: z.object({}),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "回显",
     };
@@ -1246,7 +1228,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "执行命令",
       inputSchema: z.object({ command: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => {
         executed = true;
@@ -1294,7 +1275,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       description: "执行命令",
       inputSchema: z.object({ command: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: () => "命令输出",
     };
@@ -1378,7 +1358,6 @@ describe("maxTurns 耗尽收尾（E83）", () => {
       description: "回显",
       inputSchema: z.object({ text: z.string() }),
       isReadOnly: false,
-      requiresUserInteraction: false,
       maxResultSizeChars: 1000,
       execute: (input) => String((input as { text: string }).text),
     };

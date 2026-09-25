@@ -359,7 +359,6 @@ describe("协作工具集（多 agent 环境）", () => {
           description: "慢读",
           inputSchema: z.object({}),
           isReadOnly: true,
-          requiresUserInteraction: false,
           maxResultSizeChars: 100,
           execute: async () => {
             await sleep(200);
@@ -460,7 +459,6 @@ describe("协作工具集（多 agent 环境）", () => {
         description: "自定义",
         inputSchema: z.object({}),
         isReadOnly: true,
-        requiresUserInteraction: false,
         maxResultSizeChars: 100,
         execute: () => "ok",
       }],
@@ -775,7 +773,6 @@ describe("协作工具集（多 agent 环境）", () => {
           description: "慢读",
           inputSchema: z.object({}),
           isReadOnly: true,
-          requiresUserInteraction: false,
           maxResultSizeChars: 100,
           execute: async () => {
             await sleep(100);
@@ -835,7 +832,6 @@ describe("协作工具集（多 agent 环境）", () => {
           description: "慢读",
           inputSchema: z.object({}),
           isReadOnly: true,
-          requiresUserInteraction: false,
           maxResultSizeChars: 100,
           execute: async () => {
             await sleep(100);
@@ -990,7 +986,6 @@ describe("协作工具集（多 agent 环境）", () => {
           description: "慢读",
           inputSchema: z.object({}),
           isReadOnly: true,
-          requiresUserInteraction: false,
           maxResultSizeChars: 100,
           execute: async () => {
             await sleep(100);

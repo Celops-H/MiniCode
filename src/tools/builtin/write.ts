@@ -16,7 +16,6 @@ export const writeTool: Tool = {
   description: "写入文件，覆盖已有内容，自动创建父目录",
   inputSchema: schema,
   isReadOnly: false,
-  requiresUserInteraction: false,
   maxResultSizeChars: 1000,
   async execute(input) {
     const { path: filePath, content } = validateInput<{ path: string; content: string }>(

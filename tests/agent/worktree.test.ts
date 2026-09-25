@@ -45,7 +45,6 @@ const writeTool = {
   description: "写入文件",
   inputSchema: z.object({ path: z.string(), content: z.string() }),
   isReadOnly: false,
-  requiresUserInteraction: false,
   maxResultSizeChars: 100,
   execute: async (input: { path: string; content: string }) => {
     const { resolvePath } = await import("../../src/tools/file-state.js");

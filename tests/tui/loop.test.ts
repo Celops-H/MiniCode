@@ -112,7 +112,7 @@ describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回�
   });
 });
 describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
-  it("消息区/流式/弹层/候选/聚焦/agent 树/输入清空，历史与标题保留", () => {
+  it("消息区/流式/弹层/候选/agent 树/输入清空，历史与标题保留", () => {
     let s = initState([]);
     s = reduceAction(s, { type: "input", text: "旧输入" });
     s = reduceAction(s, { type: "send" }); // 发送才写入输入历史（↑↓ 回看）
@@ -123,7 +123,6 @@ describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
     expect(fresh.prompt.lines[0]).toBe("");
     expect(fresh.modal).toBeUndefined();
     expect(fresh.candidate).toBeUndefined();
-    expect(fresh.focusIndex).toBe(-1);
     // 输入历史保留（↑↓ 可回看）
     expect(fresh.prompt.history).toContain("旧输入");
     // 会话标题保留（/clear 只清消息，标题不复位）

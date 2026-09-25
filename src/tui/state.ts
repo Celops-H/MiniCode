@@ -289,8 +289,6 @@ export interface TuiState {
   queue: QueuedItem[];
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
-  /** 可折叠块聚焦（Tab 切换、Enter 翻折）：-1 无聚焦（Enter 发送） */
-  focusIndex: number;
   toast?: { text: string; key: number };
   /** slash 命令候选（输入以 / 开头时出现） */
   candidate?: SlashCandidate;
@@ -462,7 +460,6 @@ export function initState(messages: Message[], title = "", modelLabel = ""): Tui
     queue: [],
     scrollOffset: 0,
     turnIndex: 0,
-    focusIndex: -1,
   };
 }
 
@@ -476,7 +473,6 @@ export function resetToNewState(state: TuiState): TuiState {
     toast: undefined,
     modal: undefined,
     candidate: undefined,
-    focusIndex: -1,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
     prompt: emptyPrompt(state.prompt.history),
   };
@@ -1003,14 +999,6 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       const selected = Math.max(0, Math.min(state.candidate.items.length - 1, state.candidate.selected + action.dir));
       return { ...state, candidate: { ...state.candidate, selected } };
     }
-    case "toggle-focus": {
-      // 在可折叠块间移动聚焦（Tab 高亮当前块，供键盘用户定位）
-      const foldables = state.blocks.map((b, i): number => (isFoldable(b) ? i : -1)).filter((i) => i >= 0);
-      if (foldables.length === 0) return state;
-      const current = state.focusIndex;
-      const next = current >= 0 ? foldables.find((i) => i > current) : foldables[0];
-      return { ...state, focusIndex: next ?? current };
-    }
     case "fold-at": {
       // 鼠标左键点折叠块任意部位：直接翻转指定块的折叠态（无论聚焦与否）
       const target = state.blocks[action.index];
@@ -1019,8 +1007,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, blocks };
     }
     case "cancel":
-      // 依次收起：聚焦 → slash 候选
-      if (state.focusIndex >= 0) return { ...state, focusIndex: -1 };
+      // 收起 slash 候选
       return { ...state, candidate: undefined };
     case "send": {
       // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）。
@@ -1067,7 +1054,6 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, scrollOffset: Math.max(0, state.scrollOffset + action.dir) };
     case "scroll-end":
       return { ...state, scrollOffset: 0 };
-    case "interrupt":
     case "exit":
     case "permission":
     case "modal-confirm":

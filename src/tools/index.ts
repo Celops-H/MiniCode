@@ -8,7 +8,7 @@ export type { Tool, ContextModifier, ExecuteResult } from "./base.js";
 export { ToolRegistry } from "./registry.js";
 export { FileState, currentFileState, withFileState, hashContent } from "./file-state.js";
 export type { FileVersion } from "./file-state.js";
-export { createFileTools, createBuiltinTools } from "./builtin/index.js";
+export { createBuiltinTools } from "./builtin/index.js";
 export { bashTool } from "./builtin/bash.js";
 export { bashTaskTool } from "./builtin/bash-task.js";
 export {

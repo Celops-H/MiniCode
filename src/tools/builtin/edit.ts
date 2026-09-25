@@ -17,7 +17,6 @@ export const editTool: Tool = {
   description: "在文件中精确替换一段文本，旧文本须唯一匹配",
   inputSchema: schema,
   isReadOnly: false,
-  requiresUserInteraction: false,
   maxResultSizeChars: 1000,
   async execute(input) {
     const { path, oldString, newString } = validateInput<{
