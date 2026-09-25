@@ -172,7 +172,7 @@ export class AnthropicMessagesProtocol implements Protocol {
             yield { type: "done", stopReason: stopReason ?? "end_turn" };
             return;
           case "error":
-            yield { type: "error", message: String((chunk as { error?: unknown }).error ?? "未知错误") };
+            yield { type: "error", message: anthropicErrorMessage((chunk as { error?: unknown }).error) };
             return;
           default:
             break;
@@ -199,6 +199,8 @@ export class AnthropicMessagesProtocol implements Protocol {
 
 /**
  * 统一消息 → Anthropic 消息；工具结果归并进 user 消息（Anthropic 要求）。
+ * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过（E55）：与 openai 侧
+ * buildRequest 的过滤对称，跨协议切模型续跑不再把它发给严格校验端点吃 400。
  * @param messages 统一格式消息数组
  * @returns Anthropic 消息参数数组
  */
@@ -220,6 +222,7 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
         out.push({ role: "user", content: message.content });
         break;
       case "assistant":
+        if (message.content.length === 0) break;
         flushToolResults();
         out.push({ role: "assistant", content: message.content.map(toAnthropicBlock) });
         break;
@@ -261,4 +264,24 @@ function toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
  */
 function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
   return { name: tool.name, description: tool.description, input_schema: tool.inputSchema };
+}
+
+/**
+ * 流内 error 事件的 error 字段 → 可读消息（E96）：官方 overloaded_error 等载荷的
+ * error 是对象，String() 直转得 "[object Object]" 并经 assemble 写进持久化 stopReason、
+ * 透传界面上屏。对象取 message ?? type，字符串直用；无 message/type 的对象序列化保留
+ * 错误信号（与 openai 侧 chunkErrorMessage 同口径）；error 缺失时给通用文案。
+ * @param error 流内 error 事件的 error 字段值
+ * @returns 可读错误消息
+ */
+function anthropicErrorMessage(error: unknown): string {
+  if (error === undefined || error === null) return "未知错误";
+  if (typeof error === "string") return error;
+  if (typeof error === "object") {
+    const fields = error as { message?: unknown; type?: unknown };
+    if (typeof fields.message === "string" && fields.message) return fields.message;
+    if (typeof fields.type === "string" && fields.type) return fields.type;
+    return Object.keys(error).length > 0 ? JSON.stringify(error) : "未知错误";
+  }
+  return String(error);
 }

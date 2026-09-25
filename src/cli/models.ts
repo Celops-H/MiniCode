@@ -88,6 +88,8 @@ export function buildModelClient(
           apiKey: provider.apiKey,
           env,
           headers: provider.headers,
+          // 签名校验端点开关（E61）：真 Anthropic API 语义的端点带 tools 期间不发 thinking
+          requireThinkingSignature: provider.requireThinkingSignature,
           models: modelInfos,
           createClient: opts.createAnthropicClient,
         }),
