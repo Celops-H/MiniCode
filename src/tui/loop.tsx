@@ -254,24 +254,33 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let compactInterrupted = false;
   /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位；E24） */
   let initPolicyBox: { value: boolean } | undefined;
-  /** 运行中排队的命令（E35）：Stop 后逐个重新走 handleCommand；消息走 pendingInputs 天然排队 */
+  /** 运行中排队的命令（E35/E52）：在途结束后逐个重新走 handleCommand；消息走 pendingInputs 天然排队 */
   let pendingCommands: string[] = [];
-  /** 排队命令块序号：Date.now() 同毫秒会撞 id，用递增序号 */
-  let commandSeq = 0;
-  /** 排队命令入队 + 上屏「（已排队）」命令块（E35，/compact /init /rename 三处共用） */
+  /** 排队项序号：Date.now() 同毫秒会撞 id，用递增序号 */
+  let queueSeq = 0;
+  /** 统一在途判定（E52）：root 回合运行中、子 agent 后台运行中、压缩执行中任一即「在途」——
+   *  新消息与命令统一排队等在途全部结束后消费，不再拦截+toast */
+  const inFlight = (): boolean => compacting || reassemblyBlocked(state);
+  /** 排队命令入队（E52）：命令进输入框上方排队条（不再上屏「（已排队）」命令块），执行时产生正常痕迹 */
   const queueRunningCommand = (command: string): void => {
     pendingCommands.push(command);
     commit({
       ...state,
-      blocks: [...state.blocks, { kind: "command", id: `cmd_${++commandSeq}`, text: `${command}（已排队）`, time: formatTime() }],
+      queue: [...state.queue, { id: `queue_${++queueSeq}`, kind: "command", text: command }],
       prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
       candidate: undefined,
     });
   };
-  /** 排队命令逐个出队执行（E35）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流 */
+  /** 排队命令逐个出队执行（E35/E52）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流；
+   *  出队同步移除排队条条目。root 空闲但子 agent 活跃时 handleCommand 的在途判定会重新入队，
+   *  等子 agent 收尾（AgentCompleted/Interrupted 触发 drain）再执行 */
   const drainQueuedCommands = (): void => {
     if (pendingCommands.length === 0) return;
     const next = pendingCommands.shift()!;
+    const queueIndex = state.queue.findIndex((q) => q.kind === "command" && q.text === next);
+    if (queueIndex >= 0) {
+      commit({ ...state, queue: state.queue.filter((_, i) => i !== queueIndex) });
+    }
     handleCommand(next);
   };
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
@@ -368,8 +377,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/compact" || command.startsWith("/compact ")) {
-      if (state.status === "running") {
-        // 运行中排队（E35）：当前轮结束后按序执行，不打断不丢弃
+      if (inFlight()) {
+        // 在途排队（E52）：等全部在途操作结束后按序执行，不打断不丢弃
         queueRunningCommand(command);
         return;
       }
@@ -383,8 +392,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       // 走正常回合让模型用 write 工具落盘；已存在时提示词要求不覆盖、先建议改进。
       // E24/E42：命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
       // 过程中只读工具与写项目根 AGENTS.md 免审批（initPolicyBox 置位，收尾复位）
-      if (state.status === "running") {
-        // 运行中排队（E35）：当前轮结束后按序执行；免铺屏装弹待提示词被消费到才置位
+      if (inFlight()) {
+        // 在途排队（E52）：当前轮/子 agent/压缩结束后按序执行；免铺屏装弹待提示词被消费到才置位
         suppressPending = true;
         queueRunningCommand(command);
         return;
@@ -403,7 +412,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           suppressPending = true;
           commit({
             ...state,
-            blocks: [...state.blocks, { kind: "command", id: `cmd_${++commandSeq}`, text: command, time: formatTime() }],
+            blocks: [...state.blocks, { kind: "command", id: `cmd_${Date.now()}`, text: command, time: formatTime() }],
             prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
             candidate: undefined,
           });
@@ -422,11 +431,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/session") {
-      // 运行中拒绝：切会话会把当前回合作废、删除交互风险面更大；
-      // 子 agent 后台运行中同样拦截（E13 同根源，审查决断纳入）——重建会中断全部 agent
-      if (reassemblyBlocked(state)) {
-        showToast("有 agent 运行中，等全部结束后再切换会话");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      // 在途排队（E52，替代 E13 拦截）：切会话的重建链会作废在途 agent 工作，
+      // 排队到全部在途操作结束后再弹会话面板
+      if (inFlight()) {
+        queueRunningCommand(command);
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
@@ -434,11 +442,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/connect") {
-      // 重装配族守卫（E13）：root 运行中或子 agent 后台运行中都拦截——重建链会把全部
-      // agent 的当前工作作废；否则打开供应商选择弹窗
-      if (reassemblyBlocked(state)) {
-        showToast("有 agent 运行中，等全部结束后再切换供应商");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      // 重装配族在途排队（E52，替代 E13 拦截）：重建链会把全部 agent 的当前工作作废，
+      // 排队到全部在途操作结束后再弹供应商选择弹窗
+      if (inFlight()) {
+        queueRunningCommand(command);
         return;
       }
       commit({
@@ -454,10 +461,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/model") {
-      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族守卫，E13 同 /connect）
-      if (reassemblyBlocked(state)) {
-        showToast("有 agent 运行中，等全部结束后再切换模型");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族，在途排队 E52 同 /connect）
+      if (inFlight()) {
+        queueRunningCommand(command);
         return;
       }
       const models = options.modelList ?? [];
@@ -475,11 +481,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
     if (command === "/mcp" || command === "/skills" || command === "/skill") {
       // 扩展面板（UI-SPEC §8b）：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配
-      // （BACKEND §19/§20）；重装配会重建 agent，重装配族守卫拦截（E13，同 /model，含子 agent 后台运行）。
+      // （BACKEND §19/§20）；重装配会重建 agent，重装配族在途排队（E52，同 /model）。
       // E22：命令改名为 /skills（/skill 保留兼容别名）
-      if (reassemblyBlocked(state)) {
-        showToast(command === "/mcp" ? "有 agent 运行中，等全部结束后再管理 MCP 服务" : "有 agent 运行中，等全部结束后再管理技能");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      if (inFlight()) {
+        queueRunningCommand(command);
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
@@ -489,12 +494,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     if (command === "/rename" || command.startsWith("/rename ")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化），
       // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）。
-      // 运行中排队（E35）：rewriteMessages 与轮末落盘并发会交错，排队到轮后执行
+      // 在途排队（E52）：rewriteMessages 与轮末落盘并发会交错，排队到在途结束后执行
       const renameTitle = command.slice("/rename".length).trim();
       if (!renameTitle) {
         showToast("用法：/rename 会话名");
         commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      } else if (state.status === "running") {
+      } else if (inFlight()) {
         queueRunningCommand(command);
       } else {
         session.meta.title = renameTitle;
@@ -507,10 +512,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/clear") {
-      // 运行守卫：运行中清屏会抹掉当前回合用户消息块与进行中的工具卡，破坏视图连续性
-      if (state.status === "running") {
-        showToast("运行中不可清空，等本轮结束后再试");
-        commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
+      // 在途排队（E86/E52）：清空会与在途 agent 的 mailbox 回灌、轮末落盘竞态（子 agent
+      // 后台运行、root 空闲时尤其隐蔽），统一排队到全部在途操作结束后执行
+      if (inFlight()) {
+        queueRunningCommand(command);
         return;
       }
       // 回会话新建态：agent 上下文清空（防下一轮 start() 把旧历史回灌模型并重写回文件）
@@ -951,6 +956,17 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         showToast(`权限模式：${permissionModeLabel(next)}（${note}）`);
         return;
       }
+      case "queue-cancel": {
+        // Ctrl+P 取消最后一个排队项（E72）：reducer 从排队条弹出并恢复到输入框；
+        // 传输队列（pendingInputs/pendingCommands）同步移除同文本末项，两边一致
+        const item = state.queue.at(-1);
+        if (!item) return;
+        const transport = item.kind === "message" ? pendingInputs : pendingCommands;
+        const idx = transport.lastIndexOf(item.text);
+        if (idx >= 0) transport.splice(idx, 1);
+        commit(reduceAction(state, action));
+        return;
+      }
       case "thinking-adjust": {
         // /model 弹窗 ←→：只改弹窗内候选等级（Enter 应用才写 thinkingBox，Esc 取消不改——「应用/取消」语义自洽）
         if (state.modal?.kind !== "model") return;
@@ -1043,8 +1059,16 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       if (!suppressStream) commit(reduceHook(state, e));
     }),
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
-    hooks.on("AgentCompleted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
-    hooks.on("AgentInterrupted", (e) => commit(reduceHook(state, { ...e, completedAt: Date.now() }))),
+    hooks.on("AgentCompleted", (e) => {
+      commit(reduceHook(state, { ...e, completedAt: Date.now() }));
+      // 子 agent 收尾可能正是最后一个在途操作（E52）：root 本就空闲时不会再有 Stop 触发出队，
+      // 这里补一次 drain（在途判定不满足时 handleCommand 会重新入队，不会抢跑）
+      if (!inFlight()) drainQueuedCommands();
+    }),
+    hooks.on("AgentInterrupted", (e) => {
+      commit(reduceHook(state, { ...e, completedAt: Date.now() }));
+      if (!inFlight()) drainQueuedCommands();
+    }),
     hooks.on("Stop", (e) => {
       const isRoot = e.agentPath === undefined || e.agentPath === "/root";
       // /init 收尾（E24）：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。

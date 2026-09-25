@@ -16,6 +16,7 @@ import { Messages } from "./Messages.js";
 import { PromptView } from "./Prompt.js";
 import { StatusBar } from "./StatusBar.js";
 import { ModalView } from "./Modal.js";
+import { QueueStrip } from "./QueueStrip.js";
 import { AgentStrip, agentRowCount } from "./AgentStrip.js";
 import { theme } from "./theme.js";
 
@@ -98,6 +99,10 @@ export function App(props: AppProps): JSX.Element {
         <box flexShrink={0} paddingX={1} paddingBottom={1}>
           <text fg={theme.textMuted}>{props.state.toast?.text}</text>
         </box>
+      </Show>
+      {/* 排队条（E52/E72）：在途期间入队的消息/命令展示在输入框上方，不混进消息区 */}
+      <Show when={!fullscreen() && !panelOpen() && props.state.queue.length > 0}>
+        <QueueStrip items={props.state.queue} />
       </Show>
       {/* 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills 面板不与输入框并存 */}
       <Show when={!fullscreen() && !panelOpen()}>

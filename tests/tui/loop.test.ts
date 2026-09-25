@@ -296,8 +296,9 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     let s = initState([], "", "glm-5.3");
     s = { ...s, status: "running", prompt: { ...s.prompt, lines: ["排队消息"], curCol: 4 } };
     s = reduceAction(s, { type: "send" });
-    // 运行中发送：消息块带 queued_ 前缀上屏
-    expect(s.blocks.some((b) => b.kind === "message" && b.id.startsWith("queued_"))).toBe(true);
+    // 运行中发送：进排队条，不直接上消息块（E72）
+    expect(s.queue).toHaveLength(1);
+    expect(s.blocks.some((b) => b.kind === "message" && b.role === "user")).toBe(false);
     s = reduceHook(s, { type: "UserPromptSubmit", input: "排队消息" });
     expect(s.activeModel).toBe("glm-5.3");
   });
@@ -394,40 +395,66 @@ describe("重装配族命令守卫（E13）：reassemblyBlocked 覆盖子 agent 
   });
 });
 
-describe("运行中排队（E35）", () => {
-  it("运行中 send：消息块即时上屏且 id 带 queued_ 前缀，状态保持 running", () => {
+describe("在途排队（E52/E72）", () => {
+  it("运行中 send：消息进排队条不混进消息区，输入框清空、状态保持 running", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const, prompt: { ...s.prompt, lines: ["排队的问题"], curCol: 5 } };
+    s = reduceAction(s, { type: "send" });
+    expect(s.status).toBe("running");
+    expect(s.queue).toEqual([expect.objectContaining({ kind: "message", text: "排队的问题" })]);
+    expect(s.blocks.some((b) => b.kind === "message" && b.role === "user")).toBe(false);
+    expect(s.prompt.lines).toEqual([""]);
+  });
+
+  it("UserPromptSubmit 消费排队消息：队列移除并追加用户消息块", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "排队的问题" });
     s = reduceAction(s, { type: "send" });
-    // send 只清空输入框（ reducer 无输入文本，此处验证排队块经 UserPromptSubmit 去重链路）
-    expect(s.status).toBe("running");
-  });
-
-  it("UserPromptSubmit 消费排队块：同文本 queued_ 块转正不重复追加", () => {
-    let s = initState([
-      userMessage("排队的问题"),
-    ]);
-    // 构造排队块：手排一个 queued_ 前缀消息（模拟 reduceAction send 运行中分支的产出）
-    s = {
-      ...s,
-      status: "running" as const,
-      blocks: [
-        ...s.blocks.map((b) =>
-          b.kind === "message" && b.role === "user" ? { ...b, id: "queued_0" } : b,
-        ),
-      ],
-    };
+    expect(s.queue).toHaveLength(1);
     s = reduceHook(s, { type: "UserPromptSubmit", input: "排队的问题" });
+    expect(s.queue).toEqual([]);
     const userBlocks = s.blocks.filter((b) => b.kind === "message" && b.role === "user");
-    // 转正而非追加：仍只有一条用户消息，id 已换成正式前缀
     expect(userBlocks).toHaveLength(1);
-    expect(userBlocks[0]!.kind === "message" && userBlocks[0]!.id.startsWith("user_")).toBe(true);
   });
 
-  it("UserPromptSubmit 无排队块：按原逻辑追加用户消息块", () => {
+  it("UserPromptSubmit 无排队项（空闲直发/CLI 路径）：队列不动，按原逻辑追加用户消息块", () => {
     let s = initState([]);
     s = reduceHook(s, { type: "UserPromptSubmit", input: "新问题" });
+    expect(s.queue).toEqual([]);
     const userBlocks = s.blocks.filter((b) => b.kind === "message" && b.role === "user");
     expect(userBlocks).toHaveLength(1);
+  });
+
+  it("Ctrl+P 取消末个排队消息：恢复到输入框、队列弹出", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "第一条" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "input", text: "第二条" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "queue-cancel" });
+    // 末项（第二条）恢复到输入框，光标落在恢复文本末尾
+    expect(s.queue).toHaveLength(1);
+    expect(s.queue[0]).toMatchObject({ text: "第一条" });
+    expect(s.prompt.lines[0]).toBe("第二条");
+    expect(s.prompt.curCol).toBe(3);
+  });
+
+  it("Ctrl+P 取消时输入框非空：恢复文本置于现有内容之前", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "排队项" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "input", text: "草稿" });
+    s = reduceAction(s, { type: "queue-cancel" });
+    expect(s.queue).toEqual([]);
+    expect(s.prompt.lines).toEqual(["排队项", "草稿"]);
+  });
+
+  it("排队条为空时 Ctrl+P 不动作", () => {
+    const s = reduceAction(initState([]), { type: "queue-cancel" });
+    expect(s.queue).toEqual([]);
+    expect(s.prompt.lines).toEqual([""]);
   });
 });
