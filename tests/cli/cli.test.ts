@@ -969,6 +969,96 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
     expect(prompts[0]).not.toContain("已存在的 AGENTS.md 内容");
   });
 
+  it("读 AGENTS.md 失败时报错且不把字面 /init 提交给模型（E76）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const { agent, prompts } = makeCapturingAgent();
+    // 指向一个目录路径：readInstructionFile 读目录 EACCES/EISDIR 真实抛错
+    const agentsFile = path.join(dir, "some-dir");
+    const fs = await import("node:fs");
+    fs.mkdirSync(agentsFile);
+    async function* inputs(): AsyncIterable<string> {
+      yield "/init";
+      yield "正常问题";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+      projectAgentsFile: agentsFile,
+    });
+    // 失败路径只报错；字面 "/init" 没有作为用户输入跑模型（唯一上模型的输入是"正常问题"）
+    expect(outputs.some((t) => t.includes("读取 AGENTS.md 失败"))).toBe(true);
+    expect(prompts).toEqual(["正常问题"]);
+    expect(agent.getMessages().some((m) => m.role === "user" && m.content === "/init")).toBe(false);
+  });
+
+  it("/init 与 /compact 落命令痕迹（E98，与 TUI 同口径）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agentsFile = path.join(dir, "AGENTS.md");
+    const { agent } = makeCapturingAgent();
+    // 未配置压缩：/compact 返回未压缩（不落痕）；/init 走正常回合且命令消息入历史
+    async function* inputs(): AsyncIterable<string> {
+      yield "/init";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      projectAgentsFile: agentsFile,
+    });
+    const commandMessage = agent.getMessages().find((m) => m.role === "user" && m.source === "command");
+    expect(commandMessage).toBeDefined();
+    // appendCommand 落「【命令】」前缀的消息（E24 命令消息化），重演时还原为命令块
+    expect((commandMessage as { content: string }).content).toBe("【命令】/init");
+  });
+
+  it("会话期模型流抛错渲染后继续输入循环，不终止会话（E82）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    let first = true;
+    const client: ModelClient = {
+      async *stream() {
+        if (first) {
+          first = false;
+          throw new Error("429 too many requests");
+        }
+        yield { type: "text_delta", text: "恢复了" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [] });
+    async function* inputs(): AsyncIterable<string> {
+      yield "第一问";
+      yield "第二问";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+      // CLI 注入 onError：错误渲染后继续循环
+      onError: (message) => outputs.push(`[会话错误] ${message}`),
+    });
+    expect(outputs.some((t) => t.includes("[会话错误]") && t.includes("429"))).toBe(true);
+    // 第二问正常走完：会话没有终止
+    expect(agent.getMessages().some((m) => m.role === "assistant" && JSON.stringify(m.content).includes("恢复了"))).toBe(true);
+  });
+
   it("已存在 AGENTS.md 时读取其内容、要求不覆盖并建议改进", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);

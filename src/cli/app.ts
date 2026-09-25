@@ -251,6 +251,9 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
       inputs: rl,
       write,
       hooks,
+      // 会话期错误渲染后继续输入循环（E82）：单次模型链失败不再按「启动失败」退出整个
+      // 会话进程，与 TUI 行为对称；装配期错误仍在 main catch 以「启动失败」报出
+      onError: (message) => write(`\n[会话错误] ${message}\n`),
     });
   } finally {
     // 会话结束（DESIGN 13.3：会话级事件由宿主触发）；
