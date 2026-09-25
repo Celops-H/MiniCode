@@ -51,6 +51,10 @@ export const providerConfigSchema = z
      *  reasoning 模型发送，否则思考等级静默无效（E60）。仅 openai-chat-completions
      *  协议有意义 */
     enableThinking: z.boolean().optional(),
+    /** 请求流式真实用量（stream_options.include_usage，E63）：支持的厂商开启后流尾
+     *  回传 token 用量挂 done.usage。个别严格网关对未知参数 400 且不可切换，故为
+     *  能力位开关而非无条件发送；仅 openai-chat-completions 协议有意义 */
+    includeUsage: z.boolean().optional(),
     /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头、
      *  anthropic-beta 等，E64） */
     headers: z.record(z.string(), z.string()).optional(),

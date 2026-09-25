@@ -40,6 +40,8 @@ export interface OpenAICompatibleOptions {
   reasoningEffort?: boolean;
   /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope；仅对 reasoning 模型随思考等级发送，E60） */
   enableThinking?: boolean;
+  /** 请求流式真实用量（stream_options.include_usage，E63；严格网关可能 400，按厂商能力位开关） */
+  includeUsage?: boolean;
   /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头等，E64） */
   headers?: Record<string, string>;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
@@ -78,6 +80,7 @@ export class OpenAICompatibleProvider implements Provider {
       reasoningContent: options.reasoningContent,
       emitReasoningEffort: options.reasoningEffort,
       enableThinking: options.enableThinking,
+      includeUsage: options.includeUsage,
       debugDroppedChunks: options.debugDroppedChunks,
     });
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;

@@ -28,6 +28,7 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       ...(p.reasoningContent ? { reasoningContent: true } : {}),
       ...(p.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(p.enableThinking ? { enableThinking: true } : {}),
+      ...(p.includeUsage ? { includeUsage: true } : {}),
       models: p.models.map((id) => ({
         id,
         ...(p.reasoningModels?.includes(id) ? { reasoning: true } : {}),

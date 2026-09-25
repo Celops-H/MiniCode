@@ -51,6 +51,9 @@ export class OpenAICompletionsProtocol implements Protocol {
   private readonly emitReasoningEffort: boolean;
   /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：不发送则思考等级静默无效 */
   private readonly enableThinking: boolean;
+  /** 请求流式真实用量（stream_options.include_usage，E63）：严格网关对未知参数 400
+   *  且不可切换，按厂商能力位开关而非无条件发送 */
+  private readonly includeUsage: boolean;
   /** E68 诊断开关（调试排查用）：记录流解析中未产出任何事件的被丢弃 chunk 样本 */
   private readonly debugDroppedChunks: boolean;
 
@@ -59,12 +62,14 @@ export class OpenAICompletionsProtocol implements Protocol {
       reasoningContent?: boolean;
       emitReasoningEffort?: boolean;
       enableThinking?: boolean;
+      includeUsage?: boolean;
       debugDroppedChunks?: boolean;
     } = {},
   ) {
     this.reasoningContent = options.reasoningContent ?? false;
     this.emitReasoningEffort = options.emitReasoningEffort ?? false;
     this.enableThinking = options.enableThinking ?? false;
+    this.includeUsage = options.includeUsage ?? false;
     this.debugDroppedChunks = options.debugDroppedChunks ?? false;
   }
 
@@ -95,8 +100,9 @@ export class OpenAICompletionsProtocol implements Protocol {
         : {}),
       // DashScope 等厂商需显式开启思考：仅推理系列模型随思考等级发送
       ...(this.enableThinking && reasoning && context.thinkingLevel ? { enable_thinking: true } : {}),
-      // 真实用量（E63）：流尾回传 usage chunk（仅含 usage、choices 为空），解析挂 done.usage
-      stream_options: { include_usage: true },
+      // 真实用量（E63）：能力位开启才带 stream_options.include_usage，流尾 usage chunk
+      // 解析挂 done.usage（严格网关对未知参数 400，不可无条件发送）
+      ...(this.includeUsage ? { stream_options: { include_usage: true } } : {}),
     };
   }
 

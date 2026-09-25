@@ -74,6 +74,7 @@ export function buildModelClient(
     const reasoningContent = provider.reasoningContent ?? preset?.reasoningContent;
     const reasoningEffort = provider.reasoningEffort ?? preset?.reasoningEffort;
     const enableThinking = provider.enableThinking ?? preset?.enableThinking;
+    const includeUsage = provider.includeUsage ?? preset?.includeUsage;
     const modelInfos = provider.models.map((m) => {
       const qualified = seenModelIds.has(m.id) ? `${m.id}@${provider.id}` : undefined;
       seenModelIds.add(m.id);
@@ -122,6 +123,7 @@ export function buildModelClient(
           reasoningContent,
           reasoningEffort,
           enableThinking,
+          includeUsage,
           headers: provider.headers,
           models: modelInfos,
           // E68 诊断开关（调试排查「流活跃但零输出」的静默卡死）：config.debug.streamChunks

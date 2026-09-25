@@ -48,6 +48,7 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
       ...(preset.reasoningContent ? { reasoningContent: true } : {}),
       ...(preset.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(preset.enableThinking ? { enableThinking: true } : {}),
+      ...(preset.includeUsage ? { includeUsage: true } : {}),
       // /models 拉取替换后的列表没有能力位信息，reasoning 标记只对预设内模型保留
       models: preset.models.map((id) => ({
         id,
