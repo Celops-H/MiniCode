@@ -19,7 +19,8 @@ import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, s
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type QueuedItem, type TuiState } from "./state.js";
+import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
@@ -269,7 +270,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let team: Team | undefined;
   let runningLoop = true;
   let wake: (() => void) | undefined;
-  const pendingInputs: string[] = [];
+  /** 统一传输队列（E109）：在途期间入队的消息与命令按入队顺序混存，消费时永远取队首、
+   *  按类型路由——跨类型保序，排队条（state.queue）展示顺序即实际执行顺序 */
+  const pendingQueue: QueuedItem[] = [];
+  // carry 续接（reconfigure 重建）时回种传输队列：上一轮的传输队列随闭包丢弃，排队条里的
+  // 项还没消费——不回种它们永远不会再执行，取消也匹配不到传输项（展示与传输失去一致）。
+  // 重建视图的路径（首轮/切会话）queue 已是空数组，此处自然无操作
+  pendingQueue.push(...state.queue);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   /** 挂起的权限请求：并发批工具同时请求时排队（approver 各持等待决策 promise），一次按键应用到全部 */
   let pendingPerms: Array<{ resolve: (d: PermissionDecision) => void }> = [];
@@ -287,40 +294,30 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 免铺屏装弹（E35 修正）：/init 排队时置位，其提示词被 interact 消费到（UserPromptSubmit
    *  带 INIT_PROMPT_PREFIX）才真正置位 suppressStream——排队在其前的用户消息不受影响 */
   let suppressPending = false;
+  /** /init 提示词装弹中（读 AGENTS.md 到生成的提示词插回队首之间）：此窗口内输入泵暂停
+   *  取项，防先入队的消息被取走跑轮次、插队到提示词之前（E109） */
+  let initPreparing = false;
   /** 压缩执行中（E38）：期间 Esc 打断压缩而非退出/打断回合 */
   let compacting = false;
   /** 压缩被用户打断（Esc 置位，compactAsync 据此区分「未配置」与「已打断」） */
   let compactInterrupted = false;
   /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位；E24） */
   let initPolicyBox: { value: boolean } | undefined;
-  /** 运行中排队的命令（E35/E52）：在途结束后逐个重新走 handleCommand；消息走 pendingInputs 天然排队 */
-  let pendingCommands: string[] = [];
   /** 排队项序号：Date.now() 同毫秒会撞 id，用递增序号 */
   let queueSeq = 0;
-  /** 统一在途判定（E52）：root 回合运行中、子 agent 后台运行中、压缩执行中任一即「在途」——
-   *  新消息与命令统一排队等在途全部结束后消费，不再拦截+toast */
-  const inFlight = (): boolean => compacting || reassemblyBlocked(state);
+  /** 统一在途判定（E52）：root 回合运行中、子 agent 后台运行中、压缩执行中、/init 装弹中
+   *  任一即「在途」——新消息与命令统一排队等在途全部结束后消费，不再拦截+toast */
+  const inFlight = (): boolean => compacting || initPreparing || reassemblyBlocked(state);
   /** 排队命令入队（E52）：命令进输入框上方排队条（不再上屏「（已排队）」命令块），执行时产生正常痕迹 */
   const queueRunningCommand = (command: string): void => {
-    pendingCommands.push(command);
+    const item: QueuedItem = { id: `queue_${++queueSeq}`, kind: "command", text: command };
+    pendingQueue.push(item);
     commit({
       ...state,
-      queue: [...state.queue, { id: `queue_${++queueSeq}`, kind: "command", text: command }],
+      queue: [...state.queue, item],
       prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
       candidate: undefined,
     });
-  };
-  /** 排队命令逐个出队执行（E35/E52）：compactAsync 收尾后也要触发，保证 /compact 后续队列不断流；
-   *  出队同步移除排队条条目。调用方须先确认不在途（root Stop/子 agent 收尾触发点都带
-   *  inFlight 前置，审查修正）：否则 handleCommand 会把出队命令重新入队，顺序翻转且误清输入框 */
-  const drainQueuedCommands = (): void => {
-    if (pendingCommands.length === 0) return;
-    const next = pendingCommands.shift()!;
-    const queueIndex = state.queue.findIndex((q) => q.kind === "command" && q.text === next);
-    if (queueIndex >= 0) {
-      commit({ ...state, queue: state.queue.filter((_, i) => i !== queueIndex) });
-    }
-    handleCommand(next);
   };
   /** Esc 双击退出：运行中 Esc=打断；空闲第一次 Esc 计时，800ms 内再次 Esc 退出 */
   const ESC_EXIT_WINDOW_MS = 800;
@@ -332,11 +329,42 @@ export async function runTui(options: TuiLoopOptions): Promise<{
 
   const commit = (next: TuiState): void => setState(reconcile(next));
 
-  /** 输入源：TUI 发送队列 → interact 逐行消费 */
+  /** 命令被输入泵取走执行时同步移除排队条条目（展示与传输两边一致） */
+  const consumeQueuedCommand = (text: string): void => {
+    const queueIndex = state.queue.findIndex((q) => q.kind === "command" && q.text === text);
+    if (queueIndex >= 0) {
+      commit({ ...state, queue: state.queue.filter((_, i) => i !== queueIndex) });
+    }
+  };
+
+  /**
+   * 输入源 = 统一排队泵的唯一消费者（E109）：interact 逐行取用，每次轮询按 pumpQueue 决策——
+   * 取队首消息跑轮次，或取队首命令走 handleCommand。命令可能启动异步过程（/compact 置
+   * compacting、/init 置 initPreparing），此时停在泵里等收尾唤醒再继续；同步完成的命令
+   * 立即取下一项。轮次收尾（落盘完成后）interact 自然回来取项，root Stop 无需再触发出队；
+   * 压缩收尾与子 agent 收尾各补一次唤醒。等待用单槽 wake：唤醒方只负责让泵重新决策，
+   * 泵未在等待时调用是空操作。
+   */
   async function* inputSource(): AsyncIterable<string> {
     while (runningLoop) {
-      if (pendingInputs.length > 0) yield pendingInputs.shift()!;
-      else await new Promise<void>((resolve) => (wake = resolve));
+      // 消息门：压缩中（防新发消息的轮次与压缩的历史重写并发，批次 35 整体审视补）、
+      // /init 装弹中、弹窗打开中（防在弹窗后面隐身跑轮次）；命令门：任一在途或弹窗打开中
+      const decision = pumpQueue(pendingQueue[0], {
+        messageWait: compacting || initPreparing || state.modal !== undefined,
+        commandWait: inFlight() || state.modal !== undefined,
+      });
+      if (decision.op === "wait") {
+        await new Promise<void>((resolve) => (wake = resolve));
+        continue;
+      }
+      pendingQueue.shift();
+      if (decision.op === "command") {
+        consumeQueuedCommand(decision.text);
+        handleCommand(decision.text);
+        if (inFlight()) await new Promise<void>((resolve) => (wake = resolve));
+        continue;
+      }
+      yield decision.text;
     }
   }
 
@@ -390,6 +418,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           : { action: "deny", reason: denyReason };
     commit({ ...state, modal: undefined });
     for (const perm of perms) perm.resolve(resolved);
+    // 弹窗关闭唤醒输入泵（批次 35 整体审视补）：弹窗打开期间泵暂停取项，关闭后继续
+    wake?.();
   };
 
   /** 权限审批：渲染弹块并等待键盘决策（供装配方作 PermissionPipeline.approver） */
@@ -442,6 +472,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
       const guidance = command.slice("/init".length).trim();
       const agentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
+      // 装弹开始（E109）：读文件到提示词插回队首之间在途，输入泵此窗口不取项，
+      // 防先入队的消息被取走跑轮次、插队到提示词之前
+      initPreparing = true;
       void (async () => {
         try {
           const existing = await readInstructionFile(agentsFile);
@@ -450,7 +483,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           agent.appendCommand(command);
           initPolicyBox && (initPolicyBox.value = true);
           // 免铺屏装弹（E35 审查修正）：置位推迟到提示词被消费到（UserPromptSubmit 识别前缀）——
-          // pendingInputs 里排在其前的用户消息不被误伤
+          // 排队在其前的用户消息不被误伤
           suppressPending = true;
           commit({
             ...state,
@@ -458,11 +491,16 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
             candidate: undefined,
           });
-          pendingInputs.push(full);
-          wake?.();
+          // 生成的提示词是 /init 的展开，插回队首：装弹期间入队的项保持在其后（E109）
+          pendingQueue.unshift({ id: `queue_${++queueSeq}`, kind: "message", text: full });
           showToast(existing ? "已存在 AGENTS.md：开始分析并建议改进（不覆盖）" : "开始分析代码库，生成项目根 AGENTS.md（过程不铺屏）");
         } catch (err) {
           showToast(`读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}`);
+          // 装弹失败：复位免铺屏装弹标记（与成功路径的置位对称，批次 35 整体审视补）
+          suppressPending = false;
+        } finally {
+          initPreparing = false;
+          wake?.();
         }
       })();
       return;
@@ -642,8 +680,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
     } finally {
       compacting = false;
-      // /compact 是排队命令时收尾触发下一条出队（E35：命令链不断流）
-      drainQueuedCommands();
+      // /compact 收尾唤醒输入泵（E35：命令链不断流）——队首命令继续执行、队首消息跑轮次
+      wake?.();
     }
   };
 
@@ -742,7 +780,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         if (!text.trim()) return;
         if (text.startsWith("/")) handleCommand(text);
         else {
-          pendingInputs.push(text);
+          // 传输队列与排队条存同一份裁剪后文本（E107②）：取消恢复按文本匹配移除，
+          // 两边文本不一致会让取消静默失效；interact 本就对输入行 trim，行为不变
+          pendingQueue.push({ id: `queue_${++queueSeq}`, kind: "message", text: text.trim() });
           wake?.();
           commit(reduceAction(state, action));
         }
@@ -810,6 +850,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             const picked = state.modal.models[state.modal.selected];
             thinkingBox.value = state.modal.thinkingLevel;
             commit({ ...state, modal: undefined, thinkingLevel: state.modal.thinkingLevel });
+            // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）
+            wake?.();
             if (picked && picked.id !== session.meta.model) {
               // 切模型先落盘再生效（E97）：写盘失败时回滚内存 meta——先改内存后写盘的
               // 旧实现失败只 toast，下一次轮末 flush 把错值落盘，重启续跑与「切换失败」提示矛盾
@@ -838,10 +880,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             // commit 之后再读 state.modal 是 undefined（P0 教训，同 Modal.tsx 文件头陷阱注记）
             const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
+            // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）；写盘失败时面板已关，
+            // 排队项靠这次唤醒继续消费
+            wake?.();
             applyExtensions("mcp", rows);
           } else if (state.modal.kind === "skill") {
             const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
+            // 弹窗关闭唤醒输入泵（同 /mcp 面板）
+            wake?.();
             applyExtensions("skill", rows);
           } else {
             // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表。
@@ -939,7 +986,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       case "cancel": {
         if (state.modal) {
           if (state.modal.kind === "permission") resolvePermission("deny");
-          else commit({ ...state, modal: undefined });
+          else {
+            commit({ ...state, modal: undefined });
+            // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）
+            wake?.();
+          }
         } else {
           commit(reduceAction(state, action));
         }
@@ -998,15 +1049,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
       case "queue-cancel": {
         // Ctrl+P 取消最后一个排队项（E72）：reducer 从排队条弹出并恢复到输入框；
-        // 传输队列（pendingInputs/pendingCommands）同步移除同文本末项，两边一致。
-        // 传输队列找不到（审查修正：消息已被 interact 取走、UserPromptSubmit 尚未消费的
+        // 统一传输队列同步移除同类型同文本末项（E109），两边一致。
+        // 传输队列找不到（审查修正：消息已被输入泵取走、UserPromptSubmit 尚未消费的
         // 毫秒级窗口）不动——「取消」只对尚未消费的项生效，防已发出的消息被恢复进输入框
         const item = state.queue.at(-1);
         if (!item) return;
-        const transport = item.kind === "message" ? pendingInputs : pendingCommands;
-        const idx = transport.lastIndexOf(item.text);
+        const idx = lastIndexOfItem(pendingQueue, item);
         if (idx < 0) return;
-        transport.splice(idx, 1);
+        pendingQueue.splice(idx, 1);
         commit(reduceAction(state, action));
         return;
       }
@@ -1104,13 +1154,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
     hooks.on("AgentCompleted", (e) => {
       commit(reduceHook(state, { ...e, completedAt: Date.now() }));
-      // 子 agent 收尾可能正是最后一个在途操作（E52）：root 本就空闲时不会再有 Stop 触发出队，
-      // 这里补一次 drain（在途判定不满足时 handleCommand 会重新入队，不会抢跑）
-      if (!inFlight()) drainQueuedCommands();
+      // 子 agent 收尾可能正是最后一个在途操作（E52）：root 本就空闲时不会再有轮次收尾
+      // 让 interact 回泵取项，这里补一次唤醒，输入泵重新决策（在途未清时决策仍是等待）
+      wake?.();
     }),
     hooks.on("AgentInterrupted", (e) => {
       commit(reduceHook(state, { ...e, completedAt: Date.now() }));
-      if (!inFlight()) drainQueuedCommands();
+      wake?.();
     }),
     hooks.on("Stop", (e) => {
       const isRoot = e.agentPath === undefined || e.agentPath === "/root";
@@ -1129,12 +1179,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         });
       }
       commit(reduceHook(state, e));
-      // 排队命令出队（E35/E52）：只认 root 的 Stop，且仅在途判定满足（审查修正：子 agent/
-      // 压缩仍在途时出队会被 handleCommand 重新入队，排队顺序翻转并误清输入草稿——留在
-      // 队列等 AgentCompleted/压缩收尾触发 drain）。一轮结束按序执行下一条（消息经
-      // pendingInputs 由 interact 消费，其收尾 Stop 自然驱动后续出队；/compact 收尾在
-      // compactAsync 里补触发）
-      if (isRoot && !inFlight()) drainQueuedCommands();
+      // 排队消费（E52/E109）：轮次收尾后 interact 自然回到输入泵取下一项（落盘已完成，
+      // 命令在落盘后执行，不再有此前 Stop 时点出队与轮末落盘的交错）；无需在此触发出队
     }),
   ];
 
