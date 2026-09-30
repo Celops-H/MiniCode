@@ -7,7 +7,8 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { mapKey } from "../../src/tui/keymap.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -440,6 +441,66 @@ describe("在途排队（E52/E72）", () => {
   it("排队条为空时 Ctrl+P 不动作", () => {
     const s = reduceAction(initState([]), { type: "queue-cancel" });
     expect(s.queue).toEqual([]);
+    expect(s.prompt.lines).toEqual([""]);
+  });
+
+  it("Ctrl+P 取消时输入框已被清空：直接恢复，不残留空行（E107①）", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "排队的问题" });
+    s = reduceAction(s, { type: "send" });
+    // 排队后输入框被清成单个空行（send 的既有行为），此时取消恢复
+    expect(s.prompt.lines).toEqual([""]);
+    s = reduceAction(s, { type: "queue-cancel" });
+    expect(s.prompt.lines).toEqual(["排队的问题"]);
+    expect(s.prompt.curLine).toBe(0);
+    expect(s.prompt.curCol).toBe(5);
+  });
+
+  it("Ctrl+P 取消时输入框仅剩空白草稿：同样直接恢复，不残留空白行（E107① 审查补）", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "排队的问题" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "input", text: " " }); // 视觉为空的空白草稿
+    s = reduceAction(s, { type: "queue-cancel" });
+    expect(s.prompt.lines).toEqual(["排队的问题"]);
+  });
+
+  it("Ctrl+P 恢复多行文本：行结构与光标位置一致，无残留空行（E107①）", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const, prompt: { ...s.prompt, lines: ["第一行", "第二行"], curLine: 1, curCol: 3 } };
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "queue-cancel" });
+    expect(s.prompt.lines).toEqual(["第一行", "第二行"]);
+    expect(s.prompt.curLine).toBe(1);
+    expect(s.prompt.curCol).toBe(3);
+  });
+
+  it("恢复后可正常编辑（E107②）：方向键移动光标、退格删字、Enter 重发重新排队", () => {
+    let s = initState([]);
+    s = { ...s, status: "running" as const };
+    s = reduceAction(s, { type: "input", text: "排队的问题" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "queue-cancel" });
+    // 方向键在恢复文本上移动光标（mapKey 对恢复态的路由：非空输入 ↑↓←→ 都是框内移光标）
+    const keyCtx = { inputEmpty: promptEmpty(s.prompt), browsingHistory: s.prompt.historyIndex !== -1 };
+    expect(mapKey({ kind: "left" }, keyCtx)).toEqual({ type: "cursor", dir: "left" });
+    expect(mapKey({ kind: "up" }, keyCtx)).toEqual({ type: "cursor", dir: "up" });
+    expect(mapKey({ kind: "down" }, keyCtx)).toEqual({ type: "cursor", dir: "down" });
+    s = reduceAction(s, { type: "cursor", dir: "left" });
+    expect(s.prompt.curCol).toBe(4);
+    s = reduceAction(s, { type: "cursor", dir: "start" });
+    expect(s.prompt.curCol).toBe(0);
+    // 退格在行首不动（可编辑状态成立，无卡死），插入字符正常
+    s = reduceAction(s, { type: "backspace" });
+    expect(s.prompt.lines[0]).toBe("排队的问题");
+    s = reduceAction(s, { type: "input", text: "前缀：" });
+    expect(s.prompt.lines[0]).toBe("前缀：排队的问题");
+    // 运行中 Enter 重发：重新进排队条（取消恢复的完整闭环）
+    s = reduceAction(s, { type: "send" });
+    expect(s.queue).toHaveLength(1);
+    expect(s.queue[0]).toMatchObject({ kind: "message", text: "前缀：排队的问题" });
     expect(s.prompt.lines).toEqual([""]);
   });
 });

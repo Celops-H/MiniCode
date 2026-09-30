@@ -1002,6 +1002,8 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
           ...state,
           prompt: emptyPrompt(history),
           candidate: undefined,
+          // id 仅作排队条渲染 key（loop 侧传输队列条目的 id 独立生成）；取消/消费/转正
+          // 都按「类型+文本」匹配，不按 id 关联
           queue: [...state.queue, { id: `queue_${Date.now()}_${state.queue.length}`, kind: "message" as const, text: sent }],
         };
       }
@@ -1013,17 +1015,21 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       };
     }
     case "queue-cancel": {
-      // Ctrl+P 取消最后一个排队项（E72）：从队列弹出并恢复到输入框供编辑重发——
-      // 恢复文本置于现有输入内容之前（换行相接，受 20 行上限截断），光标落在恢复文本末尾
+      // Ctrl+P 取消最后一个排队项（E72）：从队列弹出并恢复到输入框供编辑重发，
+      // 光标落在恢复文本末尾。输入框为空（排队时已被清空的单个空行，常态）直接恢复，
+      // 不再合并出恢复文本下方的残留空行（E107①）；仅空白的草稿同样按空处理（视觉为空，
+      // 保留只会复发残留空行）。有实际内容的草稿时置于其前（换行相接，受 20 行上限截断）
       const last = state.queue.at(-1);
       if (!last) return state;
       const restored = last.text.split("\n");
-      const current = state.prompt.lines;
-      const merged = [...restored, ...current].slice(0, MAX_PROMPT_LINES);
+      const merged = state.prompt.lines.join("\n").trim() === ""
+        ? restored
+        : [...restored, ...state.prompt.lines].slice(0, MAX_PROMPT_LINES);
+      const curLine = Math.min(restored.length - 1, merged.length - 1);
       const prompt: PromptState = {
         lines: merged,
-        curLine: Math.min(restored.length - 1, merged.length - 1),
-        curCol: Array.from(merged[Math.min(restored.length - 1, merged.length - 1)] ?? "").length,
+        curLine,
+        curCol: Array.from(merged[curLine] ?? "").length,
         history: state.prompt.history,
         historyIndex: -1,
         sel: null,
