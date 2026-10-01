@@ -9,6 +9,7 @@ import {
   type AssistantMessage,
   type Context,
   type Message,
+  type ModelUsage,
   type StreamEvent,
   type ToolCall,
   type ToolResultMessage,
@@ -39,7 +40,7 @@ import {
   type ExecuteOutcome,
   type Tool,
 } from "../tools/index.js";
-import type { PermissionBehavior, PermissionPipeline, PermissionRequest } from "../permission/index.js";
+import type { PermissionBehavior, PermissionPipeline, PermissionRequest, PermissionResult } from "../permission/index.js";
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { FileState, withCwd, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
@@ -166,6 +167,9 @@ export class Agent {
   private interruptController = new AbortController();
   /** 思考等级活引用（每轮组装 Context 时读一次；undefined=用厂商默认） */
   private readonly thinkingLevelRef?: () => ThinkingLevel | undefined;
+  /** LlmCallEnd 已附过全文的系统提示词版本（可观测性 B1）：hash 每次必带，
+   *  全文仅首次出现或变更时附带，轨迹据此含提示词各版本全文而不逐条重复 */
+  private emittedSystemPrompt: string | null = null;
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -257,7 +261,10 @@ export class Agent {
     this.turnCount = 0;
     this.interrupted = false;
     this.interruptController = new AbortController();
-    this.messages.push(userMessage(input));
+    const message = userMessage(input);
+    this.messages.push(message);
+    // 同步方法内发射不等待：HookBus.emit 调用即同步到达首个 handler，订阅方同步记账则到达序=发生序
+    void this.emitMessageAppended(message);
   }
 
   /**
@@ -281,7 +288,10 @@ export class Agent {
    * @param text 命令原文（如 "/compact 侧重保留命令输出"）
    */
   appendCommand(text: string): void {
-    this.messages.push(userMessage(`${COMMAND_MARKER}${text}`, "command"));
+    const message = userMessage(`${COMMAND_MARKER}${text}`, "command");
+    this.messages.push(message);
+    // 同步方法内发射不等待（同 start 的保序说明）
+    void this.emitMessageAppended(message);
   }
 
   /** 工具执行的工作目录（相对路径解析基准，DESIGN 4.2；Team 创建 worktree 时读取） */
@@ -414,11 +424,12 @@ export class Agent {
     // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本，DESIGN 11.3）
     if (this.mailbox.hasPending()) {
       for (const mail of this.mailbox.drain()) {
-        this.messages.push(userMessage(formatMailMessage(mail), "system"));
+        await this.appendMessage(userMessage(formatMailMessage(mail), "system"));
       }
     }
     let context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
     const collected: StreamEvent[] = [];
+    const agentPath = this.agentPath?.toString() ?? "/root";
     // 本轮实际产出模型（E18）：路由切到备选时更新，组装后写入消息 meta 供署名/重演一致展示
     let effectiveModel = this.modelId;
     // 超窗应急剥组重发（DESIGN 9.6）：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
@@ -426,6 +437,13 @@ export class Agent {
     const messagesBeforeRetry = this.messages;
     let retryAttempts = 0;
     for (;;) {
+      // 一次 API 尝试的测量窗口（可观测性 B1 LlmCallEnd）：超窗剥组重试与模型链切换
+      // 产生多次尝试，各自独立收口一条调用事件（每次都是独立的耗时与用量）
+      let attemptStart = Date.now();
+      let attemptFirstEventMs: number | undefined;
+      let attemptUsage: ModelUsage | undefined;
+      let attemptStopReason: string | undefined;
+      let attemptError: string | undefined;
       try {
         for await (const event of withInterruptTimeout(
           this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
@@ -434,25 +452,95 @@ export class Agent {
         )) {
           // 中断引发的流错误统一到 error 事件，不向宿主转发（interrupt 语义已覆盖，宿主不见「中断=错误」）
           if (this.interruptController.signal.aborted && event.type === "error") continue;
+          attemptFirstEventMs ??= Date.now() - attemptStart;
+          if (event.type === "model_fallback") {
+            // 轨迹镜像 ModelFallback（切换原因随事件转发，OBSERVABILITY §4.3），并收口被
+            // 切换掉的尝试：reason=error 说明该模型真实尝试过且失败（error 事件文本优先）；
+            // cooldown/unresolved 是条目被跳过、未发起调用，无调用事件可记
+            await this.safeEmit({ type: "ModelFallback", agentPath, from: event.from, to: event.to, reason: event.reason });
+            if (event.reason === "error") {
+              await this.emitLlmCallEnd({
+                model: event.from,
+                durationMs: Date.now() - attemptStart,
+                firstEventMs: attemptFirstEventMs,
+                error: attemptError ?? "模型调用失败，已切换备选",
+              });
+            }
+            effectiveModel = event.to;
+            attemptStart = Date.now();
+            attemptFirstEventMs = undefined;
+            attemptUsage = undefined;
+            attemptStopReason = undefined;
+            attemptError = undefined;
+          }
           // 观察事件（模型路由切换提示）只透传宿主观测，不进 collected——否则 assemble 会把
           // 它的长度误算为「已产出」（中断收尾以 collected.length 判断要不要落半截回复）
-          if (event.type === "model_fallback") effectiveModel = event.to;
           if (event.type !== "model_fallback") collected.push(event);
+          if (event.type === "done") {
+            attemptStopReason = event.stopReason;
+            attemptUsage = event.usage;
+          } else if (event.type === "error") {
+            attemptError = event.message;
+          }
           yield event;
+        }
+        // 流正常结束：收口本次尝试。中断收尾按失败记（停因/用量缺失属被中断的预期状态）
+        if (this.interruptController.signal.aborted) {
+          await this.emitLlmCallEnd({
+            model: effectiveModel,
+            durationMs: Date.now() - attemptStart,
+            firstEventMs: attemptFirstEventMs,
+            error: "用户中断",
+          });
+        } else {
+          await this.emitLlmCallEnd({
+            model: effectiveModel,
+            durationMs: Date.now() - attemptStart,
+            firstEventMs: attemptFirstEventMs,
+            usage: attemptUsage,
+            stopReason: attemptStopReason,
+            error: attemptError,
+          });
         }
         break;
       } catch (err) {
         // 中断：跳出重试循环，走已产出保留收尾（不由超窗剥组重发）
-        if (this.interruptController.signal.aborted) break;
+        if (this.interruptController.signal.aborted) {
+          await this.emitLlmCallEnd({
+            model: effectiveModel,
+            durationMs: Date.now() - attemptStart,
+            firstEventMs: attemptFirstEventMs,
+            error: "用户中断",
+          });
+          break;
+        }
         if (!isContextTooLongError(err) || retryAttempts >= MAX_CONTEXT_RETRY) {
           this.messages = messagesBeforeRetry;
+          await this.emitLlmCallEnd({
+            model: effectiveModel,
+            durationMs: Date.now() - attemptStart,
+            firstEventMs: attemptFirstEventMs,
+            error: err instanceof Error ? err.message : String(err),
+          });
           throw err;
         }
         const peeled = peelToolGroups(this.messages, parseContextTooLongGap(err));
         if (!peeled) {
           this.messages = messagesBeforeRetry;
+          await this.emitLlmCallEnd({
+            model: effectiveModel,
+            durationMs: Date.now() - attemptStart,
+            firstEventMs: attemptFirstEventMs,
+            error: "上下文超限且无工具回合可剥，无法重试",
+          });
           throw err;
         }
+        await this.emitLlmCallEnd({
+          model: effectiveModel,
+          durationMs: Date.now() - attemptStart,
+          firstEventMs: attemptFirstEventMs,
+          error: "上下文超限，剥组重试",
+        });
         this.messages = peeled;
         this.historyRewritten = true; // 已落盘的工具回合被剥除
         context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
@@ -468,9 +556,9 @@ export class Agent {
     // 完全没收到内容则连空消息也不落。中断后本轮结束，已产出留在历史、可正常续跑。
     if (this.interruptController.signal.aborted) {
       if (collected.length > 0) {
-        this.messages.push(assistant);
+        await this.appendMessage(assistant);
         for (const call of toolCallsOf(assistant)) {
-          this.messages.push(
+          await this.appendMessage(
             toolResultMessage(call.id, call.name, "执行中断：用户打断，工具未执行", true),
           );
         }
@@ -478,7 +566,7 @@ export class Agent {
       this.stopped = true;
       return;
     }
-    this.messages.push(assistant);
+    await this.appendMessage(assistant);
     this.turnCount++;
 
     const calls = toolCallsOf(assistant);
@@ -515,7 +603,7 @@ export class Agent {
       { onContextModifier: (modifier) => modifier() },
     );
     for (const message of results) {
-      this.messages.push(message);
+      await this.appendMessage(message);
     }
   }
 
@@ -575,7 +663,7 @@ export class Agent {
   private async maybeCompact(): Promise<void> {
     if (!this.compactConfig || this.compactDisabled) return;
     if (!needsCompact(this.estimateContextTokens(), this.compactConfig)) return;
-    await this.doCompact();
+    await this.doCompact("auto");
   }
 
   /**
@@ -598,18 +686,41 @@ export class Agent {
    */
   async compactNow(instructions?: string): Promise<boolean> {
     if (!this.compactConfig) return false;
-    return this.doCompact(instructions);
+    return this.doCompact("manual", instructions);
   }
 
-  /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败 */
-  private async doCompact(instructions?: string): Promise<boolean> {
+  /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败。
+   *  进入本方法即视为一次压缩动作，收口时发一条 Compact 事件（成功失败都发，可观测性 B1） */
+  private async doCompact(trigger: "auto" | "manual", instructions?: string): Promise<boolean> {
+    const startedAt = Date.now();
+    const agentPath = this.agentPath?.toString() ?? "/root";
+    const tokensBefore = this.estimateContextTokens();
+    const messagesBefore = this.messages.length;
+    // 收口 Compact 事件：tokensAfter/messagesAfter 按收口时刻的上下文实测
+    const emitCompact = async (ok: boolean, error?: string): Promise<void> => {
+      await this.safeEmit({
+        type: "Compact",
+        agentPath,
+        trigger,
+        tokensBefore,
+        tokensAfter: this.estimateContextTokens(),
+        messagesBefore,
+        messagesAfter: this.messages.length,
+        durationMs: Date.now() - startedAt,
+        ok,
+        ...(error ? { error } : {}),
+      });
+    };
     // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要。
     // 带压缩指导时不短路：指导必须经现场摘要生效（DESIGN 9.8），裁剪达标也继续摘要
     const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
       this.messages = pruned;
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
-      if (!instructions && !needsCompact(this.estimateContextTokens(), this.compactConfig!)) return true;
+      if (!instructions && !needsCompact(this.estimateContextTokens(), this.compactConfig!)) {
+        await emitCompact(true);
+        return true;
+      }
     }
     // ② 压缩：带指导走现场摘要（DESIGN 9.8）；无指导且有会话记忆时用记忆替代
     // 现场摘要（DESIGN 9.7，省压缩时模型调用）；否则增量合并（已有旧摘要）或全量总结
@@ -673,20 +784,31 @@ export class Agent {
       }
       if (summary.trim().length === 0) {
         this.compactDisabled = true;
+        await emitCompact(false, "摘要结果为空");
         return false;
       }
-      this.messages = replaceWithSummary(summary);
+      const summaryMessages = replaceWithSummary(summary);
+      this.messages = summaryMessages;
+      // 摘要消息是新进入上下文的消息，镜像进轨迹；在途消息压缩前已发过 MessageAppended，重灌不重发
+      await this.emitMessageAppended(summaryMessages[0]!);
       this.messages.push(...inFlight); // 记忆分支：在途消息保留原文；其他分支为空
       if (recovery) {
         // 恢复上下文由系统注入而非用户输入，标记 source: "system"
-        this.messages.push(userMessage(`${RECOVERY_MARKER}\n${recovery}`, "system"));
+        const recoveryMessage = userMessage(`${RECOVERY_MARKER}\n${recovery}`, "system");
+        this.messages.push(recoveryMessage);
+        await this.emitMessageAppended(recoveryMessage);
       }
       this.historyRewritten = true; // 已落盘历史被摘要替换
+      await emitCompact(true);
       return true;
-    } catch {
+    } catch (err) {
       // 中断导致的取消失效不算压缩失败——不在取消后误禁压缩（下次正常轮仍可撞线压缩）
-      if (this.interruptController.signal.aborted) return false;
+      if (this.interruptController.signal.aborted) {
+        await emitCompact(false, "用户中断");
+        return false;
+      }
       this.compactDisabled = true;
+      await emitCompact(false, err instanceof Error ? err.message : String(err));
       return false;
     }
   }
@@ -727,6 +849,64 @@ export class Agent {
     } catch {
       // hook 处理器异常被吞，最多漏该条观测，不中断回合
     }
+  }
+
+  /** 镜像 MessageAppended 事件（可观测性 B1）：消息进入上下文时发，轨迹经此获得全部消息全文 */
+  private emitMessageAppended(message: Message): Promise<void> {
+    return this.safeEmit({
+      type: "MessageAppended",
+      message,
+      agentPath: this.agentPath?.toString() ?? "/root",
+    });
+  }
+
+  /** 追加消息并镜像 MessageAppended（异步上下文的消息追加统一走这里） */
+  private async appendMessage(message: Message): Promise<void> {
+    this.messages.push(message);
+    await this.emitMessageAppended(message);
+  }
+
+  /**
+   * 发 LlmCallEnd 事件（可观测性 B1）：systemPrompt.hash 每次必带，全文仅首次出现
+   * 或变更时附带——轨迹据此包含系统提示词各版本全文而不逐条重复。
+   * @param fields 调用测量结果（模型、耗时、用量、停因、错误）
+   */
+  private async emitLlmCallEnd(fields: {
+    model: string;
+    durationMs: number;
+    firstEventMs?: number;
+    usage?: ModelUsage;
+    stopReason?: string;
+    error?: string;
+  }): Promise<void> {
+    const systemPrompt: { hash: string; content?: string } = { hash: hashText(this.systemPrompt) };
+    if (this.emittedSystemPrompt !== this.systemPrompt) {
+      systemPrompt.content = this.systemPrompt;
+      this.emittedSystemPrompt = this.systemPrompt;
+    }
+    await this.safeEmit({
+      type: "LlmCallEnd",
+      agentPath: this.agentPath?.toString() ?? "/root",
+      ...fields,
+      systemPrompt,
+    });
+  }
+
+  /** 镜像 PermissionDecision 事件（可观测性 B1）：权限解析汇合后的决策记录 */
+  private emitPermissionDecision(
+    toolCallId: string,
+    toolName: string,
+    decision: "allow" | "deny",
+    source: "hook" | "rule" | "user",
+  ): Promise<void> {
+    return this.safeEmit({
+      type: "PermissionDecision",
+      agentPath: this.agentPath?.toString() ?? "/root",
+      toolCallId,
+      toolName,
+      decision,
+      source,
+    });
   }
 
   /**
@@ -781,6 +961,7 @@ export class Agent {
       if (this.permission) {
         const hook = hookVerdict !== undefined ? async (): Promise<PermissionBehavior | undefined> => hookVerdict : undefined;
         const result = await this.permission.check(request, hook);
+        await this.emitPermissionDecision(call.id, call.name, result.allowed ? "allow" : "deny", permissionEventSource(result.source));
         if (!result.allowed) {
           const reason = result.reason ?? "未授权";
           // 未知工具被拒时附带「工具不存在 + 可用列表」，让模型能改选真实工具而非反复重试同一幻觉名
@@ -798,6 +979,7 @@ export class Agent {
       } else if (hookRejects) {
         // 无管线时 hook 裁决直接生效（hook 拒绝优先于「未知工具」反馈）
         const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+        await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
         await this.safeEmit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
@@ -809,6 +991,9 @@ export class Agent {
         return {
           message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
         };
+      } else if (hookVerdict === "allow") {
+        // 无管线时 hook 显式放行也是一次权限决策，镜像进轨迹
+        await this.emitPermissionDecision(call.id, call.name, "allow", "hook");
       }
       // 未知工具：发失败事件（观测闭合：调用开始后必有成功/失败结果，此前确认）
       const error = `未知工具：${call.name}${available ? `，可用工具：${available}` : ""}`;
@@ -828,6 +1013,7 @@ export class Agent {
       const error = formatInputError(call.name, parsed.error);
       if (!this.permission && hookRejects) {
         const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+        await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
         await this.safeEmit({
           type: "PostToolUseFailure",
           toolCallId: call.id,
@@ -861,6 +1047,7 @@ export class Agent {
       const result = tool.skipsPermission
         ? await this.permission.checkSkipsPermission(request, hook)
         : await this.permission.check(request, hook);
+      await this.emitPermissionDecision(call.id, call.name, result.allowed ? "allow" : "deny", permissionEventSource(result.source));
       if (!result.allowed) {
         const reason = result.reason ?? "未授权";
         // 权限拒绝：发失败事件（观测闭合，此前确认）
@@ -880,6 +1067,7 @@ export class Agent {
       // 免审批工具（skipsPermission）的 ask 不升级用户审批、视为放行（与管线 checkSkipsPermission 一致）；
       // 普通工具无审批者时 fail 保守拒绝
       const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
+      await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
       await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
@@ -891,6 +1079,9 @@ export class Agent {
       return {
         message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
       };
+    } else if (hookVerdict === "allow") {
+      // 无管线时 hook 显式放行也是一次权限决策，镜像进轨迹
+      await this.emitPermissionDecision(call.id, call.name, "allow", "hook");
     }
     // 中断检查：许可已通过、准备真正启动调用前判定——若已被打断则不再启动，
     // 补失败结果保持观测闭合（PreToolUse 已发，后有 PostToolUseFailure）
@@ -906,6 +1097,9 @@ export class Agent {
       });
       return { message: toolResultMessage(call.id, call.name, error, true) };
     }
+    // 执行耗时起点（可观测性 B1 durationMs）：从真正开始执行起测——前置（权限/参数）等待不算，
+    // 与界面「耗时 x.xs」的展示口径一致；执行前被拒绝的调用没有执行窗口、不带 durationMs
+    const executionStartedAt = Date.now();
     try {
       // 工具中断看门狗：interrupt 后工具若不响应 signal（非 bash 类挂起）3s 强制转失败，
       // 与 withInterruptTimeout 配套保证打断后本轮必然收尾；
@@ -930,7 +1124,7 @@ export class Agent {
             : result;
         const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
         const finalOutput = truncated.content;
-        // PostToolUse：工具执行完成（含标记失败的结果），供观测
+        // PostToolUse：工具执行完成（含标记失败的结果），供观测；带执行耗时
         await this.safeEmit({
           type: "PostToolUse",
           toolCallId: call.id,
@@ -938,6 +1132,7 @@ export class Agent {
           input: call.input,
           output: finalOutput,
           isError: Boolean(isError),
+          durationMs: Date.now() - executionStartedAt,
           agentPath,
         });
         return {
@@ -950,13 +1145,14 @@ export class Agent {
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      // PostToolUseFailure：工具执行抛错，供观测
+      // PostToolUseFailure：工具执行抛错，供观测；执行中失败带执行窗口耗时
       await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,
         toolName: call.name,
         input: call.input,
         error,
+        durationMs: Date.now() - executionStartedAt,
         agentPath,
       });
       return {
@@ -994,6 +1190,30 @@ export class Agent {
     if (results?.includes("allow")) return "allow";
     return undefined;
   }
+}
+
+/**
+ * 短文本指纹（FNV-1a base36，非安全场景）：LlmCallEnd 的 systemPrompt.hash 用，
+ * 标识系统提示词版本（hash 每次必带，全文仅首次或变更时附带，OBSERVABILITY §4.3）
+ */
+function hashText(text: string): string {
+  let hash = 0xcbf29ce4;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x1000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * PermissionResult.source → PermissionDecision 事件 source 的三分口径（hook/规则/用户）：
+ * hook=钩子裁决；user=用户审批与会话缓存（cache 是用户「允许会话全部」的会话内记忆）；
+ * rule=规则层与危险命令/模式/免审批等硬性判定
+ */
+function permissionEventSource(source: PermissionResult["source"]): "hook" | "rule" | "user" {
+  if (source === "hook") return "hook";
+  if (source === "approver" || source === "cache") return "user";
+  return "rule";
 }
 
 /**

@@ -16,6 +16,10 @@
  */
 import type { ModelUsage } from "./message.js";
 
+/** 模型链切换原因（可观测性 B1，OBSERVABILITY §4.3）：cooldown=轮开始主模型冷却中从备选起步；
+ *  unresolved=链上条目不可解析被跳过；error=调用失败切备选。定义在 core 供 hooks 侧 ModelFallback 事件复用 */
+export type ModelFallbackReason = "cooldown" | "unresolved" | "error";
+
 export type StreamEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; thinking: string }
@@ -24,4 +28,4 @@ export type StreamEvent =
   | { type: "toolcall_end"; index: number }
   | { type: "done"; stopReason: string; usage?: ModelUsage }
   | { type: "error"; message: string }
-  | { type: "model_fallback"; from: string; to: string };
+  | { type: "model_fallback"; from: string; to: string; reason: ModelFallbackReason };

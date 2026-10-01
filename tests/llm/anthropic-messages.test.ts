@@ -449,6 +449,50 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     });
   });
 
+  it("缓存读/写 token（cache_read/cache_creation）随 usage 提取挂 done.usage（可观测性 B1）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        // message_start 给缓存段初值（官方语义：input_tokens 不含缓存段）
+        { type: "message_start", message: { usage: { input_tokens: 100, output_tokens: 1, cache_read_input_tokens: 9500, cache_creation_input_tokens: 500 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        // message_delta 的累计 output 覆盖初值；缓存段不带时保留 start 值
+        { type: "message_delta", delta: { stop_reason: "end_turn", usage: { output_tokens: 27 } } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 9500, cacheWriteTokens: 500 },
+    });
+  });
+
+  it("message_delta 带缓存段累计值时取最后一次（可观测性 B1）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "message_start", message: { usage: { input_tokens: 100, output_tokens: 1, cache_read_input_tokens: 1000 } } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", usage: { output_tokens: 27, cache_read_input_tokens: 2000, cache_creation_input_tokens: 300 } } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "end_turn",
+      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 2000, cacheWriteTokens: 300 },
+    });
+  });
+
   it("缺 message_delta 用量的兼容端点回落 message_start 的 output_tokens", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(

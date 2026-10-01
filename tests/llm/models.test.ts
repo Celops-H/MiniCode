@@ -108,7 +108,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     // 主模型失败先发 model_fallback 观察事件，再接备选正常产出
     expect(events).toEqual([
-      { type: "model_fallback", from: "main-1", to: "backup-1" },
+      { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" },
       { type: "text_delta", text: "backup:backup-1" },
       { type: "done", stopReason: "stop" },
     ]);
@@ -124,7 +124,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     // 切换前先发 model_fallback，再接备选模型的正常产出
     expect(events).toEqual([
-      { type: "model_fallback", from: "main-1", to: "backup-1" },
+      { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" },
       { type: "text_delta", text: "backup:backup-1" },
       { type: "done", stopReason: "stop" },
     ]);
@@ -138,7 +138,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     const events: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) events.push(e);
     // 401 可切换：发 model_fallback 接备选正常产出（对齐 openai 厂商同路径）
-    expect(events[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
+    expect(events[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1", reason: "error" });
     expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop" });
     // 主模型被 recordFailure 冷却：select 跳过冷却中的它（熔断冷却生效，不立即无脑重试坏 key）
     expect(router.isHealthy("openrouter-1")).toBe(false);
@@ -164,7 +164,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     // 第一次：401 → 切备选，主模型被冷却
     const first: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) first.push(e);
-    expect(first[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
+    expect(first[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1", reason: "error" });
     expect(openrouterCalls).toBe(1);
 
     // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求；轮开始跳过也发
@@ -172,7 +172,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     const second: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) second.push(e);
     expect(openrouterCalls).toBe(1); // 坏 key 模型零重试
-    expect(second[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1" });
+    expect(second[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1", reason: "cooldown" });
     expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
   });
 
@@ -199,7 +199,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
       for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     }).rejects.toThrow("backup 失败");
     // 备选也失败后 select 全挂兜底返回链首（已尝试）：不发「已切换 main-1」的虚假通知
-    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "backup-1" }]);
+    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" }]);
   });
 
   it("不可切换错误直接上抛，不切备选且不计数", async () => {
@@ -252,7 +252,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     // error 事件先到（观测通道），异常后切备选正常产出
     expect(events).toEqual([
       { type: "error", message: "模型响应超时" },
-      { type: "model_fallback", from: "main-1", to: "backup-1" },
+      { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" },
       { type: "text_delta", text: "backup:backup-1" },
       { type: "done", stopReason: "stop" },
     ]);
@@ -335,7 +335,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     // 第二次：冷却期内直接路由到备选
     const second: StreamEvent[] = [];
     for await (const e of models.stream("main-1", createContext("s"))) second.push(e);
-    expect(second[0]).toEqual({ type: "model_fallback", from: "main-1", to: "backup-1" });
+    expect(second[0]).toEqual({ type: "model_fallback", from: "main-1", to: "backup-1", reason: "cooldown" });
     expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
   });
 
@@ -369,8 +369,8 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     // 主模型 429 → select 落到不可解析的 ghost-1 → 跳过 → 备选正常产出
     expect(events).toEqual([
-      { type: "model_fallback", from: "main-1", to: "ghost-1" },
-      { type: "model_fallback", from: "ghost-1", to: "backup-1" },
+      { type: "model_fallback", from: "main-1", to: "ghost-1", reason: "error" },
+      { type: "model_fallback", from: "ghost-1", to: "backup-1", reason: "unresolved" },
       { type: "text_delta", text: "backup:backup-1" },
       { type: "done", stopReason: "stop" },
     ]);
@@ -416,6 +416,6 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
       for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
     }).rejects.toThrow("main 失败");
     // 主模型切到死条目有观察事件；死条目之后无未尝试模型，不再发第二次
-    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "ghost-1" }]);
+    expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "ghost-1", reason: "error" }]);
   });
 });

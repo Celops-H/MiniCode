@@ -349,6 +349,8 @@ function chunkErrorMessage(chunk: unknown): string | undefined {
 /**
  * 取 chunk 携带的 usage（E63 真实用量）：include_usage 开启后流尾会有仅含 usage 的
  * chunk（choices 为空），prompt_tokens/completion_tokens 转统一 ModelUsage。
+ * 缓存读命中（可观测性 B1）：prompt_tokens_details.cached_tokens → cacheReadTokens；
+ * openai 无写缓存概念不产出 cacheWriteTokens（归一口径见 OBSERVABILITY §5.1）。
  * @param chunk 一个流式响应片段
  * @returns 统一用量；无 usage 载荷返回 undefined
  */
@@ -356,11 +358,23 @@ function readOpenAIUsage(chunk: unknown): ModelUsage | undefined {
   if (typeof chunk !== "object" || chunk === null) return undefined;
   const usage = (chunk as { usage?: unknown }).usage;
   if (typeof usage !== "object" || usage === null) return undefined;
-  const tokens = usage as { prompt_tokens?: unknown; completion_tokens?: unknown };
+  const tokens = usage as {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
+  };
   const input = typeof tokens.prompt_tokens === "number" ? tokens.prompt_tokens : undefined;
   const output = typeof tokens.completion_tokens === "number" ? tokens.completion_tokens : undefined;
-  if (input === undefined && output === undefined) return undefined;
-  return { ...(input !== undefined ? { inputTokens: input } : {}), ...(output !== undefined ? { outputTokens: output } : {}) };
+  const cached =
+    typeof tokens.prompt_tokens_details?.cached_tokens === "number"
+      ? tokens.prompt_tokens_details.cached_tokens
+      : undefined;
+  if (input === undefined && output === undefined && cached === undefined) return undefined;
+  return {
+    ...(input !== undefined ? { inputTokens: input } : {}),
+    ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(cached !== undefined ? { cacheReadTokens: cached } : {}),
+  };
 }
 
 /**

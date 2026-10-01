@@ -869,6 +869,24 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     ]);
   });
 
+  it("prompt_tokens_details.cached_tokens → cacheReadTokens（可观测性 B1；openai 无写缓存概念不产出）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { choices: [{ delta: { content: "hi" }, index: 0 }] },
+        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+        { usage: { prompt_tokens: 120, completion_tokens: 45, prompt_tokens_details: { cached_tokens: 80 } } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      stopReason: "stop",
+      usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 80 },
+    });
+  });
+
   it("无 usage chunk 的流 done 不带 usage（厂商未给时契约不变）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(

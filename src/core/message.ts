@@ -29,6 +29,13 @@ export interface ToolCall {
 export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * 缓存读命中 token（可观测性 B1）：anthropic 取 cache_read_input_tokens；
+   * openai 取 prompt_tokens_details.cached_tokens（cached ⊆ prompt_tokens，归一口径见 OBSERVABILITY §5.1）
+   */
+  cacheReadTokens?: number;
+  /** 缓存写入 token（可观测性 B1）：anthropic 取 cache_creation_input_tokens；openai 无写缓存概念不携带 */
+  cacheWriteTokens?: number;
 }
 
 /** AssistantMessage 的调用元数据（供观测 / 续跑） */

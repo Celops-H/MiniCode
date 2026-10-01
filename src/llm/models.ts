@@ -88,7 +88,7 @@ export class Models {
     // 轮开始 select 跳过冷却中的主模型直接从备选起步：同样发切换观察事件——agent 侧
     // effectiveModel 与 TUI 署名都靠它知道实际产出者，用户也能看到「已切换」而非静默换模型
     if (selected && selected !== chain[0]) {
-      yield { type: "model_fallback", from: chain[0]!, to: selected };
+      yield { type: "model_fallback", from: chain[0]!, to: selected, reason: "cooldown" };
     }
     const tried = new Set<string>();
     let lastError: unknown;
@@ -105,7 +105,7 @@ export class Models {
         const next = router.select(chain);
         // 只在真的换了一个未尝试的模型时发观察事件：select 全挂兜底会返回链首，
         // 链首若是自身或已试过的模型，发「已切换」就是虚假通知（review 补）
-        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next };
+        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next, reason: "unresolved" };
         selected = next;
         continue;
       }
@@ -143,7 +143,7 @@ export class Models {
         // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等。
         // 但只在真的换了一个未尝试的模型时才发：select 全挂兜底会返回链首，链首若是
         // 自身或已试过的模型，发「已切换」就是虚假通知（review 补）
-        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next };
+        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next, reason: "error" };
         selected = next;
       }
     }
