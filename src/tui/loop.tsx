@@ -31,6 +31,7 @@ import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import { resolveTracesDir } from "../config/index.js";
+import type { UsageSummary } from "./state.js";
 import type { HookBus as HookBusType } from "../hooks/index.js";
 import type { PermissionApprover, PermissionDecision, PermissionRequest, PermissionMode } from "../permission/index.js";
 
@@ -112,7 +113,20 @@ export interface TuiLoopOptions {
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
   /** 轨迹目录（/session 删除联动用，OBSERVABILITY §4.1 先轨迹后会话）；缺省 ~/.minicode/traces */
-  tracesDir?: string;  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
+  tracesDir?: string;
+  /** 模型 id → 协议（可观测性 B4：用量累计的归一口径按协议区分，装配层传 models.resolve） */
+  modelApi?: (modelId: string) => string | undefined;
+  /** 模型上下文窗口（状态行上下文水位的分母，可观测性 B4） */
+  contextWindow?: number;
+  /** 自动压缩触发线（contextWindow - maxOutputTokens - safetyMargin）：水位到达即警示色 */
+  compactThreshold?: number;
+  /**
+   * 恢复重建（可观测性 B4，重建视图时调用一次）：状态行用量按降级顺序重建
+   * （轨迹 → 会话 meta.usage，OBSERVABILITY §5.1）+ 工具耗时按 toolCallId 从轨迹回填；
+   * carry 续接（reconfigure）不调用，用量随界面状态原样续接
+   */
+  rebuildExtras?: () => Promise<{ usage?: UsageSummary; toolDurations?: Map<string, number> }>;
+  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
    *  全屏渲染下 hook stderr 直写会插花渲染帧，TUI 形态落 toast */
   hookStderr?: { value?: (text: string) => void };
 }
@@ -236,17 +250,25 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   // 每轮按 resetView 决定重置内容还是原样续接）；否则按会话自建（自建渲染器随 destroy 卸载根）
   let state: TuiState;
   let setState: TuiSetState;
+  // 恢复重建（可观测性 B4）：重建视图时按降级顺序取状态行用量与工具耗时回填表；
+  // carry 续接（reconfigure）不重建，用量随界面状态原样续接
+  const needRebuild = options.rebuildExtras !== undefined && (!options.shared || options.resetView !== false);
+  const extras = needRebuild ? await options.rebuildExtras!() : undefined;
   if (options.shared) {
     state = options.shared.state;
     setState = options.shared.setState;
     if (options.resetView !== false) {
       setState(
         reconcile({
-          ...(options.carryState ?? initState(session.getMessages(), session.meta.title)),
+          ...(options.carryState ?? initState(session.getMessages(), session.meta.title, undefined, extras?.toolDurations)),
           modelLabel,
           // 权限模式跨会话持久（modeBox 活读）：状态行显示与实际裁决一致（E78）——
           // 此前 resetView 重建 state 硬编码 default，plan/auto 下切会话显示失真
           permissionMode: options.permissionMode?.value ?? "default",
+          // 状态行用量与水位参数（可观测性 B4）；用量无数据时为 undefined（状态行不显示用量区）
+          usage: extras?.usage,
+          contextWindow: options.contextWindow,
+          compactThreshold: options.compactThreshold,
         }),
       );
     } else {
@@ -257,10 +279,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
   } else {
     const [ownedState, ownedSetState] = createStore<TuiState>(
-      options.carryState ?? initState(session.getMessages(), session.meta.title, modelLabel),
+      options.carryState ?? initState(session.getMessages(), session.meta.title, modelLabel, extras?.toolDurations),
     );
     state = ownedState;
     setState = ownedSetState;
+    if (!options.carryState) {
+      // 状态行用量与水位参数（可观测性 B4）
+      ownedSetState({ usage: extras?.usage, contextWindow: options.contextWindow, compactThreshold: options.compactThreshold });
+    }
     // 自建路径同样同步权限模式（E78）：initState 缺省 default，modeBox 已是 plan/auto 时
     // 状态行与实际裁决一致
     if (!options.carryState && options.permissionMode && options.permissionMode.value !== "default") {
@@ -1136,6 +1162,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
   ({ agent, team, initPolicyBox } = options.assemble({ approver, feedRoot, hooks }));
 
+  // 初始水位（可观测性 B4）：装配后按当前上下文估一次（恢复的会话历史即水位起点；
+  // 窗口与压缩线为会话常量，随此一并写入）
+  commit({
+    ...state,
+    contextTokens: agent.estimateContextTokens(),
+    contextWindow: options.contextWindow,
+    compactThreshold: options.compactThreshold,
+  });
+
   // 订阅 Hook 事件渲染（会话/工具/子 agent）都进同一 reducer
   const unsubscribeHooks = [
     hooks.on("UserPromptSubmit", (e) => {
@@ -1156,6 +1191,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }),
     hooks.on("PostToolUseFailure", (e) => {
       if (!suppressStream) commit(reduceHook(state, e));
+    }),
+    // 用量累计（可观测性 B4）：归一口径按实际产出模型的协议区分（装配层注入解析函数）
+    hooks.on("LlmCallEnd", (e) => {
+      commit(reduceHook(state, { ...e, modelApi: options.modelApi?.(e.model) }));
+    }),
+    // root 上下文水位（可观测性 B4）：随 /root 消息追加与压缩刷新，agent.estimateContextTokens
+    // 就地计算（与压缩触发同口径）；子 agent 消息不影响 root 水位
+    hooks.on("MessageAppended", (e) => {
+      if (e.agentPath !== "/root") return;
+      commit(reduceHook(state, { ...e, contextTokens: agent.estimateContextTokens() }));
+    }),
+    hooks.on("Compact", (e) => {
+      if (e.agentPath !== "/root") return;
+      commit(reduceHook(state, { ...e, contextTokens: agent.estimateContextTokens() }));
     }),
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
     hooks.on("AgentCompleted", (e) => {

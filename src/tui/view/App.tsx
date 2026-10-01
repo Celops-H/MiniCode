@@ -115,7 +115,16 @@ export function App(props: AppProps): JSX.Element {
         />
       </Show>
       <Show when={!fullscreen()}>
-        <StatusBar model={props.model ?? props.state.modelLabel} title={props.state.title} status={props.state.status} permissionMode={props.state.permissionMode} />
+        <StatusBar
+          model={props.model ?? props.state.modelLabel}
+          title={props.state.title}
+          status={props.state.status}
+          permissionMode={props.state.permissionMode}
+          usage={props.state.usage}
+          contextTokens={props.state.contextTokens}
+          contextWindow={props.state.contextWindow}
+          compactThreshold={props.state.compactThreshold}
+        />
         {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
       </Show>
     </box>

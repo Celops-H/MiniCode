@@ -236,4 +236,33 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("glm-4.5-air");
     expect(frame).not.toContain("deepseek-v4-flash");
   });
+
+  it("状态行用量三段（可观测性 B4）：有数据显示 ↑↓/缓存/上下文，无数据不渲染", async () => {
+    const [state, setState] = createStore<TuiState>(initState([], "", "m"));
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, { width: 110, height: 8 });
+    await setup.waitForVisualIdle();
+    // 无数据：用量区不渲染
+    expect(setup.captureCharFrame()).not.toContain("缓存");
+
+    // 有数据：↑ 10.3k ↓ 45.6k · 缓存 87%（9000/10350 ≈ 87%）· 上下文 62%
+    setState({
+      usage: { inputTokens: 10350, outputTokens: 45600, cacheReadTokens: 9000 },
+      contextTokens: 62000,
+      contextWindow: 100000,
+      compactThreshold: 88000,
+    });
+    await setup.waitForVisualIdle();
+    const frame = JSON.stringify(setup.captureCharFrame());
+    expect(frame).toContain("↑ 10.3k ↓ 45.6k");
+    expect(frame).toContain("缓存 87%");
+    expect(frame).toContain("上下文 62%");
+
+    // 未到压缩线：水位弱灰；到达压缩线（≥ threshold）：警示色=warning 红（UI-SPEC §9，theme.warning 并入红）
+    setState({ contextTokens: 50000 });
+    await setup.waitForVisualIdle();
+    expect(textFgContaining(setup.captureSpans(), "上下文 50%")).toBe("#8f9096");
+    setState({ contextTokens: 90000 });
+    await setup.waitForVisualIdle();
+    expect(textFgContaining(setup.captureSpans(), "上下文 90%")).toBe("#e06c75");
+  });
 });

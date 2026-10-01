@@ -17,6 +17,7 @@ import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
 import { Models } from "../llm/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
+import { rebuildUsageFromTrace, usageFromMessages } from "./usage.js";
 import { createStore } from "solid-js/store";
 
 import { type SetStoreFunction } from "solid-js/store";
@@ -329,6 +330,22 @@ async function runTuiSession(opts: {
       terminal: opts.terminal,
       projectAgentsFile: opts.projectAgentsFile,
       tracesDir,
+      // 状态行用量与水位（可观测性 B4，OBSERVABILITY §5.1）：归一口径按协议区分；
+      // 水位与压缩触发同口径（compactConfig 即压缩判断用的窗口参数）
+      modelApi: (id) => models.resolve(id)?.model.api,
+      contextWindow: compactConfig.contextWindow,
+      compactThreshold: compactConfig.contextWindow - compactConfig.maxOutputTokens - compactConfig.safetyMargin,
+      rebuildExtras: async () => {
+        // 降级顺序：轨迹（全量含子 agent）→ 会话 meta.usage（仅主 agent、无缓存段）→ 无数据
+        const rebuilt = await rebuildUsageFromTrace(
+          path.join(tracesDir, `${session.meta.id}.jsonl`),
+          (id) => models.resolve(id)?.model.api,
+        );
+        return {
+          usage: rebuilt.usage ?? usageFromMessages(session.getMessages()),
+          toolDurations: rebuilt.toolDurations,
+        };
+      },
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]

@@ -38,6 +38,9 @@ export interface ToolBlock {
   status: "pending" | "running" | "success" | "failure";
   output?: string;
   error?: string;
+  /** 工具执行耗时 ms（可观测性 B4）：PostToolUse.durationMs 实时写入；恢复会话按
+   *  toolCallId 从轨迹回填；执行前被拒（无 durationMs 事件）与被中断（无 PostToolUse）不显示 */
+  durationMs?: number;
   collapsedArgs: boolean;
   collapsedOutput: boolean;
 }
@@ -82,7 +85,15 @@ export interface AgentNode {
 }
 
 /** agent 生命周期 HookEvent 附带的时刻（loop 注入，state reducer 保持纯函数） */
-export type AgentEventMeta = HookEvent & { spawnedAt?: number; completedAt?: number };
+export type AgentEventMeta = HookEvent & {
+  spawnedAt?: number;
+  completedAt?: number;
+  /** LlmCallEnd 附带：实际产出模型的协议（归一口径按协议区分，OBSERVABILITY §5.1） */
+  modelApi?: string;
+  /** MessageAppended / Compact 附带：root 上下文的估算 token（agent.estimateContextTokens 就地计算，
+   *  用户看到的水位就是压缩判断用的水位） */
+  contextTokens?: number;
+};
 
 /** 排队项（E52/E72）：在途操作结束前暂存的用户消息或命令，输入框上方排队条展示，
  *  Ctrl+P 取消末项；消费（消息被轮次真正提交 / 命令真正执行）时从队列移除 */
@@ -266,6 +277,48 @@ export interface Streaming {
   thinking: string;
 }
 
+/**
+ * 状态行用量区数据（可观测性 B4，OBSERVABILITY §5.1）：会话级累计，含全部 agent。
+ * inputTokens 为归一后的真实总输入（缓存读写也是真实消耗）——anthropic = input +
+ * cacheRead + cacheWrite（input_tokens 不含缓存段），openai = prompt 全量（cached ⊆
+ * prompt，不可重复相加）。缓存命中率 = cacheReadTokens / inputTokens，无数据不显示。
+ */
+export interface UsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+}
+
+/** 单次调用用量并入累计：modelApi 为 anthropic-messages 时按三段之和（input_tokens 不含
+ *  缓存段），其余（含解析失败缺省）按 input 原值——openai 类协议 cached ⊆ prompt，
+ *  缺省相加会把 cached 重复计入，保守取原值 */
+export function accumulateUsage(prev: UsageSummary | undefined, event: { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }; modelApi?: string }): UsageSummary {
+  const u = event.usage;
+  if (!u) return prev ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+  const anthropicStyle = event.modelApi === "anthropic-messages";
+  const cacheRead = u.cacheReadTokens ?? 0;
+  const cacheWrite = u.cacheWriteTokens ?? 0;
+  const input = anthropicStyle ? (u.inputTokens ?? 0) + cacheRead + cacheWrite : (u.inputTokens ?? 0);
+  return {
+    inputTokens: (prev?.inputTokens ?? 0) + input,
+    outputTokens: (prev?.outputTokens ?? 0) + (u.outputTokens ?? 0),
+    cacheReadTokens: (prev?.cacheReadTokens ?? 0) + cacheRead,
+  };
+}
+
+/**
+ * token 数人性化：不足 1k 原样，1k~1M 记 k（一位小数，整 k 去掉 .0），更大记 M。
+ */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) {
+    const k = (n / 1000).toFixed(1);
+    return k.endsWith(".0") ? `${k.slice(0, -2)}k` : `${k}k`;
+  }
+  const m = (n / 1_000_000).toFixed(1);
+  return m.endsWith(".0") ? `${m.slice(0, -2)}M` : `${m}M`;
+}
+
 export interface TuiState {
   blocks: BlockView[];
   prompt: PromptState;
@@ -286,6 +339,15 @@ export interface TuiState {
   agents: AgentNode[];
   /** 排队项（E52/E72）：在途期间新消息与统一入队的命令，展示在输入框上方、不混进消息区 */
   queue: QueuedItem[];
+  /** 会话级用量累计（可观测性 B4，OBSERVABILITY §5.1）：LlmCallEnd 事件随到随累，
+   *  恢复会话按降级顺序重建（轨迹 → 会话 meta.usage → 不显示） */
+  usage?: UsageSummary;
+  /** root 上下文估算 token（水位分子）：随 /root 的消息追加与压缩事件刷新 */
+  contextTokens?: number;
+  /** 模型上下文窗口（水位分母；压缩配置装配时注入） */
+  contextWindow?: number;
+  /** 自动压缩触发线（contextWindow - maxOutputTokens - safetyMargin）：到达即警示色 */
+  compactThreshold?: number;
   /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
   scrollOffset: number;
   toast?: { text: string; key: number };
@@ -340,8 +402,10 @@ export function selectedPromptText(p: PromptState): string {
 
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
  *  user/assistant 消息带创建时间戳（后端消息结构 P11）时回填发送时间，切模型等 reconfigure
- *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示（审查补） */
-export function initState(messages: Message[], title = "", modelLabel = ""): TuiState {
+ *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示（审查补）
+ *  toolDurations（可观测性 B4）：恢复会话按 toolCallId 从轨迹回填的工具执行耗时，轨迹不存在
+ *  或该调用被中断（无 PostToolUse）时无条目、卡片不显示耗时 */
+export function initState(messages: Message[], title = "", modelLabel = "", toolDurations?: Map<string, number>): TuiState {
   const blocks: BlockView[] = [];
   const msgTime = (m: Message): string | undefined => {
     if (!m.timestamp) return undefined;
@@ -410,6 +474,7 @@ export function initState(messages: Message[], title = "", modelLabel = ""): Tui
           name: call.name,
           args: JSON.stringify(call.input ?? {}),
           status: "pending",
+          durationMs: toolDurations?.get(call.id),
           collapsedArgs: true,
           collapsedOutput: true,
         });
@@ -440,7 +505,10 @@ export function initState(messages: Message[], title = "", modelLabel = ""): Tui
 }
 
 /** /clear 回会话新建态：消息区/流式/弹层/候选/聚焦/agent 树/输入清空。
- *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空；标题保留不复位。 */
+ *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空；标题保留不复位。
+ *  可观测性 B4：水位必须随上下文清空而清（下次消息追加自动重估，否则清空后状态行仍显示
+ *  高水位警示直到下一条消息才自愈）；usage 保留——真实消耗不清零，且轨迹 append-only、
+ *  恢复重建本就会把清空前的消耗算回来，清零反而与轨迹重建口径打架 */
 export function resetToNewState(state: TuiState): TuiState {
   return {
     ...state,
@@ -450,6 +518,7 @@ export function resetToNewState(state: TuiState): TuiState {
     modal: undefined,
     candidate: undefined,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
+    contextTokens: undefined,
     prompt: emptyPrompt(state.prompt.history),
   };
 }
@@ -790,6 +859,8 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
               status: (event.isError ? "failure" : "success") as "failure" | "success",
               output: event.isError ? undefined : event.output,
               error: event.isError ? event.output : undefined,
+              // 执行耗时（可观测性 B4）：卡片完成行显示「耗时 x」；执行前被拒的事件不带该字段
+              durationMs: event.durationMs ?? b.durationMs,
             }
           : b,
       );
@@ -799,10 +870,22 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       const card = findToolById(state.blocks, event.toolCallId);
       if (!card) return state;
       const blocks = state.blocks.map((b) =>
-        b === card ? { ...b, status: "failure" as const, error: event.error, output: undefined } : b,
+        b === card
+          ? { ...b, status: "failure" as const, error: event.error, output: undefined, durationMs: event.durationMs ?? b.durationMs }
+          : b,
       );
       return { ...state, blocks };
     }
+    case "LlmCallEnd":
+      // 会话级用量累计（可观测性 B4）：归一口径按协议区分（AgentEventMeta.modelApi 注入），
+      // usage 缺省（厂商未给用量）时累计不变
+      return { ...state, usage: accumulateUsage(state.usage, { usage: event.usage, modelApi: event.modelApi }) };
+    case "MessageAppended":
+    case "Compact":
+      // root 上下文水位刷新（可观测性 B4）：loop 就地计算注入（agent.estimateContextTokens，
+      // 与压缩触发同口径——用户看到的水位就是压缩判断用的水位）；未注入（子 agent 事件/直调）不动
+      if (event.contextTokens === undefined) return state;
+      return { ...state, contextTokens: event.contextTokens };
     case "AgentSpawned":
       // 已存在条目（followup 唤醒已完成/中断的 agent，P9）：重置为运行态、清完成时刻，
       // 树重新亮起（否则条目停在上一次终态、AgentStrip 10s 后过滤消失后不再出现）；

@@ -173,6 +173,14 @@ function argsDigest(args: string, max = 40): string {
   return Array.from(s).length > max ? `${Array.from(s).slice(0, max).join("")}…` : s;
 }
 
+/** 执行耗时文案（可观测性 B4）：完成/失败卡显示「· 耗时 1.2s」，不足 1 秒记 ms；
+ *  执行前被拒（无 durationMs 事件）与被中断（无 PostToolUse）无耗时不显示 */
+function durationText(b: ToolBlock): string {
+  if (b.durationMs === undefined) return "";
+  if (b.durationMs < 1000) return ` · 耗时 ${b.durationMs}ms`;
+  return ` · 耗时 ${(b.durationMs / 1000).toFixed(1)}s`;
+}
+
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const b = props.b;
   const status = toolStatus(b);
@@ -193,6 +201,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         <text fg={h.fg()}>
           <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
           {b.args ? ` ${argsDigest(b.args)}` : ""}
+          {durationText(b)}
           {b.status === "running" ? (
             ""
           ) : hasOutput(b) && !expanded ? ` · 输出 ${outputLines} 行 · 点击展开` : ""}
@@ -216,6 +225,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         <text>
           <span style={{ fg: status.fg }}>{status.icon}</span> <span style={{ fg: h.fg() }}>Bash</span>{" "}
           {b.args ? argsDigest(b.args, 60) : ""}
+          {durationText(b)}
         </text>
         <Show when={hasOutput(b)}>
           {b.collapsedOutput ? (
@@ -238,6 +248,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
       <text fg={h.fg()}>
         <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
+        {durationText(b)}
         {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」；只有错误无输出时显「错误详情」（审查 D-3） */}
         {hasOutput(b) && b.collapsedOutput
           ? b.output
