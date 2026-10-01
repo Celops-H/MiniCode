@@ -6,10 +6,10 @@ import { pathToFileURL } from "node:url";
 import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { buildInstructionsPrompt, environmentPrompt, loadInstructionFiles } from "../context/index.js";
-import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
+import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEvent, type HookEventType } from "../hooks/index.js";
 import { attachRecorder } from "../observability/index.js";
-import { resolveSessionsRoot } from "../config/index.js";
-import { Logger } from "../logger/index.js";
+import { resolveLogsDir, resolveSessionsRoot } from "../config/index.js";
+import { Logger, attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { McpManager, killAllMcpServers } from "../mcp/index.js";
 import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills/index.js";
 import { SessionStore } from "../storage/index.js";
@@ -196,7 +196,7 @@ async function loadDotEnv(): Promise<void> {
 /** 新建或继续会话，进入交互循环 */
 async function startSession(modelId?: string, sessionId?: string, agents = true): Promise<void> {
   const config = await loadConfig();
-  const logger = new Logger({ level: config.logLevel });
+  const logger = createFileLogger(config);
   const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
   const models = buildModelClient(config, modelId);
 
@@ -207,9 +207,12 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     console.log(`会话已创建：${session.meta.id}`);
   }
 
+  logger.info(`启动：minicode ${MINICODE_VERSION}（cwd ${process.cwd()}）`);
+  logger.info(`配置加载完成（logLevel ${config.logLevel}）`);
   // hook 总线常在（可观测性装配需要）：无 hooks 配置时为空总线，事件发射零成本；
   // Recorder 订阅总线把运行过程写轨迹（OBSERVABILITY §3.1 统一事件出口）
-  const hooks = buildHookBus(config.hooks) ?? new HookBus();
+  const onHandlerError = (err: unknown, event: HookEvent): void => logger.error(hookHandlerErrorText(err, event));
+  const hooks = buildHookBus(config.hooks, { onHandlerError }) ?? new HookBus({ onHandlerError });
   // 可观测性装配（OBSERVABILITY §3.1/§7）：Recorder 订阅总线把运行过程写轨迹，
   // enabled=false 时不装配；轨迹与会话存储独立，只靠 sessionId 关联
   attachRecorder(hooks, {
@@ -220,11 +223,13 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     enabled: config.observability?.enabled,
     dir: config.observability?.dir,
   });
+  // 流水日志埋点（OBSERVABILITY §6）：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
+  attachHookLogging(hooks, logger);
   const write = (text: string): void => {
     process.stdout.write(text);
   };
   // M5 扩展生态装配（BACKEND §19/§20）：MCP server 工具与技能并入会话；失败 server 错误行输出
-  const extensions = await assembleSessionExtensions(config);
+  const extensions = await assembleSessionExtensions(config, { logger });
   for (const line of extensions.mcpErrors) console.error(line);
   // 指令文件加载（BACKEND §21）：用户级 ~/.minicode/AGENTS.md + 项目侧根→cwd 逐级，
   // 全部拼接进系统提示词；无文件为空段不占位
@@ -256,7 +261,9 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     },
   });
 
-  logger.info(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）`);
+  // 流水日志（文件）+ 控制台各记一条会话开始（控制台这行是既有 UX，保留直写）
+  logger.info(`会话 ${session.meta.id}（模型 ${session.meta.model}）开始`);
+  write(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）\n`);
   // 会话开始（DESIGN 13.3：会话级事件由宿主触发）
   await hooks?.emit({ type: "SessionStart" });
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -301,22 +308,29 @@ export interface SessionExtensions {
  * 并记录错误行，不阻断会话）、扫描技能目录；技能非空时产出 skill 工具与「可用技能」提示词段
  * （工具与提示词同进退）。
  * @param config 已加载配置（取 mcpServers 与 skills.disabled）
- * @param opts 技能目录覆盖（测试注入；缺省项目 <cwd>/.minicode/skills、用户 ~/.minicode/skills）
+ * @param opts 技能目录覆盖（测试注入；缺省项目 <cwd>/.minicode/skills、用户 ~/.minicode/skills）；
+ *   logger 传入时记录 MCP 启动摘要、连接断开与技能加载（可观测性 B3 埋点）
  */
 export async function assembleSessionExtensions(
   config: Pick<Config, "mcpServers" | "skills">,
-  opts: { projectSkillsDir?: string; userSkillsDir?: string } = {},
+  opts: { projectSkillsDir?: string; userSkillsDir?: string; logger?: Logger } = {},
 ): Promise<SessionExtensions> {
   const tools: Tool[] = [];
   let promptSection = "";
   let mcpManager: McpManager | null = null;
   let mcpErrors: string[] = [];
+  const logger = opts.logger;
 
   const servers = config.mcpServers ?? {};
   if (Object.keys(servers).length > 0) {
-    mcpManager = new McpManager(servers);
+    mcpManager = new McpManager(servers, {
+      onDisconnect: (name, reason) => logger?.warn(`MCP 服务 ${name} 连接断开：${reason}`),
+    });
     tools.push(...(await mcpManager.startAll()));
     mcpErrors = mcpManager.errors();
+    const failed = mcpManager.statuses().filter((s) => s.enabled && s.error).length;
+    logger?.info(`MCP 服务启动：${mcpManager.statuses().filter((s) => s.started).length} 个成功，${failed} 个失败`);
+    for (const line of mcpErrors) logger?.warn(line);
   }
 
   const skills = await scanSkills({
@@ -327,9 +341,24 @@ export async function assembleSessionExtensions(
   if (skills.length > 0) {
     tools.push(createSkillTool(skills));
     promptSection = buildSkillsPromptSection(skills);
+    logger?.info(`技能加载：${skills.length} 个`);
   }
 
   return { tools, promptSection, mcpManager, mcpErrors };
+}
+
+/**
+ * 流水日志文件 Logger（OBSERVABILITY §6，CLI/TUI 共用）：级别走 logLevel 配置
+ * （MINICODE_LOG_LEVEL 环境变量经配置加载层可覆盖），写 ~/.minicode/logs/minicode.log，
+ * 单文件超限轮转保留 .old 一份。日志无新增配置项。
+ * @param config 已加载配置（取 logLevel）
+ * @returns 只写文件的 Logger
+ */
+export function createFileLogger(config: Pick<Config, "logLevel">): Logger {
+  return new Logger({
+    level: config.logLevel,
+    file: { path: path.join(resolveLogsDir(), "minicode.log") },
+  });
 }
 
 /**
@@ -338,10 +367,14 @@ export async function assembleSessionExtensions(
  * @param hooks hook 配置
  * @param opts.onStderr hook 命令 stderr 的观测输出通道（E95）：CLI 缺省直写本进程
  *   stderr；TUI 宿主注入界面通道（全屏渲染下直写 stderr 会插花渲染帧）
+ * @param opts.onHandlerError 处理器异常回调（可观测性 B3）：宿主接流水日志
  */
-export function buildHookBus(hooks?: Config["hooks"], opts: { onStderr?: (text: string) => void } = {}): HookBus | undefined {
+export function buildHookBus(
+  hooks?: Config["hooks"],
+  opts: { onStderr?: (text: string) => void; onHandlerError?: (error: unknown, event: HookEvent) => void } = {},
+): HookBus | undefined {
   if (!hooks) return undefined;
-  const bus = new HookBus();
+  const bus = new HookBus({ onHandlerError: opts.onHandlerError });
   for (const eventType of HOOK_EVENT_TYPES) {
     for (const command of hooks[eventType] ?? []) {
       bus.on(eventType, createCommandHook(command, { onStderr: opts.onStderr }));

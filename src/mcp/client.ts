@@ -45,6 +45,8 @@ export class McpClient {
   /** 服务名（配置键，用于错误信息与工具命名） */
   readonly name: string;
   private readonly config: McpServerConfig;
+  /** 非主动停止的进程退出回调（可观测性 B3：宿主接流水日志记录「连接断开」） */
+  private readonly onUnexpectedExit?: (reason: string) => void;
   private child: ChildProcess | null = null;
   private nextId = 1;
   private tools: McpToolInfo[] = [];
@@ -59,10 +61,13 @@ export class McpClient {
   /** 进程已退出（退出后拒绝全部新请求） */
   private exited = false;
   private exitError = "";
+  /** stop() 主动停止：其后到达的 exit 事件不算「连接断开」（会话收尾的正常关闭） */
+  private stopped = false;
 
-  constructor(name: string, config: McpServerConfig) {
+  constructor(name: string, config: McpServerConfig, options: { onUnexpectedExit?: (reason: string) => void } = {}) {
     this.name = name;
     this.config = config;
+    this.onUnexpectedExit = options.onUnexpectedExit;
   }
 
   /** server 进程是否仍在运行 */
@@ -102,7 +107,10 @@ export class McpClient {
       child.once("exit", (code, signal) => {
         // markExited 内部拒绝全部在途请求：稳态调用期 server 崩溃时，在途 tools/call
         // 立即失败而非挂到超时（错误信息误导且白等满 timeoutMs）
-        this.markExited(`进程退出（${code !== null ? `code ${code}` : `信号 ${signal}`}）`);
+        const reason = `进程退出（${code !== null ? `code ${code}` : `信号 ${signal}`}）`;
+        this.markExited(reason);
+        // 主动停止（stop）触发的退出不算断开：会话收尾的正常关闭不进日志
+        if (!this.stopped) this.onUnexpectedExit?.(reason);
         reject(new Error(`MCP 服务 ${this.name} 在握手完成前退出${this.stderrSuffix()}`));
       });
       child.once("error", (err) => {
@@ -152,6 +160,7 @@ export class McpClient {
    * 已退出的进程不再杀树：pid 可能已被 OS 复用，taskkill 会误杀无关进程。
    */
   stop(): void {
+    this.stopped = true;
     if (!this.exited && this.child && this.child.pid !== undefined) killProcessTree(this.child.pid);
     this.child = null;
     if (!this.exited) this.markExited("已停止");

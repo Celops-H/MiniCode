@@ -8,11 +8,12 @@ import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Session, SessionStore } from "../storage/index.js";
-import { HookBus } from "../hooks/index.js";
+import { HookBus, type HookEvent } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
-import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions, MINICODE_VERSION } from "../cli/app.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions, createFileLogger, MINICODE_VERSION } from "../cli/app.js";
 import { attachRecorder, deleteTrace } from "../observability/index.js";
+import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
 import { Models } from "../llm/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
@@ -268,8 +269,16 @@ async function runTuiSession(opts: {
   // stderr（全屏渲染下会以裸文本插进渲染帧）。盒子指向 toast 前的窗口期输出静默丢弃
   // （当前装配顺序下无事件落在该窗口；若调整装配顺序需留意）
   const hookStderrBox: { value?: (text: string) => void } = {};
-  const hooks = buildHookBus(config.hooks, { onStderr: (text) => hookStderrBox.value?.(text) }) ?? new HookBus();
+  // 流水日志（OBSERVABILITY §6）：文件 Logger（TUI 全屏渲染，不走控制台输出）
+  const logger = createFileLogger(config);
+  const onHandlerError = (err: unknown, event: HookEvent): void => logger.error(hookHandlerErrorText(err, event));
+  const hooks =
+    buildHookBus(config.hooks, { onStderr: (text) => hookStderrBox.value?.(text), onHandlerError }) ??
+    new HookBus({ onHandlerError });
   const modelId = session.meta.model;
+  logger.info(`启动：minicode ${MINICODE_VERSION}（cwd ${process.cwd()}）`);
+  logger.info(`配置加载完成（logLevel ${config.logLevel}）`);
+  logger.info(`会话 ${session.meta.id}（模型 ${session.meta.model}）开始`);
   // 可观测性装配（OBSERVABILITY §3.1/§7，与 CLI 同套）：Recorder 订阅总线写轨迹；
   // enabled=false 时不装配。轨迹目录同时供 /session 删除联动（先轨迹后会话）使用
   const tracesDir = config.observability?.dir ?? resolveTracesDir();
@@ -281,6 +290,8 @@ async function runTuiSession(opts: {
     enabled: config.observability?.enabled,
     dir: config.observability?.dir,
   });
+  // 流水日志埋点（OBSERVABILITY §6）：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
+  attachHookLogging(hooks, logger);
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
   // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
   const compactConfig = buildCompactConfig(config, modelId, models) ?? {
@@ -294,7 +305,7 @@ async function runTuiSession(opts: {
   const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
   // M5 扩展生态装配（BACKEND §19/§20，与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
   // 启动失败的 server 已跳过，错误行 toast 一次提示、完整状态在 /mcp 面板
-  const extensions = await assembleSessionExtensions(config);
+  const extensions = await assembleSessionExtensions(config, { logger });
   // 指令文件加载（BACKEND §21，与 CLI 同套）：用户级 + 项目侧逐级拼接进系统提示词
   const instructionsSection = buildInstructionsPrompt(await loadInstructionFiles());
   try {

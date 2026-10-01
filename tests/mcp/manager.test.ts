@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ToolRegistry } from "../../src/tools/index.js";
 import { McpManager, killAllMcpServers } from "../../src/mcp/manager.js";
@@ -149,5 +149,29 @@ describe("McpManager（生命周期与工具接入）", () => {
     managers.push(manager);
     const [tool] = await manager.startAll();
     expect(tool?.inputSchema.safeParse({ whatever: [1, 2, 3] }).success).toBe(true);
+  });
+
+  it("连接断开回调：server 非主动停止退出时触发，stopAll 主动停止不触发（可观测性 B3）", async () => {
+    // crash-after-list：握手成功后 50ms 自杀
+    const onDisconnect = vi.fn();
+    const manager = new McpManager({ crash: fakeConfig("crash-after-list") }, { onDisconnect });
+    managers.push(manager);
+    await manager.startAll();
+    // 轮询等退出回调到达（异步事件）
+    for (let i = 0; i < 50 && onDisconnect.mock.calls.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+    expect(onDisconnect.mock.calls[0]?.[0]).toBe("crash");
+    expect(onDisconnect.mock.calls[0]?.[1]).toContain("进程退出");
+
+    // 主动停止不触发断开回调
+    const onDisconnect2 = vi.fn();
+    const manager2 = new McpManager({ fs: fakeConfig() }, { onDisconnect: onDisconnect2 });
+    managers.push(manager2);
+    await manager2.startAll();
+    manager2.stopAll();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(onDisconnect2).not.toHaveBeenCalled();
   });
 });

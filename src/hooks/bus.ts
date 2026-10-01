@@ -3,6 +3,16 @@ import type { HookEvent, HookEventOf, HookEventType, HookHandler, HookVerdict } 
 /** 内部存储用的通用处理器签名（对外注册时按事件类型限定，emit 时事件已按类型分发） */
 type AnyHandler = (event: HookEvent) => HookVerdict | void | Promise<HookVerdict | void>;
 
+/** HookBus 构造选项 */
+export interface HookBusOptions {
+  /**
+   * 处理器异常回调（可观测性 B3）：单个 handler 抛错时调用（异常本身仍被吞掉，
+   * 不影响同事件其余 handler 与业务，CONTRACTS §3）。宿主接流水日志，
+   * 让 hook 故障从「静默吞掉」变成可排查（E104）。
+   */
+  onHandlerError?: (error: unknown, event: HookEvent) => void;
+}
+
 /**
  * Hook 事件总线：外部程序扩展 Agent 的出口（DESIGN 13.2）。
  * on() 登记想监听的事件类型，emit() 广播事件并等所有处理器执行完，
@@ -10,6 +20,11 @@ type AnyHandler = (event: HookEvent) => HookVerdict | void | Promise<HookVerdict
  */
 export class HookBus {
   private readonly handlers = new Map<HookEventType, Set<AnyHandler>>();
+  private readonly onHandlerError?: (error: unknown, event: HookEvent) => void;
+
+  constructor(options: HookBusOptions = {}) {
+    this.onHandlerError = options.onHandlerError;
+  }
 
   /**
    * 注册事件处理器：该类型事件一发生就回调 handler，可异步；PreToolUse 的 handler 返回拦截结果。
@@ -39,8 +54,15 @@ export class HookBus {
     for (const handler of handlers) {
       try {
         results.push(await handler(event));
-      } catch {
-        // 单个 handler 异常不影响同事件其余 handler（CONTRACTS §3 事件处理出错不影响业务）
+      } catch (err) {
+        // 单个 handler 异常不影响同事件其余 handler（CONTRACTS §3 事件处理出错不影响业务）；
+        // 异常经回调上报宿主流水日志，不再静默吞掉（E104）。
+        // 回调自身抛错同样吞掉：保证「handler 异常不向上抛、不连带丢后续 handler」无条件成立
+        try {
+          this.onHandlerError?.(err, event);
+        } catch {
+          // 回调故障忽略
+        }
       }
     }
     return results;

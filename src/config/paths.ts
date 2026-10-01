@@ -115,3 +115,15 @@ export function resolveTracesDir(opts: ResolvePathsOptions = {}): string {
   const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
   return path.join(globalDir, "traces");
 }
+
+/**
+ * 解析流水日志目录：默认用户级 `~/.minicode/logs/`（OBSERVABILITY §6，无配置项）。
+ * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
+ * @returns 日志目录
+ */
+export function resolveLogsDir(opts: ResolvePathsOptions = {}): string {
+  const home = opts.homedir ?? os.homedir();
+  const xdg = opts.xdgConfigHome;
+  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
+  return path.join(globalDir, "logs");
+}

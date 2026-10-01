@@ -29,6 +29,12 @@ export function killAllMcpServers(): void {
   for (const manager of [...activeManagers]) manager.stopAll();
 }
 
+/** McpManager 构造选项 */
+export interface McpManagerOptions {
+  /** server 非主动停止的进程退出回调（可观测性 B3：宿主接流水日志记录「连接断开」） */
+  onDisconnect?: (name: string, reason: string) => void;
+}
+
 /**
  * MCP server 生命周期管理（BACKEND §19）：装配时启动全部已启用 server 并完成握手，
  * 失败的跳过并记录错误行（不阻断会话）；会话结束 stopAll 按进程树杀防孤儿。
@@ -40,9 +46,11 @@ export class McpManager {
   /** 工具重名丢弃告警行（mcp__ 前缀拼接可能撞名） */
   private readonly collisions: string[] = [];
   private readonly configs: Record<string, McpServerConfig>;
+  private readonly options: McpManagerOptions;
 
-  constructor(servers: Record<string, McpServerConfig>) {
+  constructor(servers: Record<string, McpServerConfig>, options: McpManagerOptions = {}) {
     this.configs = servers;
+    this.options = options;
   }
 
   /**
@@ -106,7 +114,12 @@ export class McpManager {
   }
 
   private async startOne(name: string, cfg: McpServerConfig): Promise<void> {
-    const client = new McpClient(name, cfg);
+    const client = new McpClient(name, cfg, {
+      onUnexpectedExit: (reason) => {
+        // 握手完成前退出属启动失败（已记入 errors()），不算「连接断开」
+        if (this.clients.has(name)) this.options.onDisconnect?.(name, reason);
+      },
+    });
     try {
       const tools = await client.start();
       this.clients.set(name, client);
