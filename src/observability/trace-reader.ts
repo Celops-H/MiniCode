@@ -114,6 +114,8 @@ export async function deleteTrace(tracesDir: string, sessionId: string): Promise
  * 惰性清理（OBSERVABILITY §4.1 兜底）：按各轨迹 header 的 cwd 定位对应会话目录，
  * 会话文件已不存在的轨迹直接删除——防历史版本（轨迹目录早于按 cwd 隔离的会话
  * 存储使用）或意外路径残留。读取失败/头损坏的轨迹保守跳过，宁可残留不误删。
+ * 该 cwd 的会话子目录本身不存在时整体跳过（如 sessionsDir 换根后新根尚未建）——
+ * 该根的会话布局未知，防止把全部旧轨迹当孤儿误删（轨迹含消息正文不可恢复）。
  * @param tracesDir 轨迹目录
  * @param sessionsRoot 会话存储根目录（各轨迹按 header.cwd 派生自己的会话目录）
  * @param keepSessionId 当前活跃会话（草稿会话尚未落盘，其轨迹不能误删）
@@ -138,11 +140,17 @@ export async function cleanupStaleTraces(
     const filePath = path.join(tracesDir, name);
     const header = await TraceReader.readHeader(filePath);
     if (!header) continue;
+    const sessionsDir = resolveSessionsDir({ root: sessionsRoot, cwd: header.cwd });
     try {
-      const sessionsDir = resolveSessionsDir({ root: sessionsRoot, cwd: header.cwd });
+      await stat(sessionsDir);
+    } catch {
+      // 会话子目录不存在：布局未知，保守跳过（换根守卫，见函数注释）
+      continue;
+    }
+    try {
       await stat(path.join(sessionsDir, `${sessionId}.jsonl`));
     } catch {
-      // 会话文件已不存在（或按 cwd 定位失败视为失效）：删除残留轨迹
+      // 目录在而会话文件缺：删除残留轨迹
       await rm(filePath, { force: true });
       removed++;
     }

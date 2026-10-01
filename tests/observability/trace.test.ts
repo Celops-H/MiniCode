@@ -424,16 +424,21 @@ describe("会话删除联动与惰性清理（OBSERVABILITY §4.1）", () => {
       const tracesDir = path.join(dir, "traces");
       const sessionsRoot = path.join(dir, "sessions");
       await mkdir(tracesDir, { recursive: true });
-      // cwd A：会话存在；cwd B：会话不存在
+      // cwd A：会话存在；cwd B：会话子目录在而文件缺（会话被删后的真实残留形态）
       const cwdA = path.join(dir, "projA");
       const cwdB = path.join(dir, "projB");
       await mkdir(resolveSessionsDir({ root: sessionsRoot, cwd: cwdA }), { recursive: true });
+      await mkdir(resolveSessionsDir({ root: sessionsRoot, cwd: cwdB }), { recursive: true });
       const headerLine = (sessionId: string, cwd: string): string =>
         JSON.stringify({ format: TRACE_FORMAT, formatVersion: 1, sessionId, cwd, minicodeVersion: "0.0.1", startedAt: "t" });
       await writeFile(path.join(tracesDir, "alive.jsonl"), `${headerLine("alive", cwdA)}\n`, "utf8");
       await mkdir(resolveSessionsDir({ root: sessionsRoot, cwd: cwdA }), { recursive: true });
       await writeFile(path.join(resolveSessionsDir({ root: sessionsRoot, cwd: cwdA }), "alive.jsonl"), "", "utf8");
       await writeFile(path.join(tracesDir, "stale.jsonl"), `${headerLine("stale", cwdB)}\n`, "utf8");
+      // 会话子目录根本不存在的 cwd（换根守卫场景）：布局未知，保守跳过不删
+      const cwdC = path.join(dir, "projC");
+
+      await writeFile(path.join(tracesDir, "other-root.jsonl"), `${headerLine("other-root", cwdC)}\n`, "utf8");
       // 当前会话（草稿未落盘）：即使会话文件不存在也不能误删
       await writeFile(path.join(tracesDir, "current.jsonl"), `${headerLine("current", cwdB)}\n`, "utf8");
       // 头损坏：保守跳过不删
@@ -445,6 +450,8 @@ describe("会话删除联动与惰性清理（OBSERVABILITY §4.1）", () => {
       expect(existsSync(path.join(tracesDir, "stale.jsonl"))).toBe(false);
       expect(existsSync(path.join(tracesDir, "current.jsonl"))).toBe(true);
       expect(existsSync(path.join(tracesDir, "broken.jsonl"))).toBe(true);
+      // 换根守卫：会话子目录不存在的 cwd 对应轨迹保守保留
+      expect(existsSync(path.join(tracesDir, "other-root.jsonl"))).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
