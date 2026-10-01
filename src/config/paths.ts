@@ -32,19 +32,28 @@ export function resolveConfigPaths(opts: ResolvePathsOptions = {}): ConfigPaths 
 }
 
 /**
+ * 解析会话存储根目录（不分工作目录子层）：config.sessionsDir 的语义为根目录（DESIGN 14），
+ * 缺省用户级 `~/.minicode/sessions/`。
+ * @param opts 路径选项（homedir / xdgConfigHome / root 可注入，测试用）
+ * @returns 会话存储根目录
+ */
+export function resolveSessionsRoot(opts: ResolvePathsOptions & { root?: string } = {}): string {
+  const home = opts.homedir ?? os.homedir();
+  const xdg = opts.xdgConfigHome;
+  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
+  return opts.root ?? path.join(globalDir, "sessions");
+}
+
+/**
  * 解析会话存储目录：按启动工作目录分子目录（E46，DESIGN 14）——
- * `<root>/<sanitizePath(cwd)>`，各工作目录只看自己的会话。root 缺省用户级
- * `~/.minicode/sessions/`（config.sessionsDir 可覆盖，语义为根目录）。
+ * `<root>/<sanitizePath(cwd)>`，各工作目录只看自己的会话。
  * @param opts 路径选项（homedir / xdgConfigHome / root / cwd 可注入，测试用）
  * @returns 会话存储目录
  */
 export function resolveSessionsDir(
   opts: ResolvePathsOptions & { root?: string } = {},
 ): string {
-  const home = opts.homedir ?? os.homedir();
-  const xdg = opts.xdgConfigHome;
-  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
-  const root = opts.root ?? path.join(globalDir, "sessions");
+  const root = resolveSessionsRoot(opts);
   const cwd = path.resolve(opts.cwd ?? process.cwd());
   return path.join(root, sanitizePath(cwd));
 }
@@ -92,4 +101,17 @@ export function resolveOutputsDir(opts: ResolvePathsOptions = {}): string {
   const xdg = opts.xdgConfigHome;
   const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
   return path.join(globalDir, "outputs");
+}
+
+/**
+ * 解析运行轨迹目录：默认用户级 `~/.minicode/traces/`（OBSERVABILITY §4.1，
+ * config.observability.dir 可覆盖）。轨迹与会话存储独立目录、独立生命周期。
+ * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
+ * @returns 轨迹目录
+ */
+export function resolveTracesDir(opts: ResolvePathsOptions = {}): string {
+  const home = opts.homedir ?? os.homedir();
+  const xdg = opts.xdgConfigHome;
+  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
+  return path.join(globalDir, "traces");
 }

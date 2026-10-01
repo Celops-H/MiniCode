@@ -1,8 +1,8 @@
 export { configSchema } from "./types.js";
-export type { Config, ModelConfig, ProviderConfig, McpServerConfig, SkillsConfig } from "./types.js";
+export type { Config, ModelConfig, ProviderConfig, McpServerConfig, SkillsConfig, ObservabilityConfig } from "./types.js";
 export { loadConfig } from "./load.js";
 export type { LoadConfigOptions } from "./load.js";
-export { resolveConfigPaths, resolveSessionsDir } from "./paths.js";
+export { resolveConfigPaths, resolveSessionsDir, resolveSessionsRoot, resolveTracesDir } from "./paths.js";
 export type { ConfigPaths, ResolvePathsOptions } from "./paths.js";
 export { parseEnvFile, loadEnvFile } from "./env.js";
 export { PROVIDER_PRESETS } from "./presets.js";

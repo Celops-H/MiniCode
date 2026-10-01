@@ -99,6 +99,17 @@ export const debugConfigSchema = z
   .strict();
 export type DebugConfig = z.infer<typeof debugConfigSchema>;
 
+/** 可观测性配置（OBSERVABILITY §7）；strict：拼错字段直接报错而非默认忽略 */
+export const observabilityConfigSchema = z
+  .object({
+    /** 总开关（缺省 true）：false 时不装配 Recorder、不写轨迹；日志文件不受影响 */
+    enabled: z.boolean().optional(),
+    /** 轨迹目录，缺省 ~/.minicode/traces */
+    dir: z.string().optional(),
+  })
+  .strict();
+export type ObservabilityConfig = z.infer<typeof observabilityConfigSchema>;
+
 /** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错（DESIGN 16） */
 export const configSchema = z
   .object({
@@ -131,6 +142,8 @@ export const configSchema = z
   skills: skillsConfigSchema.optional(),
   /** 调试开关（诊断用，E68）：默认全关，零行为影响 */
   debug: debugConfigSchema.optional(),
+  /** 可观测性（OBSERVABILITY §7）：运行轨迹落盘开关与目录；缺省开启 */
+  observability: observabilityConfigSchema.optional(),
 })
   .strict();
 

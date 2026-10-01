@@ -7,6 +7,8 @@ import { Agent, Team, type CompactConfig } from "../agent/index.js";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { buildInstructionsPrompt, environmentPrompt, loadInstructionFiles } from "../context/index.js";
 import { HookBus, createCommandHook, HOOK_EVENT_TYPES, type HookEventType } from "../hooks/index.js";
+import { attachRecorder } from "../observability/index.js";
+import { resolveSessionsRoot } from "../config/index.js";
 import { Logger } from "../logger/index.js";
 import { McpManager, killAllMcpServers } from "../mcp/index.js";
 import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills/index.js";
@@ -48,11 +50,14 @@ const SYSTEM_PROMPT = [
 /** 多 agent 协作开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
 const COORDINATOR_PROMPT = "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。";
 
+/** 项目版本号（轨迹 header、--version 用；与 package.json version 保持同步） */
+export const MINICODE_VERSION = "0.0.1";
+
 export const program = new Command();
 program
   .name("minicode")
   .description("AI 编程 Agent 命令行工具（无参数直接进 TUI；minicode -c 继续最近会话）")
-  .version("0.0.1");
+  .version(MINICODE_VERSION);
 
 program
   .command("new")
@@ -202,7 +207,19 @@ async function startSession(modelId?: string, sessionId?: string, agents = true)
     console.log(`会话已创建：${session.meta.id}`);
   }
 
-  const hooks = buildHookBus(config.hooks);
+  // hook 总线常在（可观测性装配需要）：无 hooks 配置时为空总线，事件发射零成本；
+  // Recorder 订阅总线把运行过程写轨迹（OBSERVABILITY §3.1 统一事件出口）
+  const hooks = buildHookBus(config.hooks) ?? new HookBus();
+  // 可观测性装配（OBSERVABILITY §3.1/§7）：Recorder 订阅总线把运行过程写轨迹，
+  // enabled=false 时不装配；轨迹与会话存储独立，只靠 sessionId 关联
+  attachRecorder(hooks, {
+    sessionId: session.meta.id,
+    cwd: process.cwd(),
+    minicodeVersion: MINICODE_VERSION,
+    sessionsRoot: resolveSessionsRoot({ root: config.sessionsDir }),
+    enabled: config.observability?.enabled,
+    dir: config.observability?.dir,
+  });
   const write = (text: string): void => {
     process.stdout.write(text);
   };

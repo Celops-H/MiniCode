@@ -3,7 +3,7 @@
  * 通道（approver/feedRoot/hooks）由 runTui 就绪后回调，这里用它 createSessionAgent；
  * /session 切换的会话重建循环也在此完成（装配层）。
  */
-import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir, resolveSessionsRoot, resolveTracesDir } from "../config/index.js";
 import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -11,7 +11,8 @@ import { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
-import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions } from "../cli/app.js";
+import { buildCompactConfig, buildHookBus, createSessionAgent, assembleSessionExtensions, MINICODE_VERSION } from "../cli/app.js";
+import { attachRecorder, deleteTrace } from "../observability/index.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../cli/models.js";
 import { Models } from "../llm/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
@@ -269,6 +270,17 @@ async function runTuiSession(opts: {
   const hookStderrBox: { value?: (text: string) => void } = {};
   const hooks = buildHookBus(config.hooks, { onStderr: (text) => hookStderrBox.value?.(text) }) ?? new HookBus();
   const modelId = session.meta.model;
+  // 可观测性装配（OBSERVABILITY §3.1/§7，与 CLI 同套）：Recorder 订阅总线写轨迹；
+  // enabled=false 时不装配。轨迹目录同时供 /session 删除联动（先轨迹后会话）使用
+  const tracesDir = config.observability?.dir ?? resolveTracesDir();
+  attachRecorder(hooks, {
+    sessionId: session.meta.id,
+    cwd: process.cwd(),
+    minicodeVersion: MINICODE_VERSION,
+    sessionsRoot: resolveSessionsRoot({ root: config.sessionsDir }),
+    enabled: config.observability?.enabled,
+    dir: config.observability?.dir,
+  });
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
   // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
   const compactConfig = buildCompactConfig(config, modelId, models) ?? {
@@ -305,6 +317,7 @@ async function runTuiSession(opts: {
       hookStderr: hookStderrBox,
       terminal: opts.terminal,
       projectAgentsFile: opts.projectAgentsFile,
+      tracesDir,
       assemble: ({ approver, feedRoot }) => {
         const tools = [...createBuiltinTools(), ...extensions.tools];
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]

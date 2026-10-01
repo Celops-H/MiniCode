@@ -24,11 +24,13 @@ import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../cli/interact.js";
+import { deleteTrace } from "../observability/index.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
 import { tuiCursor, CURSOR_STEADY_MS } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
+import { resolveTracesDir } from "../config/index.js";
 import type { HookBus as HookBusType } from "../hooks/index.js";
 import type { PermissionApprover, PermissionDecision, PermissionRequest, PermissionMode } from "../permission/index.js";
 
@@ -109,7 +111,8 @@ export interface TuiLoopOptions {
   carryState?: TuiState;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
-  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
+  /** 轨迹目录（/session 删除联动用，OBSERVABILITY §4.1 先轨迹后会话）；缺省 ~/.minicode/traces */
+  tracesDir?: string;  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
    *  全屏渲染下 hook stderr 直写会插花渲染帧，TUI 形态落 toast */
   hookStderr?: { value?: (text: string) => void };
 }
@@ -900,6 +903,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
               const delSelected = state.modal.selected;
               void (async () => {
                 try {
+                  // 删除联动（OBSERVABILITY §4.1）：先删轨迹后删会话——即使两步之间崩溃，
+                  // 残留只会是「有会话无轨迹」的无害方向，不会留下含正文的孤儿轨迹
+                  await deleteTrace(options.tracesDir ?? resolveTracesDir(), targetId);
                   await store.deleteSession(targetId);
                   const sessions = await store.listSessions();
                   const remaining = sessions.filter((s) => s.id !== session.meta.id);
