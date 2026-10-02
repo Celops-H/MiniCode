@@ -108,6 +108,87 @@ describe("Recorder：轨迹格式与落盘", () => {
     }
   });
 
+  it("生命周期事件的 path 提升为行级 agentPath（负载原样保留），按 agentPath 过滤不再丢诞生/结束行", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const recorder = new Recorder(bus, {
+        sessionId: "s2",
+        cwd: "C:\work\proj",
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      bus.emit({ type: "AgentSpawned", path: "/root/worker", parentPath: "/root" });
+      bus.emit({
+        type: "AgentCompleted",
+        path: "/root/worker",
+        parentPath: "/root",
+        conclusion: "完成",
+      });
+      await bus.emit({ type: "SessionEnd" });
+      recorder.dispose();
+
+      const lines = (await readLines(path.join(dir, "traces", "s2.jsonl"))).filter(
+        (l) => l.kind === "event",
+      );
+      expect(lines[0]).toMatchObject({
+        event: "AgentSpawned",
+        agentPath: "/root/worker",
+        data: { path: "/root/worker", parentPath: "/root" },
+      });
+      expect(lines[1]).toMatchObject({
+        event: "AgentCompleted",
+        agentPath: "/root/worker",
+        data: { path: "/root/worker", parentPath: "/root", conclusion: "完成" },
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("systemPrompt 全文按 hash 文件级只落一次：同 hash 多实例只留首份，不同 hash 各留一份", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const recorder = new Recorder(bus, {
+        sessionId: "s3",
+        cwd: "C:\work\proj",
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      const call = (hash: string, content?: string) =>
+        bus.emit({
+          type: "LlmCallEnd",
+          agentPath: hash === "h1" ? "/root" : "/root/worker",
+          model: "m",
+          durationMs: 10,
+          systemPrompt: content === undefined ? { hash } : { hash, content },
+        });
+      call("h1", "root 的全文提示词"); // root 实例首次：落全文
+      call("h1", "root 的全文提示词"); // root 第二次调用：只留 hash
+      call("h1", "root 的全文提示词"); // 子 agent 实例再次附全文（同 hash）：剥掉
+      call("h2", "worker 的全文提示词"); // 不同 hash：落全文
+      call("h2"); // 只带 hash：原样保留
+      await bus.emit({ type: "SessionEnd" });
+      recorder.dispose();
+
+      const lines = (await readLines(path.join(dir, "traces", "s3.jsonl"))).filter(
+        (l) => l.kind === "event",
+      ) as Array<{ data: { systemPrompt?: { hash?: string; content?: string } } }>;
+      expect(lines[0]!.data.systemPrompt).toEqual({ hash: "h1", content: "root 的全文提示词" });
+      expect(lines[1]!.data.systemPrompt).toEqual({ hash: "h1" });
+      expect(lines[2]!.data.systemPrompt).toEqual({ hash: "h1" });
+      expect(lines[3]!.data.systemPrompt).toEqual({ hash: "h2", content: "worker 的全文提示词" });
+      expect(lines[4]!.data.systemPrompt).toEqual({ hash: "h2" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("header.metadata 原样落盘（评测宿主注入任务身份）", async () => {
     const dir = await tmpDir();
     try {

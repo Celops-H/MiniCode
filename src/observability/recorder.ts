@@ -38,6 +38,8 @@ export class Recorder {
   private readonly sessionId: string;
   private readonly sessionsRoot: string;
   private readonly subscriptions: Array<() => void> = [];
+  /** 已落过全文的 systemPrompt hash（文件级去重，见 dedupeSystemPrompt） */
+  private readonly seenSystemPromptHashes = new Set<string>();
 
   /**
    * @param bus hook 事件总线（唯一采集通道）
@@ -93,7 +95,13 @@ export class Recorder {
       this.writer.appendLine(JSON.stringify({ kind: "message", agentPath, ...message }));
     } else if ("agentPath" in event) {
       const { type, agentPath, ...data } = event;
-      this.writeEventLine(type, agentPath, data);
+      this.writeEventLine(type, agentPath, this.dedupeSystemPrompt(type, data));
+    } else if ("path" in event) {
+      // 生命周期事件（AgentSpawned/AgentCompleted/AgentInterrupted）负载字段叫 path：
+      // 提升一份到行级 agentPath——按 agentPath 过滤轨迹时才不会静默丢掉全部诞生/结束行；
+      // 负载原样保留（path/parentPath 不动）
+      const { type, ...data } = event;
+      this.writeEventLine(type, (event as { path: string }).path, data);
     } else {
       // 无 agentPath 的会话级事件（UserPromptSubmit / SessionStart / SessionEnd）：行级省略该键
       const { type, ...data } = event;
@@ -118,5 +126,21 @@ export class Recorder {
         data,
       }),
     );
+  }
+
+  /**
+   * LlmCallEnd 的 systemPrompt 全文按 hash 文件级只落一次：Agent 侧的去重是实例级的
+   * （每个子 agent 实例首次调用各附一份全文），同一 hash 会在轨迹里重复多份；
+   * 去重上移到 Recorder 后同一 hash 只有首次出现的行带全文，后续行只留 hash。
+   */
+  private dedupeSystemPrompt(type: string, data: Record<string, unknown>): Record<string, unknown> {
+    if (type !== "LlmCallEnd") return data;
+    const systemPrompt = data.systemPrompt as { hash?: string; content?: string } | undefined;
+    if (!systemPrompt?.hash || systemPrompt.content === undefined) return data;
+    if (this.seenSystemPromptHashes.has(systemPrompt.hash)) {
+      return { ...data, systemPrompt: { hash: systemPrompt.hash } };
+    }
+    this.seenSystemPromptHashes.add(systemPrompt.hash);
+    return data;
   }
 }
