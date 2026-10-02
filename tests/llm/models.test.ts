@@ -145,7 +145,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.select(["openrouter-1", "deepseek-1"])).toBe("deepseek-1");
   });
 
-  it("401 冷却期内第二次请求：跳过主模型直接走备选，不再请求坏 key（P13 复测观感）", async () => {
+  it("401 冷却期内第二次请求：跳过主模型直接走备选，不再请求坏 key", async () => {
     const router = new ModelRouter({ cooldownMs: 60_000 });
     const models = new Models({ router, chain: ["openrouter-1", "deepseek-1"] });
     let openrouterCalls = 0;

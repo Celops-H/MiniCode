@@ -1,5 +1,5 @@
 /**
- * 层 1：agent 条行数变化时光标跟随（P12）——单独成文件：opentui 的 useTerminalDimensions
+ * 层 1：agent 条行数变化时光标跟随——单独成文件：opentui 的 useTerminalDimensions
  * 是跨用例残留的全局状态，混在 height=8/14/22 混合的 render.test 里会读到前例残留高度，
  * 光标行数值失真；本文件内统一 height=22，用相对差值断言。
  */
@@ -10,7 +10,7 @@ import { App } from "../../src/tui/view/App.js";
 import { initState, type TuiState } from "../../src/tui/state.js";
 import { tuiCursor } from "../../src/tui/cursor.js";
 
-describe("agent 条变化时光标跟随（P12）", () => {
+describe("agent 条变化时光标跟随", () => {
   afterEach(() => vi.useRealTimers());
 
   it("完成条目 10s 老化出树后，光标行随 agent 条回移（App 秒级节拍驱动 bottomRows）", async () => {
@@ -35,7 +35,7 @@ describe("agent 条变化时光标跟随（P12）", () => {
     (setup as { renderer?: { destroy?: () => void } }).renderer?.destroy?.();
   });
 
-  it("派生出现 agent 条时光标上移避让（行数增加即重算，P12 同机制）", async () => {
+  it("派生出现 agent 条时光标上移避让（行数增加即重算）", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 22 });
     await setup.waitForVisualIdle();

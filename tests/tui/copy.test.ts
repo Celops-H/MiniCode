@@ -1,6 +1,6 @@
 /**
- * 复制到剪贴板（B-4 编码修复）：PowerShell 显式 UTF8 解码 stdin——默认 OEM 代码页
- * 会把中文/emoji 变乱码（问题 38）。mock spawn 断言命令参数与传入原文。
+ * 复制到剪贴板：PowerShell 显式 UTF8 解码 stdin——默认 OEM 代码页
+ * 会把中文/emoji 变乱码。mock spawn 断言命令参数与传入原文。
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -19,7 +19,7 @@ function mockChild() {
   return { child, stdinEnd };
 }
 
-describe("copyToClipboard（B-4 非 ASCII 不乱码）", () => {
+describe("copyToClipboard（非 ASCII 不乱码）", () => {
   beforeEach(() => spawnMock.spawn.mockClear());
 
   it("命令显式 UTF8 解码 stdin（而非 OEM 代码页默认），中文/emoji 不变成乱码", () => {

@@ -1,5 +1,5 @@
 /**
- * 层 1：嵌入弹块——权限确认 / 会话面板（P4-3 完全全屏页）渲染断言。
+ * 层 1：嵌入弹块——权限确认 / 会话面板（完全全屏页）渲染断言。
  */
 import { testRender } from "@opentui/solid";
 import { createStore } from "solid-js/store";
@@ -51,11 +51,11 @@ it("权限弹块：工具名/参数/三决策与选中高亮", async () => {
   expect(frame).toContain("◀");
   // 框线（视觉分隔体系：权限弹窗 rounded 边框 + 边框内标题）
   expect(frame).toContain("╭");
-  // C-1=50 黑白化：标题去 ⚠ 符号（红色警示符不再用于弹窗美化）
+  // 黑白化：标题去 ⚠ 符号（红色警示符不再用于弹窗美化）
   expect(frame).not.toContain("⚠");
 });
 
-it("权限选中项：浅蓝背景块 + 黑字（P6-3 文字保持黑白、选中浅蓝可辨）", async () => {
+it("权限选中项：浅蓝背景块 + 黑字（文字保持黑白、选中浅蓝可辨）", async () => {
   const modal: ModalState = {
     kind: "permission",
     toolName: "bash",
@@ -76,7 +76,7 @@ it("权限选中项：浅蓝背景块 + 黑字（P6-3 文字保持黑白、选�
   expect(unselected[0] && !isAccentBg(unselected[0].bg)).toBe(true);
 });
 
-it("connect 供应商列表：只显供应商名、不附默认模型（C-7=62）", async () => {
+it("connect 供应商列表：只显供应商名、不附默认模型", async () => {
   const modal: ModalState = {
     kind: "connect",
     providers: [
@@ -114,7 +114,7 @@ it("高亮随 selected 挪动（◀ 跟着选中项走）——For+条件曾在�
   expect(pos2).toBeGreaterThan(pos0);
 });
 
-it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副行、Esc 返回提示", async () => {
+it("会话面板（全屏页）：新建置顶、每条两行主信息+副行、Esc 返回提示", async () => {
   const modal: ModalState = {
     kind: "session",
     sessions: [{ id: "ab3f90d1e2", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: new Date(Date.now() - 180_000).toISOString(), sizeBytes: 4096 }],
@@ -130,7 +130,7 @@ it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副�
   // 副行：相对时间 + 消息文件大小
   expect(frame).toContain("3min ago");
   expect(frame).toContain("4.0 KB");
-  // 新建会话置顶默认选中（P6-4）：＋ 图标特殊化，且在会话条目之前
+  // 新建会话置顶默认选中：＋ 图标特殊化，且在会话条目之前
   expect(frame).toContain("＋ 新建会话");
   const lines2 = frame.split("\n");
   const newIdx = lines2.findIndex((l) => l.includes("＋ 新建会话"));
@@ -142,7 +142,7 @@ it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副�
   expect(frame).not.toContain("╭");
 });
 
-it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5 列序 标题·模型·哈希）", async () => {
+it("会话面板三列各自对齐：长短标题下模型起始列一致（列序 标题·模型·哈希）", async () => {
   const modal: ModalState = {
     kind: "session",
     sessions: [
@@ -171,10 +171,10 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
   expect(rowA.indexOf("aaaa11")).toBeGreaterThan(rowA.indexOf("model-alpha"));
 });
 
-it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换 P4-2；新建行无操作态）", async () => {
+it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换；新建行无操作态）", async () => {
   const sessions = [{ id: "ab3f90", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: "now", sizeBytes: 2048 }];
   const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 1, action: "enter" });
-  // 视口需容纳「标记 + 三列（P5 加大列间距）+ 操作态」整行不折行
+  // 视口需容纳「标记 + 三列（加大列间距）+ 操作态」整行不折行
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 76, height: 12 });
   await setup.waitForVisualIdle();
   // 进入态：选中会话行尾显示 ◀ 进入（新建行 selected 0 无操作态）
@@ -187,7 +187,7 @@ it("会话面板删除态：选中行显示操作态（进入/删除，←→ �
   expect(frame).toContain("←→ 进入/删除");
 });
 
-it("新建会话选中时无会话带 ▸，↓ 到会话才出现（P3：选中索引不做下限截断）", async () => {
+it("新建会话选中时无会话带 ▸，↓ 到会话才出现（选中索引不做下限截断）", async () => {
   const sessions = [{ id: "ab3f90", title: "重构 partition", model: "m", updatedAt: "now", sizeBytes: 0 }];
   const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 0 });
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
@@ -205,7 +205,7 @@ it("新建会话选中时无会话带 ▸，↓ 到会话才出现（P3：选中
   expect(setup.captureCharFrame()).toContain("▸ ＋ 新建会话");
 });
 
-it("会话面板副行与主行标题起始列一致（P4：text 水平 padding 在 opentui 无效，改字面空格缩进）", async () => {
+it("会话面板副行与主行标题起始列一致（text 水平 padding 在 opentui 无效，改字面空格缩进）", async () => {
   const modal: ModalState = {
     kind: "session",
     sessions: [
@@ -261,7 +261,7 @@ it("会话面板超页：窗口渲染且选中项随导航滚动入视野（新�
   expect(frame).toContain("sxx-11");
 });
 
-it("/connect 选中供应商：浅蓝背景块黑字（P6 与权限/新建会话统一选中观感）", async () => {
+it("/connect 选中供应商：浅蓝背景块黑字（与权限/新建会话统一选中观感）", async () => {
   const modal: ModalState = {
     kind: "connect",
     providers: [
@@ -305,7 +305,7 @@ it("/model 选中模型：正绿 + ▸、未选中白字、无背景块（配色
   expect(spans.find((s) => isAccentBg(s.bg))).toBeUndefined();
 });
 
-it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致（）", async () => {
+it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致", async () => {
   // 先测 /model：selected 1 时 gpt-4o 未选中、gpt-5-mini 选中，两行 id 起始列相同
   const modelModal: ModalState = {
     kind: "model",
@@ -363,7 +363,7 @@ it("/model 选中高亮随导航移动（createMemo 响应式，非 For 卡死�
   expect(fgHex(spans1.find((s) => s.text.includes("gpt-4o"))?.fg)).toBe("#ececf0");
 });
 
-it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普通会话白字条目区分）", async () => {
+it("新建会话选中态：浅蓝背景块 + 黑字（特殊化，与普通会话白字条目区分）", async () => {
   const sessions = [
     { id: "ab3f90", title: "重构 partition", model: "m", updatedAt: "now", sizeBytes: 0 },
     { id: "cd11ef", title: "修 bug", model: "m2", updatedAt: "now", sizeBytes: 0 },

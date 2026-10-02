@@ -30,7 +30,7 @@ export interface AttachRecorderOptions {
 }
 
 /**
- * 装配轨迹记录器（CLI/TUI 宿主调用）：enabled=false时返回
+ * 装配轨迹记录器（CLI/TUI 宿主调用）：enabled=false 时返回
  * undefined、零开销。Recorder 订阅总线上全部事件类型，随会话存亡。
  * @param bus hook 事件总线
  * @param options 装配选项

@@ -1,5 +1,5 @@
 /**
- * 层 1：输入框视图——多行/候选列表渲染断言 + 光标位置计算（D-1 终端光标不占格）。
+ * 层 1：输入框视图——多行/候选列表渲染断言 + 光标位置计算（终端光标不占格）。
  */
 import { testRender } from "@opentui/solid";
 import { it, expect, describe } from "vitest";
@@ -42,7 +42,7 @@ it("slash 候选列表显示匹配命令与选中态", async () => {
   expect(frame).toContain("▸");
 });
 
-describe("promptCursorPosition（D-1 光标终端定位不占格）", () => {
+describe("promptCursorPosition（光标终端定位不占格）", () => {
   it("单行：光标行 = 高 - 1 - 下方占用，列 = 前缀 + 光标前文本", () => {
     // H=20、1 行、光标在 "ab" 后（col2），下方占用 2（底边框+状态行）
     const pos = promptCursorPosition(prompt({ lines: ["ab"], curCol: 2 }), 20, 2);
@@ -69,7 +69,7 @@ describe("promptCursorPosition（D-1 光标终端定位不占格）", () => {
   });
 });
 
-it("光标位置随 curCol 移动（D-1：不再渲染插入字符「│」，位置由计算函数给出）", async () => {
+it("光标位置随 curCol 移动（不再渲染插入字符「│」，位置由计算函数给出）", async () => {
   const channel = createChannel([]);
   const setup = await testRender(
     () => <PromptView prompt={channel.state.prompt} />,
@@ -88,7 +88,7 @@ it("光标位置随 curCol 移动（D-1：不再渲染插入字符「│」，�
   expect(colAfterLeft).toBe(colAtEnd - 1);
 });
 
-it("输入/移动后 tuiCursor 实际更新（S1 回归：组件体 createRenderEffect 响应式，非仅挂载一次）", async () => {
+it("输入/移动后 tuiCursor 实际更新（组件体 createRenderEffect 响应式，非仅挂载一次）", async () => {
   const channel = createChannel([]);
   const setup = await testRender(
     () => <PromptView prompt={channel.state.prompt} />,

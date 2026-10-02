@@ -550,8 +550,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      // 面板数据读取失败（如 sessionsDir 不可读）给提示而非静默无反应（
-      // listSessions 非 ENOENT 上抛后吞错会让权限问题更难排查）
+      // 面板数据读取失败（如 sessionsDir 不可读）给提示而非静默无反应——
+      // listSessions 非 ENOENT 上抛后吞错会让权限问题更难排查
       void openSessionModal().catch((err) => showToast(`打开会话面板失败：${err instanceof Error ? err.message : String(err)}`));
       return;
     }

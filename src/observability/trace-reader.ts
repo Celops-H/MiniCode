@@ -7,7 +7,7 @@ import { TRACE_FORMAT, type TraceEventLine, type TraceHeader, type TraceMessageL
 
 /**
  * 轨迹读取的通用原语：流式逐行扫描、按 kind/event/agentPath
- * 过滤、容错反序列化。TUI 的累计重建与工具耗时回填是它的两个内置消费方（B4）；
+ * 过滤、容错反序列化。TUI 的累计重建与工具耗时回填是它的两个内置消费方；
  * 指标聚合口径不进本模块，留在消费侧（评测）。
  *
  * 容错规则：未知 kind / event 跳过不报错——事件类型是开放

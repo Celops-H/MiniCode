@@ -326,12 +326,12 @@ describe("协作工具集（多 agent 环境）", () => {
     }
     const result = root.getMessages().find((m) => m.role === "tool_result");
     expect(String(result?.content)).toContain("/root/worker");
-    // 状态跟真实运行同步：worker 空闲（从未驱动）→ 标「空闲」而非默认「活跃」（问题 65 Bug2）
+    // 状态跟真实运行同步：worker 空闲（从未驱动）→ 标「空闲」而非默认「活跃」
     expect(String(result?.content)).toContain("空闲");
     expect(String(result?.content)).not.toContain("活跃");
   });
 
-  it("list_agents：运行中成员标「运行中」（状态跟真实运行同步，问题 65 Bug2）", async () => {
+  it("list_agents：运行中成员标「运行中」（状态跟真实运行同步）", async () => {
     const team = new Team();
     const root = new Agent({ modelClient: toolThenTextClient("x", {}), modelId: "mock", systemPrompt: "助手", team });
     team.registerRoot(root);
@@ -911,7 +911,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(forwarded).toContain("汇总结论");
   });
 
-  it("子 agent 生命周期事件（）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
+  it("子 agent 生命周期事件：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
     const events: string[] = [];
     const hooks = new HookBus();
     hooks.on("AgentSpawned", (e) => {

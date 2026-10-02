@@ -450,7 +450,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(allowed?.content).toBe("文件内容");
   });
 
-  it("工具失败路径事件闭合（）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
+  it("工具失败路径事件闭合：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
     // 未知工具：无 tool 可执行，发失败事件
     const hooks1 = new HookBus();
     const failure1 = vi.fn();
@@ -493,7 +493,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
-  it("工具事件带 toolCallId 配对（）：PreToolUse → PostToolUse 同一调用 id", async () => {
+  it("工具事件带 toolCallId 配对：PreToolUse → PostToolUse 同一调用 id", async () => {
     const hooks = new HookBus();
     const pre = vi.fn();
     const post = vi.fn();

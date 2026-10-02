@@ -227,7 +227,7 @@ describe("Agent 主循环：turn 内真打断", () => {
     expect(agent.isInterrupted()).toBe(false);
   });
 
-  it("思考中打断（只产 thinking）：续跑请求体不产生空 content assistant（A400 回归）", async () => {
+  it("思考中打断（只产 thinking）：续跑请求体不产生空 content assistant", async () => {
     const protocol = new OpenAICompletionsProtocol({ reasoningContent: true });
     let calls = 0;
     let secondBody: unknown;

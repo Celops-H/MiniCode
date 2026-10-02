@@ -675,8 +675,7 @@ export class Agent {
   /**
    * 当前上下文的估算 token：消息 + 系统提示词。每次请求全量携带 systemPrompt，
    * 只按消息估算会系统性低估体积，长提示词会话（指令文件 + 技能清单）的压缩触发点明显滞后。
-   * 公开给宿主：TUI 状态行的上下文水位与压缩触发共用同一估算（
-   * 用户看到的水位就是压缩判断用的水位）。
+   * 公开给宿主：TUI 状态行的上下文水位与压缩触发共用同一估算——用户看到的水位就是压缩判断用的水位。
    */
   estimateContextTokens(): number {
     return estimateTokens(this.messages) + estimateTextTokens(this.systemPrompt);

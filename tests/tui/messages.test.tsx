@@ -36,7 +36,7 @@ it("用户消息带头部与文本；「你」标签与圆点为绿、模型标�
   const frame = setup.captureCharFrame();
   expect(frame).toContain("你");
   expect(frame).toContain("重构 partition 逻辑");
-  // 「你」标签绿（success #7fd88f）、模型标签浅蓝（modelColor #61afef），与 主题色板一致
+  // 「你」标签绿（success #7fd88f）、模型标签浅蓝（modelColor #61afef），与主题色板一致
   expect(spanFgOf(setup.captureSpans(), "你")).toBe("#7fd88f");
   expect(spanFgOf(setup.captureSpans(), "test-model")).toBe("#61afef");
 });
@@ -328,7 +328,7 @@ it("圆点配色：你=绿、模型=蓝、工具/思考=灰、通知=红（2026-
   expect(colors[0]).toBe("#7fd88f"); // 你=绿（success，与模型蓝区分）
   expect(colors[1]).toBe("#61afef"); // 模型=蓝
   expect(colors[2]).toBe("#8f9096"); // 工具=灰
-  expect(colors[3]).toBe("#e06c75"); // 通知=警示红（P4-5 色板：红色承担严重/警告语义）
+  expect(colors[3]).toBe("#e06c75"); // 通知=警示红（红色承担严重/警告语义）
 });
 
 it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧「你」为绿", async () => {
@@ -365,7 +365,7 @@ it("思考块渲染在消息文本之前（思考在前、结论在后）", asyn
   expect(thinkingIdx).toBeGreaterThanOrEqual(0); // 思考块存在
   expect(textIdx).toBeGreaterThan(thinkingIdx); // 思考行在消息文本之前
 });
-it("折叠块悬停：摘要文字变白，移开恢复灰（E-1=35，不再整块背景抬高）", async () => {
+it("折叠块悬停：摘要文字变白，移开恢复灰（不再整块背景抬高）", async () => {
   const setup = await app([
     { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "内容" },
   ]);
@@ -382,7 +382,7 @@ it("折叠块悬停：摘要文字变白，移开恢复灰（E-1=35，不再整�
   expect(spanFgOf(setup.captureSpans(), "read")).toBe("#8f9096");
 });
 
-it("compact 工具点击展开：点卡后输出全文可见（G-6 真实 click 断言）", async () => {
+it("compact 工具点击展开：点卡后输出全文可见（真实 click 断言）", async () => {
   const [blocks, setBlocks] = createSignal<BlockView[]>([
     { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "line1\nline2" },
   ]);
@@ -409,7 +409,7 @@ it("compact 工具点击展开：点卡后输出全文可见（G-6 真实 click 
   expect(frame).toContain("line2");
 });
 
-it("滚轮滚动消息区：滚轮后内容滚动（F-2 滚轮加速接线，S2 回归锁定）", async () => {
+it("滚轮滚动消息区：滚轮后内容滚动（滚轮加速接线）", async () => {
   const blocks: BlockView[] = Array.from({ length: 15 }, (_, i) => ({
     kind: "message", id: `m${i}`, role: "user", text: `消息 ${i}`, thinkingCollapsed: true,
   }));
@@ -421,12 +421,12 @@ it("滚轮滚动消息区：滚轮后内容滚动（F-2 滚轮加速接线，S2 
   const before = setup.captureCharFrame();
   // stickyScroll 贴底：首屏显示底部消息，顶部「消息 0」不在视野
   expect(before).not.toContain("消息 0");
-  // 向上滚 3 次（每次 ×3 行）：离开底部、内容滚动（F-2 接线生效，S2 回归锁定——帧必须变化）
+  // 向上滚 3 次（每次 ×3 行）：离开底部、内容滚动（接线生效，帧必须变化）
   for (let i = 0; i < 3; i++) {
     await setup.mockMouse.scroll(30, 5, "up");
     await setup.waitForVisualIdle();
   }
   const after = setup.captureCharFrame();
-  // 帧必须变化 = 滚动接线生效（S2 回归锁定；具体滚动量取决于块高，不作精确断言）
+  // 帧必须变化 = 滚动接线生效（具体滚动量取决于块高，不作精确断言）
   expect(after, `SCROLL-AFTER=${JSON.stringify(after)}`).not.toEqual(before);
 });

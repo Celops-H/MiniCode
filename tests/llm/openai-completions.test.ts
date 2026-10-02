@@ -217,7 +217,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("content 块数组（glm 等兼容厂商格式）：取文本块拼接为 text_delta（P10）", async () => {
+  it("content 块数组（glm 等兼容厂商格式）：取文本块拼接为 text_delta", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(

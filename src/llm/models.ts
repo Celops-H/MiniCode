@@ -115,7 +115,7 @@ export class Models {
         for await (const event of resolved.provider.stream(selected, context, options)) {
           // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标；
           // 也不算「已吐出内容」——首 token 前的厂商故障（空闲超时、
-          // 流内 error 后异常收尾）仍可切换备选，与排除条件对齐。
+          // 流内 error 后异常收尾）仍可切换备选，与「可切换错误」口径一致。
           // done 等 非 error 事件都置位：厂商宣告正常完成（done 收尾）不进冷却
           if (event.type === "error") streamFailed = true;
           else contentEmitted = true;

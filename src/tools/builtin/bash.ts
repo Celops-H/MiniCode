@@ -212,9 +212,8 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       exitCode = code;
       // 进程退出但管道写端仍被存活进程持有（shell 经 start/& 启动的后台孙进程继承了
       // stdout/stderr 句柄）时，流不会关闭，「close」迟迟不来导致整个调用长时间无返回
-      // （工具系统问题记录 2026-08-27 问题 2 的同类场景；若根因是 shell 本身不退出则
-      // exit 不来，仍靠超时/打断救回）：给一个排水窗口收剩余输出，到点销毁流强制收尾，
-      // 保证调用必然返回
+      // （若根因是 shell 本身不退出则 exit 不来，仍靠超时/打断救回）：给一个排水窗口
+      // 收剩余输出，到点销毁流强制收尾，保证调用必然返回
       drainTimer = setTimeout(() => {
         for (const [stream] of streams) stream.destroy();
         maybeSettle();

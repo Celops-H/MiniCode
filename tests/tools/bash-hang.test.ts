@@ -2,15 +2,14 @@ import { describe, expect, it } from "vitest";
 import { bashTool } from "../../src/tools/index.js";
 
 /**
- * 复现「命令进程已退出，但 stdio 管道被别的进程持有」导致工具长时间无返回
- * （工具系统问题记录 2026-08-27 问题 2）：
+ * 复现「命令进程已退出，但 stdio 管道被别的进程持有」导致工具长时间无返回：
  * - Windows 用 start /b 拉起后台 node，Unix 用 & 后台任务——两者都继承 stdout 句柄，
  *   shell 退出后管道写端仍被孙进程攥着，「close」迟迟不来；
  * - 修复语义：进程退出 + 短暂排水窗口（1 秒）后强制收尾，不等管道自然关闭；
  * - 另钉住 stdin 语义：工具执行是非交互的，等待输入的命令读到 EOF（stdin 已关闭）
  *   即退出，不挂到超时被杀。
  */
-describe("bash 工具：进程退出但管道被持有 / stdin 关闭（问题记录 2026-08-27 问题 2）", () => {
+describe("bash 工具：进程退出但管道被持有 / stdin 关闭", () => {
   const holdPipeCommand =
     process.platform === "win32"
       ? 'start "" /b node -e "setTimeout(function(){process.exit(0)},15000)" & echo DONE'

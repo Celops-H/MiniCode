@@ -1,5 +1,5 @@
 /**
- * 输入框选区（B-2 Shift+方向键选择）：select 动作设锚点扩展选区、编辑/普通移动清选区、
+ * 输入框选区（Shift+方向键选择）：select 动作设锚点扩展选区、编辑/普通移动清选区、
  * selectedPromptText 取选区文本（单行/跨行/反向、码点安全）。
  */
 import { describe, expect, it } from "vitest";

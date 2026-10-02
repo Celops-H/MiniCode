@@ -24,13 +24,13 @@ export interface RecorderOptions {
 
 /**
  * 轨迹记录器：hook 总线的普通订阅者，收到事件与消息即转成
- * 轨迹行。镜像全部 hook 事件——新增事件自动入轨迹，采集零维护（§11 取舍 5）。
+ * 轨迹行。镜像全部 hook 事件——新增事件自动入轨迹，采集零维护。
  * agent 核心（core）只发事件，不知道本模块存在；core 与 observability 之间只有
  * 事件这一条关系。
  *
  * 记账时序：handler 内同步把行文本入 writer 缓冲（到达序即发生序，与总线顺序
  * await 的语义一致），实际落盘由 writer 攒批；SessionEnd 收尾冲刷、SessionStart
- * 时做一次惰性清理兜底（§4.1）。
+ * 时做一次惰性清理兜底。
  */
 export class Recorder {
   private readonly writer: TraceWriter;

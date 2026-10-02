@@ -1,5 +1,5 @@
 /**
- * 层 1：底栏 agent 树（P1-5）——main 仅多 agent 显示、子 agent ( )/(√)+耗时、树线对齐父圆点/括号中心列、10s 消失。
+ * 层 1：底栏 agent 树——main 仅多 agent 显示、子 agent ( )/(√)+耗时、树线对齐父圆点/括号中心列、10s 消失。
  */
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
@@ -112,7 +112,7 @@ it("树线对齐父圆点/括号中心列：├─/└─ 放 main 圆点列、�
   expect(sub.indexOf("└")).toBe(t1Center);
 });
 
-it("树形深度 2（P4-4）：孙 agent 渲染、树线对齐父括号中心、全程四行", async () => {
+it("树形深度 2：孙 agent 渲染、树线对齐父括号中心、全程四行", async () => {
   const t = Date.now();
   const setup = await render([
     running("/root"),
@@ -157,7 +157,7 @@ it("不同父下无同名冲突时仍显示纯末段", async () => {
   expect(frame).toContain("( ) beta");
 });
 
-it("agentRowCount：仅 main=0；1 个子 agent 含 paddingTop=2 行（App 光标定位用，审查 D-1）", () => {
+it("agentRowCount：仅 main=0；1 个子 agent 含 paddingTop=2 行（App 光标定位用）", () => {
   expect(agentRowCount([running("/root")])).toBe(0);
   expect(agentRowCount([running("/root"), running("/root/task_1")])).toBe(3); // 树(main+子)2 行 + paddingTop 1
   // 完成但 10s 内：仍计（可见期）

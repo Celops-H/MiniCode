@@ -96,7 +96,7 @@ describe("view/App 渲染链", () => {
     expect(textFg(setup.captureSpans(), "model-blue")).toBe("#61afef");
   });
 
-  it("运行中状态显示黄色（E-2=66：进行中黄，红色只留严重错误/API error）", async () => {
+  it("运行中状态显示黄色（进行中黄，红色只留严重错误/API error）", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     setState({ status: "running" });
     const setup = await testRender(
@@ -157,7 +157,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("( ) task_1");
   });
 
-  it("AgentInterrupted 后底栏树显示 (×) 名、消息区显示中断活动行（A-5 打断显示）", async () => {
+  it("AgentInterrupted 后底栏树显示 (×) 名、消息区显示中断活动行", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 12 });
     await setup.waitForVisualIdle();
@@ -180,7 +180,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("中断");
   });
 
-  it("/session 打开后全屏化生效：消息区/输入框/状态行隐藏，关闭后恢复（审查 S-1 回归：全屏判定须响应式）", async () => {
+  it("/session 打开后全屏化生效：消息区/输入框/状态行隐藏，关闭后恢复（全屏判定须响应式）", async () => {
     const [state, setState] = createStore<TuiState>(initState([], "标题"));
     const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 14 });
     await setup.waitForVisualIdle();
