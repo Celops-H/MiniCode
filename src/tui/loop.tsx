@@ -22,6 +22,7 @@ import type { McpServerConfig, Config } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type QueuedItem, type TuiState } from "./state.js";
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
+import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../bootstrap/interact.js";
@@ -385,8 +386,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     ) {
       return;
     }
+    const next = reduceEvent(state, event);
+    // 流式开始强制回底：用户提交后视口必须跟着新回复走（读历史态一并解除）
+    if (!state.streaming && next.streaming) forceScrollToBottom();
     // model_fallback（模型路由切换）由 reduceEvent 追加常驻通知行到消息区，不 toast 一闪而过
-    commit(reduceEvent(state, event));
+    commit(next);
   };
   const onEvent = feedEvent;
   const feedRoot = feedEvent;
@@ -819,7 +823,24 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           pendingQueue.push({ id: `queue_${++queueSeq}`, kind: "message", text: text.trim() });
           wake?.();
           commit(reduceAction(state, action));
+          // 用户提交强制回底：新输入与其后的回复必须在视口内
+          forceScrollToBottom();
         }
+        return;
+      }
+      case "scroll": {
+        // 键盘翻页（pageup 向上/pagedown 向下）：实际滚动在 scrollbox，reducer 无状态可写
+        scrollByPages(-action.dir);
+        return;
+      }
+      case "scroll-end": {
+        // end 回底：恢复跟随
+        forceScrollToBottom();
+        return;
+      }
+      case "scroll-top": {
+        // home 回顶：进入读历史态
+        scrollToTop();
         return;
       }
       case "paste": {

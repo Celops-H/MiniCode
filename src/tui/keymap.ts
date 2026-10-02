@@ -23,6 +23,7 @@ export type TuiAction =
   | { type: "history"; dir: -1 | 1 }
   | { type: "scroll"; dir: 1 | -1 }
   | { type: "scroll-end" }
+  | { type: "scroll-top" }
   | { type: "complete" }
   | { type: "modal-nav"; dir: 1 | -1 }
   | { type: "modal-confirm" }
@@ -115,7 +116,7 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
     case "end":
       return { type: "scroll-end" };
     case "home":
-      return { type: "noop" };
+      return { type: "scroll-top" };
     case "ctrl-c":
       // Ctrl+C = 应用内复制（Shift/拖选选区 → Set-Clipboard）；无选区 noop（打断已由 Esc 承担）
       return { type: "copy" };

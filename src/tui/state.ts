@@ -357,8 +357,6 @@ export interface TuiState {
   contextWindow?: number;
   /** 自动压缩触发线（contextWindow - maxOutputTokens - safetyMargin）：到达即警示色 */
   compactThreshold?: number;
-  /** 消息区上滚行数：0 跟随底部，>0 用户上滚 */
-  scrollOffset: number;
   toast?: { text: string; key: number };
   /** slash 命令候选（输入以 / 开头时出现） */
   candidate?: SlashCandidate;
@@ -508,7 +506,6 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
     thinkingLevel: undefined,
     agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
     queue: [],
-    scrollOffset: 0,
     turnIndex: 0,
   };
 }
@@ -666,7 +663,6 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         activeModel: status === "running" ? state.activeModel : undefined,
         streaming: undefined,
         status,
-        scrollOffset: 0,
         turnIndex: state.turnIndex + 1,
       };
     }
@@ -680,7 +676,6 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           activeModel: undefined,
           streaming: undefined,
           status: "idle",
-          scrollOffset: 0,
           blocks: [
             ...state.blocks,
             {
@@ -720,7 +715,6 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         activeModel: undefined,
         streaming: undefined,
         status: "idle",
-        scrollOffset: 0,
         turnIndex: state.turnIndex + 1,
         blocks,
       };
@@ -1131,10 +1125,6 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     }
     case "clear-input":
       return { ...state, prompt: emptyPrompt(state.prompt.history), candidate: undefined };
-    case "scroll":
-      return { ...state, scrollOffset: Math.max(0, state.scrollOffset + action.dir) };
-    case "scroll-end":
-      return { ...state, scrollOffset: 0 };
     case "exit":
     case "permission":
     case "modal-confirm":
@@ -1144,6 +1134,9 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "session-action-toggle":
     case "extensions-toggle":
     case "copy":
+    case "scroll":
+    case "scroll-end":
+    case "scroll-top":
     case "noop":
       return state;
   }

@@ -7,9 +7,11 @@
  * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
  * 所有展示状态在 state，本组件只读呈现。
  */
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
+import { messageScroller, noteUserScroll } from "../scroll.js";
 import { theme } from "./theme.js";
 
 /** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗 */
@@ -346,30 +348,65 @@ export function Messages(props: {
   streaming?: Streaming;
   onFoldAt?: (index: number) => void;
 }): JSX.Element {
-  // 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
-  // 直接 spread 覆盖会遮蔽原生滚动。改用 ref 包装：先放大 delta 再调原生实现，
-  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。放大按倍数作用——上下方向速度一致；
-  // 滚轮事件统一落在消息区 scrollbox 上，长消息等子元素不拦截（事件冒泡到滚动容器）。
-  // 整体速度 ×5。
-  const boostedScrollboxes = new WeakSet<object>();
-  const boostWheel = (el: unknown): void => {
-    if (!el || boostedScrollboxes.has(el)) return;
-    boostedScrollboxes.add(el);
-    const box = el as { onMouseEvent?: (e: unknown) => void };
+  // 滚动接线：scrollbox 注册进 messageScroller（键盘翻页/强制回底经它调用）；
+  // 滚轮只同步「是否在读历史」标记，不再放大 delta——滚动加速交给 opentui 内置
+  // scrollAcceleration（手势越快滚得越多），替代旧的 ×5 改写实例方法 hack
+  const registerScroller = (el: unknown): void => {
+    if (!el) {
+      messageScroller.box = null;
+      return;
+    }
+    const box = el as {
+      scrollTop: number;
+      scrollHeight: number;
+      viewport: { height: number };
+      onMouseEvent?: (e: unknown) => void;
+      scrollBy: (delta: number, unit?: "absolute" | "viewport") => void;
+    };
     const orig = box.onMouseEvent?.bind(box);
     box.onMouseEvent = (e: unknown) => {
-      const ev = e as { type: string; scroll?: { delta: number } };
-      if (ev.type === "scroll" && ev.scroll) ev.scroll.delta *= 5;
+      const ev = e as { type: string; scroll?: { direction?: "up" | "down" } };
+      if (ev.type === "scroll") noteUserScroll(ev.scroll?.direction === "up" ? "up" : "down");
       orig?.(e);
     };
+    messageScroller.box = {
+      get scrollTop() {
+        return box.scrollTop;
+      },
+      get scrollHeight() {
+        return box.scrollHeight;
+      },
+      get viewportHeight() {
+        return box.viewport.height;
+      },
+      scrollBy: (delta, unit) => box.scrollBy(delta, unit),
+      scrollToTop: () => {
+        box.scrollTop = 0;
+      },
+      scrollToBottom: () => {
+        box.scrollTop = Math.max(0, box.scrollHeight - box.viewport.height);
+      },
+    };
   };
+  onCleanup(() => {
+    messageScroller.box = null;
+  });
+  // 跟随兜底：blocks 增长/流式更新后贴底（opentui sticky 在内容一帧内高度跳变时
+  // 会误判为手动滚动而脱附且无自愈）；用户在读历史（滚轮向上/翻页/回顶）时不拽回，
+  // 回底跟随由 userScrolled 标记门控（用户提交/流式开始经 forceScrollToBottom 解除）
+  createEffect(() => {
+    void props.blocks.length;
+    void props.streaming;
+    if (!messageScroller.userScrolled) messageScroller.box?.scrollToBottom();
+  });
   return (
     <scrollbox
       flexGrow={1}
       paddingX={1}
       stickyScroll={true}
       stickyStart="bottom"
-      ref={boostWheel}
+      scrollAcceleration={new MacOSScrollAccel()}
+      ref={registerScroller}
       verticalScrollbarOptions={{
         trackOptions: { backgroundColor: theme.backgroundPanel, foregroundColor: theme.border },
       }}
