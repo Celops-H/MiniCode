@@ -306,4 +306,135 @@ describe("覆盖窗口与在途保留", () => {
     expect(memoryRequests.length).toBeGreaterThanOrEqual(2);
     expect(memoryRequests.at(-1)!).toContain("压缩后输入");
   });
+
+  it("压缩排空在途记忆更新：stale 覆盖点回写不再抵消重排", async () => {
+    let releaseFirst: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let memoryCall = 0;
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryCall++;
+          if (memoryCall === 1) await gate; // 第一次更新挂起，制造与压缩的交错
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join(" "),
+          );
+          yield { type: "text_delta", text: "记忆：更新" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const pre = Array.from({ length: 4 }, (_, i) => userMessage(`预置${i}`));
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      initialMessages: pre,
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("压缩前输入");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    // 不等记忆更新收尾直接压缩（模拟下一轮输入即撞线）：压缩须先排空在途更新
+    const compacting = agent.compactNow();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseFirst();
+    await compacting;
+    await agent.whenMemorySettled();
+    // 压缩后的新轮次：覆盖点重排不被 stale 回写抵消，新输入正常进记忆
+    agent.start("压缩后输入");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    expect(memoryRequests.at(-1)!).toContain("压缩后输入");
+  });
+
+  it("非记忆分支压缩把摘要写入记忆：后续记忆更新带上摘要内容", async () => {
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          // 记忆更新返回空文本：记忆保持为空，压缩走全量摘要分支
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join(" "),
+          );
+          yield { type: "text_delta", text: "" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        if (context.messages.some((m) => typeof m.content === "string" && m.content.includes("结构化摘要"))) {
+          yield { type: "text_delta", text: "现场摘要：完成到一半，下一步跑测试" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("搭脚手架");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 带指导压缩：走现场摘要分支（记忆为空），摘要须写回记忆
+    await agent.compactNow("聚焦待办");
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 后续记忆更新请求带当前记忆 = 摘要内容（旧实现记忆仍为空，摘要没覆盖的段落会静默丢）
+    expect(memoryRequests.at(-1)!).toContain("现场摘要：完成到一半");
+  });
+
+  it("resetHistory 清空记忆与覆盖点：/clear 后新消息正常进记忆", async () => {
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join(" "),
+          );
+          yield { type: "text_delta", text: "记忆：清盘前内容" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    agent.start("清盘前对话");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    agent.resetHistory();
+    agent.start("清盘后对话");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 清盘后记忆从头积累：请求不含旧会话记忆文本，且包含新会话输入（覆盖点归零）
+    expect(memoryRequests.at(-1)!).not.toContain("记忆：清盘前内容");
+    expect(memoryRequests.at(-1)!).toContain("清盘后对话");
+  });
 });

@@ -300,6 +300,10 @@ export class Agent {
     this.messages = [];
     // 清盘即丢弃未发射的待镜像消息：消息已不在上下文，补发只会让轨迹多出不存在的消息
     this.pendingRepairMirrors = [];
+    // 记忆一并清空（/clear 语义是回会话新建态）：旧会话的记忆文本不跨会话残留，
+    // 覆盖点也归零——它指旧会话下标会让新会话的消息永远进不了记忆、压缩时被当已覆盖替换
+    this.memory = "";
+    this.memoryCovered = 0;
   }
 
   /**
@@ -613,8 +617,9 @@ export class Agent {
         });
         this.messages = peeled;
         this.historyRewritten = true; // 已落盘的工具回合被剥除
-        // 覆盖点钳制：剥组只删尾部，但极端情况下会吃进已覆盖区——覆盖点收回到新数组长度内，
-        // 记忆更新的下标切片才不会越界空转（被剥掉的未覆盖消息随剥组丢弃，属剥组既定语义）
+        // 覆盖点钳制：剥组保留组间游离消息、旧消息下标会前移，极端情况下剩余长度
+        // 小于覆盖点即越界——收回到新数组长度内兜底；剩余长度仍覆盖点的场景下
+        // 前移导致的「未覆盖消息被当已覆盖」按剥组应急丢弃语义接受（被剥消息本就丢弃）
         this.memoryCovered = Math.min(this.memoryCovered, this.messages.length);
         context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
         collected.length = 0;
@@ -769,6 +774,9 @@ export class Agent {
   /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败。
    *  进入本方法即视为一次压缩动作，收口时发一条 Compact 事件（成功失败都发） */
   private async doCompact(trigger: "auto" | "manual", instructions?: string): Promise<boolean> {
+    // 先排空在途记忆更新：更新按旧数组推进覆盖点，压缩等它收尾后切片，
+    // 否则压缩重排与更新的 stale 覆盖点回写交错，重排被 Math.max 回写抵消
+    await this.whenMemorySettled();
     // 压缩前补发待镜像消息：维持「在途消息压缩前已发过 MessageAppended」的时序约定，
     // 恢复会话未经回合直接 /compact 时合成消息才不随摘要替换静默消失
     this.flushPendingRepairMirrors();
@@ -808,6 +816,7 @@ export class Agent {
       const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
       let summary: string;
       let inFlight: Message[] = [];
+      let usedMemory = false;
       if (instructions) {
         // 现场摘要：指导随 Additional Instructions 段生效
         summary = await generateSummary(
@@ -820,6 +829,7 @@ export class Agent {
       } else if (this.memoryEnabled && this.memory.trim().length > 0) {
         // 记忆替代现场摘要（省压缩时模型调用）；但记忆只覆盖到上次 Stop，
         // 其后的在途消息（本次输入与工具回合）保留原文，不能静默丢弃
+        usedMemory = true;
         summary = this.memory;
         inFlight = this.messages.slice(this.memoryCovered);
       } else {
@@ -869,8 +879,13 @@ export class Agent {
       }
       const summaryMessages = replaceWithSummary(summary);
       this.messages = summaryMessages;
-      // 覆盖点重排：摘要消息本身视为已覆盖（记忆分支它就是记忆文本；其他分支它概括了
-      // 全量历史，无需再喂记忆更新），其后推入的在途与恢复消息全部回到未覆盖区正常消化。
+      // 非记忆分支的摘要同样捕获了全量历史：写入记忆，维持「已覆盖 ⇒ 已进记忆」——
+      // 否则下次记忆分支压缩用旧记忆替换上下文，记忆没覆盖的段落被静默丢弃
+      if (this.memoryEnabled && !usedMemory) {
+        this.memory = summary.trim().slice(0, MAX_MEMORY_CHARS);
+      }
+      // 覆盖点重排：摘要消息本身视为已覆盖（记忆分支它就是记忆文本；其他分支摘要已
+      // 写入记忆，同样成立），其后推入的在途与恢复消息全部回到未覆盖区正常消化。
       // 不重排的后果：旧覆盖点指向已不存在的下标，每轮记忆更新空批次白发模型调用、
       // 在途消息永远进不了记忆，下次压缩在途切片取空导致历史删除且记忆里也没有（静默丢数据）
       this.memoryCovered = 1;

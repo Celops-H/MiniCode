@@ -1141,6 +1141,9 @@ describe("/init 命令（生成/改进项目根 AGENTS.md）", () => {
     expect(prompts[0]).toContain("现有项目指令：pnpm test");
   });
 
+});
+
+describe("会话记忆装配", () => {
   it("memory 开关接线：装配 memory 透传 Agent（开启后回合收尾维护记忆，缺省关闭）", async () => {
     let memoryUpdates = 0;
     const client: ModelClient = {
