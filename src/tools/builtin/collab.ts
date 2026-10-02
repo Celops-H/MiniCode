@@ -26,6 +26,17 @@ export const COLLAB_SUBAGENT_PROMPT =
   "你是团队工作 agent，由协调者派生执行分派的任务。你看不到协调者的完整历史，只收到任务消息。" +
   "完成任务后用简洁文字说明结论。";
 
+/** agent 名命名约束（与 agent-path.ts 的段名校验一致，schema 层前置拦截） */
+const AGENT_NAME_PATTERN = /^[a-z0-9_]+$/;
+
+/**
+ * 失败结果：协作工具的守卫失败（名字/路径/额度等）统一按失败回灌，
+ * 父 agent 才能把命名失败、额度超限当失败处理而不是当正常结果消费
+ */
+function failure(text: string): { output: string; isError: true } {
+  return { output: text, isError: true };
+}
+
 export interface CollabDeps {
   team: Team;
   /** 当前 agent 在团队中的路径（未注册时返回 undefined，按 root 处理） */
@@ -55,21 +66,22 @@ function spawnAgentTool(deps: CollabDeps): Tool {
     description:
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
       "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
+      "agent 名只能用小写字母、数字和下划线。" +
       "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
       "多个互不依赖的子任务可在同一轮并行派生，等待期间可继续做不依赖它们结果的本地工作，" +
       "需要等结果时用 wait_agent",
     inputSchema: z.object({
-      agentName: z.string(),
+      agentName: z.string().regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线"),
       prompt: z.string(),
     }),
     isReadOnly: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { agentName, prompt } = input as { agentName: string; prompt: string };
-      if (!prompt.trim()) return "任务内容不能为空";
+      if (!prompt.trim()) return failure("任务内容不能为空");
       const parentPath = deps.getAgentPath() ?? AgentPath.root();
       const path = deps.team.reserveSpawn(parentPath, agentName);
-      if (typeof path === "string") return path; // 守卫失败：错误文本回灌
+      if (typeof path === "string") return failure(path); // 守卫失败：按失败回灌，父 agent 可据此调整
       try {
         const child = deps.createChildAgent(agentName, path);
         deps.team.commitSpawn(path, child);
@@ -79,7 +91,7 @@ function spawnAgentTool(deps: CollabDeps): Tool {
           content: prompt,
           triggerTurn: true,
         });
-        if (error) return error;
+        if (error) return failure(error);
         return `已派生 ${path}，初始任务已下达`;
       } catch (err) {
         // 创建/投递中途失败：释放已预留的 spawn 槽位与路径（防计数泄漏）
@@ -105,16 +117,16 @@ function sendMessageTool(deps: CollabDeps): Tool {
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { target, message } = input as { target: string; message: string };
-      if (!message.trim()) return "消息内容不能为空";
+      if (!message.trim()) return failure("消息内容不能为空");
       const targetPath = resolveTarget(deps, target);
-      if (typeof targetPath === "string") return targetPath;
+      if (typeof targetPath === "string") return failure(targetPath);
       const error = await deps.sendMessage(targetPath, {
         type: "MESSAGE",
         from: deps.getAgentPath() ?? AgentPath.root(),
         content: message,
         triggerTurn: false,
       });
-      return error ?? `已发送给 ${targetPath}`;
+      return error ? failure(error) : `已发送给 ${targetPath}`;
     },
   };
 }
@@ -133,16 +145,16 @@ function followupTaskTool(deps: CollabDeps): Tool {
     maxResultSizeChars: 500,
     execute: async (input) => {
       const { target, message } = input as { target: string; message: string };
-      if (!message.trim()) return "任务内容不能为空";
+      if (!message.trim()) return failure("任务内容不能为空");
       const targetPath = resolveTarget(deps, target);
-      if (typeof targetPath === "string") return targetPath;
+      if (typeof targetPath === "string") return failure(targetPath);
       const error = await deps.sendMessage(targetPath, {
         type: "MESSAGE",
         from: deps.getAgentPath() ?? AgentPath.root(),
         content: message,
         triggerTurn: true,
       });
-      return error ?? `已投递任务给 ${targetPath}`;
+      return error ? failure(error) : `已投递任务给 ${targetPath}`;
     },
   };
 }
@@ -193,15 +205,15 @@ function waitAgentTool(deps: CollabDeps): Tool {
     execute: async (input) => {
       const { target, timeoutMs } = input as { target: string; timeoutMs?: number };
       const targetPath = resolveTarget(deps, target);
-      if (typeof targetPath === "string") return targetPath;
+      if (typeof targetPath === "string") return failure(targetPath);
       if (targetPath.toString() === (deps.getAgentPath() ?? AgentPath.root()).toString()) {
-        return "不能等待自己";
+        return failure("不能等待自己");
       }
       const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
-      if (!targetAgent) return `目标 agent ${targetPath} 不存在`;
+      if (!targetAgent) return failure(`目标 agent ${targetPath} 不存在`);
       const deadline = Date.now() + (timeoutMs ?? 30_000);
       while (targetAgent.isActive() || targetAgent.hasPendingMail()) {
-        if (Date.now() >= deadline) return `等待 ${targetPath} 超时`;
+        if (Date.now() >= deadline) return failure(`等待 ${targetPath} 超时`);
         await sleep(50);
       }
       return `${targetPath} 已完成当前任务`;
@@ -224,13 +236,13 @@ function interruptAgentTool(deps: CollabDeps): Tool {
     execute: async (input) => {
       const { target } = input as { target: string };
       const targetPath = resolveTarget(deps, target);
-      if (typeof targetPath === "string") return targetPath;
-      if (targetPath.isRoot()) return "root 不能被中断";
+      if (typeof targetPath === "string") return failure(targetPath);
+      if (targetPath.isRoot()) return failure("root 不能被中断");
       if (targetPath.toString() === (deps.getAgentPath() ?? AgentPath.root()).toString()) {
-        return "不能中断自己；返回结果让父 agent 处理即可";
+        return failure("不能中断自己；返回结果让父 agent 处理即可");
       }
       const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
-      if (!targetAgent) return `目标 agent ${targetPath} 不存在`;
+      if (!targetAgent) return failure(`目标 agent ${targetPath} 不存在`);
       targetAgent.interrupt();
       return `已请求中断 ${targetPath}`;
     },

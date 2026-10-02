@@ -22,6 +22,18 @@ function collabTool(team: Team, name: string, agentPath?: () => AgentPath | unde
   return tools.find((t) => t.name === name)!;
 }
 
+/** 统一取工具结果的回灌文本（成功字符串与结构化失败结果都适用） */
+function outputOf(result: Awaited<ReturnType<Tool["execute"]>>): string {
+  return typeof result === "string" ? result : result.output;
+}
+
+/** 断言工具结果是结构化失败（isError 标记 + 错误文本），返回文本供进一步断言 */
+function expectFailure(result: Awaited<ReturnType<Tool["execute"]>>): string {
+  expect(typeof result).toBe("object");
+  expect((result as { isError?: boolean }).isError).toBe(true);
+  return outputOf(result);
+}
+
 /** 毫秒睡眠（等待后台驱动 / 模拟耗时工具） */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -243,8 +255,7 @@ describe("协作工具集（多 agent 环境）", () => {
     // 深度 2 派生：子 agent 场景下 spawn_agent 执行被深度守卫拒绝（getAgentPath 返回子 agent 路径）
     const spawnTool = collabTool(team, "spawn_agent", () => AgentPath.parse("/root/worker") as AgentPath);
     const second = await spawnTool.execute({ agentName: "grand", prompt: "第二层" });
-    expect(typeof second).toBe("string");
-    expect(second as string).toContain("深度超限");
+    expect(expectFailure(second)).toContain("深度超限");
     expect(team.resolveAgent(AgentPath.parse("/root/worker/grand") as AgentPath)).toBeUndefined();
   });
 
@@ -391,8 +402,9 @@ describe("协作工具集（多 agent 环境）", () => {
       // 消费
     }
     const result = root.getMessages().find((m) => m.role === "tool_result");
-    // worker 未派生：目标不存在回灌错误
+    // worker 未派生：目标不存在按失败回灌（isError 置位，父 agent 可当失败处理）
     expect(String(result?.content)).toContain("不存在");
+    expect(result?.isError).toBe(true);
 
     // 绝对路径目标：派生 worker 后可用 /root/worker 引用
     const worker = new Agent({ modelClient: toolThenTextClient("x", {}), modelId: "mock", systemPrompt: "助手", team });
@@ -400,8 +412,8 @@ describe("协作工具集（多 agent 环境）", () => {
     team.commitSpawn(path, worker);
     const tool = collabTool(team, "send_message");
     expect(await tool.execute({ target: "/root/worker", message: "绝对路径" })).toContain("已发送给 /root/worker");
-    expect(await tool.execute({ target: "worker", message: "   " })).toContain("不能为空");
-    expect(await tool.execute({ target: "Bad/Name", message: "x" })).toContain("agent 名");
+    expect(expectFailure(await tool.execute({ target: "worker", message: "   " }))).toContain("不能为空");
+    expect(expectFailure(await tool.execute({ target: "Bad/Name", message: "x" }))).toContain("agent 名");
   });
 
   it("spawn_agent：总数上限守卫", async () => {
@@ -420,10 +432,20 @@ describe("协作工具集（多 agent 环境）", () => {
     const first = root.getMessages().find((m) => m.role === "tool_result");
     expect(String(first?.content)).toContain("已派生 /root/a");
 
-    // 第二个 spawn 被总数上限拒绝
+    // 第二个 spawn 被总数上限拒绝（按失败回灌）
     const tool = collabTool(team, "spawn_agent");
-    expect(await tool.execute({ agentName: "b", prompt: "2" })).toContain("总数超限");
+    expect(expectFailure(await tool.execute({ agentName: "b", prompt: "2" }))).toContain("总数超限");
     expect(team.resolveAgent(AgentPath.parse("/root/b") as AgentPath)).toBeUndefined();
+  });
+
+  it("spawn_agent：非法 agent 名被 schema 拒绝（约束前置，不再当正常结果回灌）", async () => {
+    const tool = collabTool(new Team(), "spawn_agent");
+    const bad = ["Bad-Name", "大写", "has/slash", ""];
+    for (const name of bad) {
+      const parsed = tool.inputSchema.safeParse({ agentName: name, prompt: "任务" });
+      expect(parsed.success, `非法名 ${name} 应被 schema 拒绝`).toBe(false);
+    }
+    expect(tool.inputSchema.safeParse({ agentName: "good_name", prompt: "任务" }).success).toBe(true);
   });
 
   it("子 agent 工具集：协作工具恰一份且其余继承", async () => {
@@ -698,7 +720,7 @@ describe("协作工具集（多 agent 环境）", () => {
       triggerTurn: true,
     });
     const start = Date.now();
-    expect(await waitTool.execute({ target: "busy", timeoutMs: 100 })).toContain("超时");
+    expect(expectFailure(await waitTool.execute({ target: "busy", timeoutMs: 100 }))).toContain("超时");
     expect(Date.now() - start).toBeGreaterThanOrEqual(100);
   });
 
@@ -728,19 +750,19 @@ describe("协作工具集（多 agent 环境）", () => {
 
     // 守卫：root 不可被中断（root 也被前置的 isRoot 检查拦住，自己守卫是子 agent 场景）
     const intTool = collabTool(team, "interrupt_agent");
-    expect(await intTool.execute({ target: "/root" })).toContain("不能被中断");
+    expect(expectFailure(await intTool.execute({ target: "/root" }))).toContain("不能被中断");
   });
 
   it("interrupt_agent：目标不存在返回错误（有效性校验，防静默成功假象）", async () => {
     const team = new Team();
     const tool = collabTool(team, "interrupt_agent");
-    expect(await tool.execute({ target: "nobody" })).toContain("不存在");
+    expect(expectFailure(await tool.execute({ target: "nobody" }))).toContain("不存在");
   });
 
   it("followup_task：目标不存在返回错误（有效性校验，防静默投递假象）", async () => {
     const team = new Team();
     const tool = collabTool(team, "followup_task");
-    expect(await tool.execute({ target: "nobody", message: "继续" })).toContain("不存在");
+    expect(expectFailure(await tool.execute({ target: "nobody", message: "继续" }))).toContain("不存在");
   });
 
   it("interrupt 核心语义：正在跑的 agent 被中断后当前 turn 结束即停止", async () => {
@@ -1019,7 +1041,7 @@ describe("协作工具集（多 agent 环境）", () => {
       // 消费
     }
 const waitTool = collabTool(team, "wait_agent");
-    expect(await waitTool.execute({ target: "/root" })).toContain("不能等待自己");
+    expect(expectFailure(await waitTool.execute({ target: "/root" }))).toContain("不能等待自己");
   });
 });
 
