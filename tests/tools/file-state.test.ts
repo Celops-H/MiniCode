@@ -60,7 +60,9 @@ describe("文件写冲突防护（per-agent 快照）", () => {
 
       // read 用小写路径登记快照
       await withFileState(state, () => readTool.execute({ path: file }));
-      // 外部用大写路径修改（Windows 大小写不敏感，同一文件）
+      // 外部用大写路径修改（Windows 大小写不敏感，同一文件）。
+      // 等过 mtime 毫秒刻度：两次写入同刻度时检测按「未变化」放行，属口径内盲区而非本用例目标
+      await new Promise((resolve) => setTimeout(resolve, 5));
       writeFileSync(path.join(dir, "A.TXT"), "v2");
       // 用小写路径 write：快照键已统一，命中 v1 快照 → 拒绝
       const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v3" }));
@@ -94,7 +96,8 @@ describe("文件写冲突防护（per-agent 快照）", () => {
     const out = await withFileState(state, () => editTool.execute({ path: file, oldString: "same", newString: "same" }));
     expect(out).toBe("已替换 1 处");
 
-    // 内容真的变了 → 拒绝
+    // 内容真的变了 → 拒绝（等过 mtime 毫秒刻度，理由同上）
+    await new Promise((resolve) => setTimeout(resolve, 5));
     writeFileSync(file, "changed content");
     const out2 = await withFileState(state, () => writeTool.execute({ path: file, content: "x" }));
     expect(out2).toContain("文件已被外部或其他 Agent 修改");
@@ -108,7 +111,8 @@ describe("文件写冲突防护（per-agent 快照）", () => {
 
     // 部分读（limit）→ 无 hash，只有 mtime+size
     await withFileState(state, () => readTool.execute({ path: file, limit: 1 }));
-    // 内容变但长度相同 → 无法 hash 兜底，拒绝
+    // 内容变但长度相同 → 无法 hash 兜底，拒绝（等过 mtime 毫秒刻度，理由同上）
+    await new Promise((resolve) => setTimeout(resolve, 5));
     writeFileSync(file, "line1\nline9\nline3");
     const out = await withFileState(state, () => writeTool.execute({ path: file, content: "x" }));
     expect(out).toContain("文件已被外部或其他 Agent 修改");
