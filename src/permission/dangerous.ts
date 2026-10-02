@@ -12,13 +12,22 @@ export interface DangerousCheckResult {
 /** 危险内建命令：把参数当代码执行，而非普通命令 */
 const DANGEROUS_BUILTINS = ["eval", "source", "coproc", "zmodload", "zpty"];
 
-/** 危险模式：正则 + 说明 */
-const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+/** 危险模式：正则 + 说明。quoteStrippedCommand 标记的只在引号外匹配 */
+const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string; quoteStrippedCommand?: boolean }> = [
   { pattern: /\$\(|\x60/, reason: "命令替换（$() 或反引号）" },
-  { pattern: /[<>]=?\(/, reason: "进程替换（<() / >()）" },
+  // 进程替换 <( / >(：引号内是字面文本不生效（node -e 的 f=>({ 在引号内，剔除后不再
+  // 误拦）；引号外词中的 =<(、=>( 在 bash 里仍是真进程替换，必须拦截——形态豁免只针对
+  // 引号剔除，不做前缀字符豁免（($|=> 等前缀后紧跟 <( 的都是真进程替换）
+  { pattern: /[<>](?=\()/, reason: "进程替换（<() / >()）", quoteStrippedCommand: true },
   { pattern: /\bIFS\s*=/, reason: "IFS 环境变量注入" },
   { pattern: /\/proc\//, reason: "访问 /proc 敏感路径" },
 ];
+
+/** 剔除引号段（单/双，双引号容忍转义），供引号内不生效的模式匹配用：
+ *  引号不配对时残段留在原文里照常参与匹配，不会漏检 */
+function stripQuotedSpans(command: string): string {
+  return command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, " ");
+}
 
 /**
  * 检测命令是否危险（硬编码黑名单 + 正则模式）。
@@ -39,8 +48,9 @@ export function checkDangerousCommand(command: string): DangerousCheckResult {
     return { dangerous: true, reason: "危险内建命令：.（source 别名）" };
   }
 
-  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) {
+  for (const { pattern, reason, quoteStrippedCommand } of DANGEROUS_PATTERNS) {
+    const target = quoteStrippedCommand ? stripQuotedSpans(command) : command;
+    if (pattern.test(target)) {
       return { dangerous: true, reason };
     }
   }

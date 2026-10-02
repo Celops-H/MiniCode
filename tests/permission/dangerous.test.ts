@@ -25,6 +25,24 @@ describe("危险命令检测", () => {
 
   it("进程替换危险", () => {
     expect(checkDangerousCommand("diff <(ls) <(ls)").dangerous).toBe(true);
+    expect(checkDangerousCommand("tee >(gzip > out.gz)").dangerous).toBe(true);
+  });
+
+  it("箭头函数与比较运算不误判进程替换（node -e 内联脚本常见写法）", () => {
+    expect(checkDangerousCommand('node -e "arr.map(f=>({k:f}))"').dangerous).toBe(false);
+    expect(checkDangerousCommand('node -e "if (a>=(b+1)) print()"').dangerous).toBe(false);
+    expect(checkDangerousCommand('node -e "if (a<(b)) print()"').dangerous).toBe(false);
+    expect(checkDangerousCommand("echo '<(ls)'").dangerous).toBe(false);
+    // 真进程替换仍拦截
+    expect(checkDangerousCommand("diff <(ls) <(ls)").dangerous).toBe(true);
+  });
+
+  it("引号外词中的进程替换不因 = 前缀豁免（bash 词中 <( >() 仍是真进程替换）", () => {
+    expect(checkDangerousCommand("echo a=<(echo x)").dangerous).toBe(true);
+    expect(checkDangerousCommand("echo a=>(echo x)").dangerous).toBe(true);
+    expect(checkDangerousCommand("sed s/=>(/X/ file").dangerous).toBe(true);
+    // 引号不配对：残段留在原文照常参与匹配，不漏检
+    expect(checkDangerousCommand('diff <(ls) "unterminated').dangerous).toBe(true);
   });
 
   it("IFS 注入危险", () => {
