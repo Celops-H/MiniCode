@@ -219,6 +219,24 @@ describe("Git Worktree 隔离", () => {
     expect(existsSync(b.dir)).toBe(true);
   });
 
+  it("分支残留时复用建 worktree：中断保留的分支不再让同名派生永久退化", () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    initGitRepo(dir);
+    const first = createWorktree(dir, "/root/worker")!;
+    writeFileSync(path.join(first.dir, "产出.txt"), "上次的部分产出");
+    // 模拟中断保留场景：产出提交进分支，目录删除、分支保留（abortWorktree 的行为）
+    execSync("git add -A && git commit -qm work", { cwd: first.dir });
+    execSync(`git worktree remove --force "${first.dir}"`, { cwd: dir });
+    expect(existsSync(first.dir)).toBe(false);
+
+    // 同名再派生：复用残留分支成功创建（旧实现 -b 重复建分支直接失败）
+    const second = createWorktree(dir, "/root/worker")!;
+    expect(second.branch).toBe(first.branch);
+    expect(existsSync(second.dir)).toBe(true);
+    // 复用的分支带着上次的部分产出（与「保留供人工处理」语义一致）
+    expect(existsSync(path.join(second.dir, "产出.txt"))).toBe(true);
+  });
+
   it("逐次开关：派生时显式关闭/开启覆盖 Team 全局缺省", () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
     initGitRepo(dir);
@@ -286,10 +304,12 @@ describe("Git Worktree 隔离", () => {
     expect(member?.worktree).toBeDefined();
     expect(member!.agent!.getCwd()).toContain("root-worker");
     // 放行后子 agent 自然完成：worktree 合并回主工作区并清理
+    //（轮询等待：git 清理链条耗时不确定，固定 sleep 在负载下会误报）
     const worktreeDir = member!.worktree!.dir;
     releaseChild();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(member?.worktree).toBeUndefined();
+    await expect
+      .poll(() => member?.worktree, { interval: 20, timeout: 10_000 })
+      .toBeUndefined();
     expect(existsSync(worktreeDir)).toBe(false);
   });
 

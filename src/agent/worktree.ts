@@ -55,17 +55,21 @@ export function resolveGitRoot(cwd: string): string | undefined {
  * 分支基于当前 HEAD（root 不提交，主分支始终无新提交，完成时可 fast-forward 合并）。
  * 目录/分支名掺完整子 agent 路径：不同父下同名子 agent 不再撞名
  * （原来只用 agentName，同名第二个 git worktree add 失败会静默退化共享目录）。
- * 残留同名 worktree 时创建失败返回 undefined（退化共享目录，不销毁「保留供人工处理」的成果）。
+ * 分支残留（中断/冲突保留的产物）时复用该分支建 worktree：git 拒绝重复建分支，
+ * 直接失败会让同名派生永久退化隔离；复用与「保留供人工处理」语义一致，
+ * 新子 agent 能看到上次的部分产出。分支仍被活跃 worktree 占用或目录残留时退化。
  * @param rootDir 主仓库根（root agent 的 git 根）
  * @param childPath 子 agent 完整路径（如 /root/t，作为目录与分支名的唯一段）
- * @returns worktree 信息；创建失败（非 git 仓库/同名残留）返回 undefined
+ * @returns worktree 信息；创建失败返回 undefined
  */
 export function createWorktree(rootDir: string, childPath: string): WorktreeInfo | undefined {
   const key = childPath.replace(/^\//, "").replace(/\//g, "-");
   const branch = `${BRANCH_PREFIX}${key}`;
   const dir = path.join(rootDir, ".git", WORKTREE_REL, key);
-  const ok = git(rootDir, ["worktree", "add", dir, "-b", branch]);
-  return ok === undefined ? undefined : { dir, branch };
+  if (git(rootDir, ["worktree", "add", dir, "-b", branch]) === undefined) {
+    if (git(rootDir, ["worktree", "add", dir, branch]) === undefined) return undefined;
+  }
+  return { dir, branch };
 }
 
 /** 合并结果：merged/no_changes 为终态（worktree 已清理）；kept 为保留态（目录/分支保留，可重试） */
