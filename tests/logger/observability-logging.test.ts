@@ -136,10 +136,10 @@ describe("attachHookLogging：事件流水埋点", () => {
     expect(infos[0]).not.toContain("9500"); // token 明细不进 info
   });
 
-  it("失败请求与模型切换、压缩、权限拒绝各记一条 info", () => {
+  it("事件行带会话归属；失败请求与权限拒绝走 warn，正常行与切换仍 info", () => {
     const bus = new HookBus();
     const { logger, lines } = captureLogger();
-    attachHookLogging(bus, logger);
+    attachHookLogging(bus, logger, "sess-1");
     bus.emit({ type: "LlmCallEnd", agentPath: "/root", model: "m1", durationMs: 12, error: "429 限流" });
     bus.emit({ type: "ModelFallback", agentPath: "/root", from: "m1", to: "m2", reason: "error" });
     bus.emit({
@@ -157,14 +157,17 @@ describe("attachHookLogging：事件流水埋点", () => {
     bus.emit({ type: "PermissionDecision", agentPath: "/root", toolCallId: "c2", toolName: "read", decision: "allow", source: "rule" });
 
     const messages = lines.filter((l) => l.level === "info").map((l) => l.message);
-    expect(messages[0]).toContain("失败（429 限流）");
-    expect(messages[1]).toContain("模型切换：m1 → m2（调用失败）");
-    expect(messages[2]).toContain("压缩（撞线自动）完成：消息 30 → 4 条");
-    expect(messages[3]).toContain("权限拒绝 bash（来源 用户）");
-    expect(messages).toHaveLength(4); // allow 不记日志
+    expect(messages[0]).toContain("模型切换：m1 → m2（调用失败）");
+    expect(messages[1]).toContain("压缩（撞线自动）完成：消息 30 → 4 条");
+    expect(messages).toHaveLength(2); // 失败与拒绝记 warn，allow 不记日志
+    // 失败类事件走 warn 级（按级别可筛出问题行），行首带会话归属
+    const warns = lines.filter((l) => l.level === "warn").map((l) => l.message);
+    expect(warns[0]).toContain("模型请求 m1：耗时 12ms，失败（429 限流）");
+    expect(warns[1]).toContain("权限拒绝 bash（来源 用户）");
+    expect(lines.every((l) => l.message.includes("会话 sess-1 "))).toBe(true);
   });
 
-  it("压缩失败带原因；工具失败 info 记错误、参数全文只进 debug", () => {
+  it("压缩失败带原因；工具失败走 warn、参数全文只进 debug", () => {
     const bus = new HookBus();
     const { logger, lines } = captureLogger();
     attachHookLogging(bus, logger);
@@ -190,10 +193,10 @@ describe("attachHookLogging：事件流水埋点", () => {
       durationMs: 10,
     });
 
-    const infos = lines.filter((l) => l.level === "info").map((l) => l.message);
-    expect(infos[0]).toContain("压缩失败（摘要结果为空）");
-    expect(infos[1]).toContain("工具失败 bash：命令执行失败：目录不存在");
-    expect(infos.join("\n")).not.toContain("rm -rf"); // 参数全文不进 info（隐私口径）
+    const warns = lines.filter((l) => l.level === "warn").map((l) => l.message);
+    expect(warns[0]).toContain("压缩失败（摘要结果为空）");
+    expect(warns[1]).toContain("工具失败 bash：命令执行失败：目录不存在");
+    expect(warns.join("\n")).not.toContain("rm -rf"); // 参数全文不进 warn（隐私口径）
     const debugs = lines.filter((l) => l.level === "debug").map((l) => l.message);
     expect(debugs[0]).toContain("rm -rf 产物目录"); // debug 级才展开
   });

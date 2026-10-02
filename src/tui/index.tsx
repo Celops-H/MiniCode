@@ -280,8 +280,8 @@ async function runTuiSession(opts: {
     enabled: config.observability?.enabled,
     dir: config.observability?.dir,
   });
-  // 流水日志埋点：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
-  attachHookLogging(hooks, logger);
+  // 流水日志埋点：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志（行带会话归属）
+  attachHookLogging(hooks, logger, session.meta.id);
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
   // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
   const compactConfig = buildCompactConfig(config, modelId, models) ?? {

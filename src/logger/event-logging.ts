@@ -18,16 +18,22 @@ const DECISION_SOURCES: Record<string, string> = {
 /**
  * 把 hook 事件流水接到日志（埋点）：
  * 模型请求耗时与结果、token 用量（debug）、fallback 决策、压缩动作、工具失败详情、
- * 权限拒绝。隐私口径：info 级不含消息正文与工具参数全文，参数只在 debug 级展开。
+ * 权限拒绝。事件级失败（模型请求失败、工具失败、权限拒绝、压缩失败、截断收尾）走
+ * warn，按级别可筛出问题行。隐私口径：info 级不含消息正文与工具参数全文，
+ * 参数只在 debug 级展开。
  * @param bus hook 事件总线
  * @param logger 流水日志
+ * @param sessionId 会话 id（事件行统一带会话归属——同一日志文件跨会话追加，
+ *   无归属字段时多会话混写的行无法区分归属）
  * @returns 取消订阅函数（会话收尾用）
  */
-export function attachHookLogging(bus: HookBus, logger: Logger): () => void {
+export function attachHookLogging(bus: HookBus, logger: Logger, sessionId?: string): () => void {
+  const tag = sessionId ? `会话 ${sessionId} ` : "";
+  const emit = (level: "info" | "warn" | "debug", message: string): void => logger[level](`${tag}${message}`);
   const unsubscribe: Array<() => void> = [
     bus.on("LlmCallEnd", (e) => {
       const result = e.error ? `失败（${e.error}）` : `完成（停因 ${e.stopReason ?? "未知"}）`;
-      logger.info(`模型请求 ${e.model}：耗时 ${e.durationMs}ms，${result}`);
+      emit(e.error ? "warn" : "info", `模型请求 ${e.model}：耗时 ${e.durationMs}ms，${result}`);
       const usage = e.usage;
       if (usage) {
         const parts = [
@@ -36,32 +42,32 @@ export function attachHookLogging(bus: HookBus, logger: Logger): () => void {
           `缓存读 ${usage.cacheReadTokens ?? "-"}`,
           `缓存写 ${usage.cacheWriteTokens ?? "-"}`,
         ];
-        logger.debug(`token 用量 ${e.model}：${parts.join("，")}`);
+        emit("debug", `token 用量 ${e.model}：${parts.join("，")}`);
       }
     }),
     bus.on("ModelFallback", (e) => {
-      logger.info(`模型切换：${e.from} → ${e.to}（${FALLBACK_REASONS[e.reason] ?? e.reason}）`);
+      emit("info", `模型切换：${e.from} → ${e.to}（${FALLBACK_REASONS[e.reason] ?? e.reason}）`);
     }),
     bus.on("Compact", (e) => {
       const outcome = e.ok
         ? `完成：消息 ${e.messagesBefore} → ${e.messagesAfter} 条`
         : `失败${e.error ? `（${e.error}）` : ""}`;
-      logger.info(`压缩${e.trigger === "auto" ? "（撞线自动）" : ""}${outcome}`);
+      emit(e.ok ? "info" : "warn", `压缩${e.trigger === "auto" ? "（撞线自动）" : ""}${outcome}`);
     }),
     bus.on("Stop", (e) => {
       // 撞轮次上限的截断收尾：曾与正常收尾同形无法统计，warn 级可筛
       if (e.reason === "max_turns") {
-        logger.warn(`agent ${e.agentPath} 达到单次任务轮次上限，本轮被截断`);
+        emit("warn", `agent ${e.agentPath} 达到单次任务轮次上限，本轮被截断`);
       }
     }),
     bus.on("PostToolUseFailure", (e) => {
-      logger.info(`工具失败 ${e.toolName}：${e.error}`);
+      emit("warn", `工具失败 ${e.toolName}：${e.error}`);
       // 参数全文只在 debug 级展开（隐私口径：info 不含工具参数全文）
-      logger.debug(`工具失败参数 ${e.toolName}：${JSON.stringify(e.input)}`);
+      emit("debug", `工具失败参数 ${e.toolName}：${JSON.stringify(e.input)}`);
     }),
     bus.on("PermissionDecision", (e) => {
       if (e.decision === "deny") {
-        logger.info(`权限拒绝 ${e.toolName}（来源 ${DECISION_SOURCES[e.source] ?? e.source}）`);
+        emit("warn", `权限拒绝 ${e.toolName}（来源 ${DECISION_SOURCES[e.source] ?? e.source}）`);
       }
     }),
   ];
