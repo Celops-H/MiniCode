@@ -11,7 +11,7 @@ import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
-import { messageScroller, noteUserScroll } from "../scroll.js";
+import { messageScroller, noteScrollPosition, noteUserScroll } from "../scroll.js";
 import { theme } from "./theme.js";
 
 /** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗 */
@@ -362,13 +362,29 @@ export function Messages(props: {
       viewport: { height: number };
       onMouseEvent?: (e: unknown) => void;
       scrollBy: (delta: number, unit?: "absolute" | "viewport") => void;
+      verticalScrollBar?: { slider?: { onChange?: (value: number) => void } };
     };
     const orig = box.onMouseEvent?.bind(box);
     box.onMouseEvent = (e: unknown) => {
-      const ev = e as { type: string; scroll?: { direction?: "up" | "down" } };
-      if (ev.type === "scroll") noteUserScroll(ev.scroll?.direction === "up" ? "up" : "down");
       orig?.(e);
+      // 滚后同步标记（先滚再判定，「向下滚回到底」才看得到滚后位置）；
+      // 仅纵向滚轮参与——Shift+滚轮被 opentui 重映射为横向滚动，不动跟随态
+      const ev = e as { type: string; scroll?: { direction?: string } };
+      if (ev.type === "scroll") {
+        if (ev.scroll?.direction === "up") noteUserScroll("up");
+        else if (ev.scroll?.direction === "down") noteUserScroll("down");
+      }
     };
+    // 拖滚动条不经鼠标滚轮事件：滑块回调里按滚动后位置同步标记（拖离底部进入读历史态，
+    // 拖回底部恢复跟随），否则 blocks 增长的跟随兜底会把拖拽中的视口拽回底部
+    const slider = box.verticalScrollBar?.slider;
+    if (slider) {
+      const origOnChange = slider.onChange?.bind(slider);
+      slider.onChange = (value: number) => {
+        origOnChange?.(value);
+        noteScrollPosition();
+      };
+    }
     messageScroller.box = {
       get scrollTop() {
         return box.scrollTop;
@@ -390,10 +406,13 @@ export function Messages(props: {
   };
   onCleanup(() => {
     messageScroller.box = null;
+    // 读历史态一并复位：会话切换重建 App 但模块单例还在，残留 true 会让新会话
+    // 首屏历史的跟随兜底失效（重挂载本就重建 scrollbox、位置归零，语义一致）
+    messageScroller.userScrolled = false;
   });
   // 跟随兜底：blocks 增长/流式更新后贴底（opentui sticky 在内容一帧内高度跳变时
-  // 会误判为手动滚动而脱附且无自愈）；用户在读历史（滚轮向上/翻页/回顶）时不拽回，
-  // 回底跟随由 userScrolled 标记门控（用户提交/流式开始经 forceScrollToBottom 解除）
+  // 会误判为手动滚动而脱附且无自愈）；用户在读历史（滚轮向上/翻页/回顶/拖滚动条）时
+  // 不拽回，跟随由 userScrolled 标记门控（用户提交经 forceScrollToBottom 解除）
   createEffect(() => {
     void props.blocks.length;
     void props.streaming;

@@ -386,11 +386,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     ) {
       return;
     }
-    const next = reduceEvent(state, event);
-    // 流式开始强制回底：用户提交后视口必须跟着新回复走（读历史态一并解除）
-    if (!state.streaming && next.streaming) forceScrollToBottom();
     // model_fallback（模型路由切换）由 reduceEvent 追加常驻通知行到消息区，不 toast 一闪而过
-    commit(next);
+    commit(reduceEvent(state, event));
   };
   const onEvent = feedEvent;
   const feedRoot = feedEvent;

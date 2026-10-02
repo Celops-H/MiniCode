@@ -42,6 +42,11 @@ export function noteUserScroll(direction: "up" | "down"): void {
   if (atBottom()) messageScroller.userScrolled = false;
 }
 
+/** 拖滚动条等直接定位后同步「是否在读历史」：按滚动后的位置判定（不在底部 = 读历史） */
+export function noteScrollPosition(): void {
+  noteUserScroll(atBottom() ? "down" : "up");
+}
+
 /** 键盘翻页（pageup/pagedown，dir>0 向下）：按半个视口滚动（opentui 内置键位同款） */
 export function scrollByPages(dir: number): void {
   const box = messageScroller.box;
