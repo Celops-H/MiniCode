@@ -64,27 +64,35 @@ export class Team {
   }
 
   /**
-   * 为子 agent 创建 Git Worktree（worktrees 开启且父在 git 仓库内时）：
-   * 子 agent 独立工作区 + 独立分支，文件写物理隔离。
+   * 为子 agent 创建 Git Worktree：子 agent 独立工作区 + 独立分支，文件写物理隔离。
+   * 是否启用按调用方传入的开关（spawn 派生时的逐次选择），
+   * 未传时回落 Team 全局缺省（装配层从 config.worktrees 注入）。
    * 创建成功后记录到对应 member（commitSpawn 后即可用，release 时自动清理）。
-   * @param parentPath 父 agent 路径
-   * @param agentName 子 agent 名
-   * @returns worktree 信息；不可用（未开启/非 git 仓库）返回 undefined
+   * @param childPath 子 agent 完整路径（worktree 目录/分支名的唯一段）
+   * @param enabled 是否启用隔离；缺省随 Team 全局缺省
+   * @returns worktree 信息；不可用（未开启/非 git 仓库/创建失败）返回 undefined
    */
-  createChildWorktree(parentPath: AgentPath, agentName: string): WorktreeInfo | undefined {
-    if (!this.worktrees) return undefined;
-    const parent = this.members.get(parentPath.toString())?.agent;
+  createChildWorktree(childPath: AgentPath, enabled?: boolean): WorktreeInfo | undefined {
+    if (!(enabled ?? this.worktrees)) return undefined;
+    const parent = this.members.get(childPath.parent().toString())?.agent;
     if (!parent) return undefined;
     const rootDir = resolveGitRoot(parent.getCwd());
     if (!rootDir) return undefined; // 非 git 仓库：退化为共享目录 + CAS 冲突防护
-    const info = createWorktree(rootDir, agentName);
+    const info = createWorktree(rootDir, childPath.toString());
     if (!info) return undefined;
-    const childPath = parentPath.join(agentName);
-    if (typeof childPath !== "string") {
-      const member = this.members.get(childPath.toString());
-      if (member) member.worktree = info;
-    }
+    const member = this.members.get(childPath.toString());
+    if (member) member.worktree = info;
     return info;
+  }
+
+  /** Team 全局 worktree 缺省开关（spawn 工具 worktree 参数的缺省值） */
+  get worktreeDefault(): boolean {
+    return this.worktrees;
+  }
+
+  /** 查询子 agent 当前挂着的 worktree（spawn 结果判定隔离是否生效用） */
+  getWorktree(path: AgentPath): WorktreeInfo | undefined {
+    return this.members.get(path.toString())?.worktree;
   }
 
   /**

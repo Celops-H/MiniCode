@@ -178,6 +178,9 @@ export function createSessionAgent(options: {
   agents?: boolean;
   /** 撞线自动压缩开关（缺省开；透传给 Agent） */
   autoCompact?: boolean;
+  /** 子 agent git worktree 隔离缺省开关（缺省关；透传给 Team，
+   *  生产装配从 config.worktrees 取值——派生时 spawn_agent 的 worktree 参数缺省随它） */
+  worktrees?: boolean;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;
@@ -195,7 +198,7 @@ export function createSessionAgent(options: {
   if (options.agents === false) {
     return { agent: new Agent({ ...options, systemPrompt: `${options.systemPrompt}\n${envPrompt}` }) };
   }
-  const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks });
+  const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks, worktrees: options.worktrees });
   const agent = new Agent({
     ...options,
     systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}\n${envPrompt}`,

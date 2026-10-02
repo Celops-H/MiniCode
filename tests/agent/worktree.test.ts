@@ -17,6 +17,16 @@ function initGitRepo(dir: string): void {
   execSync("git add . && git commit -qm init", { cwd: dir });
 }
 
+/** 空转模型客户端（只回一句正文，不调工具） */
+function emptyClient(): ModelClient {
+  return {
+    async *stream() {
+      yield { type: "text_delta", text: "ok" };
+      yield { type: "done", stopReason: "end_turn" };
+    },
+  };
+}
+
 /** spawn 工具的 mock：子 agent 第一轮写文件到 cwd，第二轮总结 */
 function workerClient(fileName: string): ModelClient {
   return {
@@ -86,6 +96,31 @@ function sequenceClient(tasks: Array<{ file: string; content: string }>): ModelC
   };
 }
 
+/**
+ * 派生一次即收尾的 mock：第一轮 spawn_agent（按传入参数），之后所有轮回正文。
+ * 子 agent 复用同实例（靠上下文里的系统注入消息区分）：等到 gate 放行才回正文，
+ * 让测试能在子 agent 完成前断言 worktree 挂载状态（完成即合并清理，来不及看）。
+ */
+function spawnOnceClient(spawnInput: Record<string, unknown>, childGate?: Promise<void>): ModelClient {
+  let spawned = false;
+  return {
+    async *stream(_modelId, context) {
+      if (!spawned) {
+        spawned = true;
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "spawn_agent" };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify(spawnInput) };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+        return;
+      }
+      const isChild = context.messages.some((m) => m.role === "user" && m.source === "system");
+      if (isChild && childGate) await childGate;
+      yield { type: "text_delta", text: "完成" };
+      yield { type: "done", stopReason: "end_turn" };
+    },
+  };
+}
+
 describe("Git Worktree 隔离", () => {
   let dir: string;
   afterEach(() => {
@@ -116,7 +151,7 @@ describe("Git Worktree 隔离", () => {
     const childPath = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
     // createChildAgent 内做 worktree 创建——手工路径用等价逻辑：
     // 直接验证 Team.createChildWorktree + child cwd 绑定
-    const worktree = team.createChildWorktree(AgentPath.root(), "worker");
+    const worktree = team.createChildWorktree(AgentPath.parse("/root/worker") as AgentPath);
     expect(worktree).toBeDefined();
     expect(worktree!.dir).not.toBe(dir); // 独立目录
     expect(worktree!.dir).toContain(".git"); // 建在仓库 .git 下（不受跟踪）
@@ -167,8 +202,120 @@ describe("Git Worktree 隔离", () => {
       team,
     });
     team.registerRoot(root);
-    const worktree = team.createChildWorktree(AgentPath.root(), "worker");
+    const worktree = team.createChildWorktree(AgentPath.parse("/root/worker") as AgentPath);
     expect(worktree).toBeUndefined();
+  });
+
+  it("不同父下同名子 agent：目录/分支名掺完整路径，两者都创建成功不撞名", () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    initGitRepo(dir);
+    const a = createWorktree(dir, "/root/t1/worker")!;
+    const b = createWorktree(dir, "/root/t2/worker")!;
+    expect(a.dir).not.toBe(b.dir);
+    expect(a.branch).not.toBe(b.branch);
+    expect(a.branch).toContain("t1-worker");
+    expect(b.branch).toContain("t2-worker");
+    expect(existsSync(a.dir)).toBe(true);
+    expect(existsSync(b.dir)).toBe(true);
+  });
+
+  it("逐次开关：派生时显式关闭/开启覆盖 Team 全局缺省", () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    initGitRepo(dir);
+    const teamOn = new Team({ worktrees: true });
+    const rootOn = new Agent({
+      modelClient: emptyClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      cwd: dir,
+      tools: [],
+      team: teamOn,
+    });
+    teamOn.registerRoot(rootOn);
+    // 全局开、派生时显式关：不创建
+    expect(teamOn.createChildWorktree(AgentPath.parse("/root/worker") as AgentPath, false)).toBeUndefined();
+    // 全局开、不传：随全局创建
+    expect(teamOn.createChildWorktree(AgentPath.parse("/root/worker") as AgentPath)).toBeDefined();
+
+    const teamOff = new Team({ worktrees: false });
+    const rootOff = new Agent({
+      modelClient: emptyClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      cwd: dir,
+      tools: [],
+      team: teamOff,
+    });
+    teamOff.registerRoot(rootOff);
+    // 全局关、派生时显式开：创建（换一个子路径，避开上面 teamOn 已占用的同名 worktree）
+    expect(teamOff.createChildWorktree(AgentPath.parse("/root/other") as AgentPath, true)).toBeDefined();
+    // 全局缺省值经 getter 暴露（spawn 工具 worktree 参数缺省随它）
+    expect(teamOff.worktreeDefault).toBe(false);
+    expect(teamOn.worktreeDefault).toBe(true);
+  });
+
+  it("spawn_agent 接线：全局开关关闭时模型显式 worktree:true，子 agent 仍落独立 worktree", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    initGitRepo(dir);
+    // 全局关：隔离完全靠派生时的 worktree 参数逐次选择（会写文件的任务开启）
+    const team = new Team({ worktrees: false });
+    // 子 agent 等门控放行才收尾：完成即合并清理，必须趁挂着时断言
+    let releaseChild: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseChild = resolve;
+    });
+    const root = new Agent({
+      modelClient: spawnOnceClient({ agentName: "worker", prompt: "写文件", worktree: true }, gate),
+      modelId: "mock",
+      systemPrompt: "助手",
+      cwd: dir,
+      tools: [writeTool],
+      team,
+    });
+    team.registerRoot(root);
+    root.start("派活");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    const member = team.resolveAgent(AgentPath.parse("/root/worker") as AgentPath);
+    expect(member?.agent).toBeDefined();
+    // 隔离生效：spawn 结果不带退化注明，子 agent cwd 在独立 worktree
+    const result = root.getMessages().find((m) => m.role === "tool_result");
+    expect(String(result?.content)).toContain("已派生 /root/worker");
+    expect(String(result?.content)).not.toContain("未生效");
+    expect(member?.worktree).toBeDefined();
+    expect(member!.agent!.getCwd()).toContain("root-worker");
+    // 放行后子 agent 自然完成：worktree 合并回主工作区并清理
+    const worktreeDir = member!.worktree!.dir;
+    releaseChild();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(member?.worktree).toBeUndefined();
+    expect(existsSync(worktreeDir)).toBe(false);
+  });
+
+  it("spawn_agent 接线：全局开启但非 git 仓库，spawn 结果注明隔离未生效并退化共享父目录", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
+    const team = new Team({ worktrees: true });
+    const root = new Agent({
+      modelClient: spawnOnceClient({ agentName: "worker", prompt: "写文件" }),
+      modelId: "mock",
+      systemPrompt: "助手",
+      cwd: dir,
+      tools: [writeTool],
+      team,
+    });
+    team.registerRoot(root);
+    root.start("派活");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    const member = team.resolveAgent(AgentPath.parse("/root/worker") as AgentPath);
+    expect(member?.agent).toBeDefined();
+    // 非 git 仓库：子 agent 退化继承父 cwd
+    expect(member!.agent!.getCwd()).toBe(dir);
+    const result = root.getMessages().find((m) => m.role === "tool_result");
+    expect(String(result?.content)).toContain("worktree 隔离未生效");
+    await new Promise((resolve) => setTimeout(resolve, 200));
   });
 
   it("嵌套（深度 2）：子 agent 的 worktree 内再派生孙 agent，根解析正确、隔离链不退化", async () => {
@@ -192,7 +339,7 @@ describe("Git Worktree 隔离", () => {
     team.registerRoot(root);
 
     // 第一层 worktree（worker）
-    const first = team.createChildWorktree(AgentPath.root(), "worker");
+    const first = team.createChildWorktree(AgentPath.parse("/root/worker") as AgentPath);
     expect(first).toBeDefined();
     // worker 注册进团队（其 cwd = worktree 目录）
     const firstPath = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
@@ -211,7 +358,7 @@ describe("Git Worktree 隔离", () => {
     });
     team.commitSpawn(firstPath, worker);
     // worker 在 worktree 内再派生孙 agent：其 cwd 在 worktree 中，根应解析到主仓库
-    const second = team.createChildWorktree(firstPath, "grand");
+    const second = team.createChildWorktree(AgentPath.parse("/root/worker/grand") as AgentPath);
     expect(second).toBeDefined();
     expect(second!.dir).toContain(".git");
     expect(second!.dir).not.toBe(first!.dir);
@@ -242,7 +389,7 @@ describe("Git Worktree 隔离", () => {
     // A、B 同时派生（同一 base），改同一行（冲突）
     const spawnChild = (name: string, client: ModelClient) => {
       const childPath = team.reserveSpawn(AgentPath.root(), name) as AgentPath;
-      const worktree = team.createChildWorktree(AgentPath.root(), name)!;
+      const worktree = team.createChildWorktree(AgentPath.parse(`/root/${name}`) as AgentPath)!;
       const child = new Agent({
         modelClient: client,
         modelId: "mock",
@@ -285,7 +432,7 @@ describe("Git Worktree 隔离", () => {
   it("子 agent 无改动：判空分支直接清理（不误报合并）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
     initGitRepo(dir);
-    const info = createWorktree(dir, "worker")!;
+    const info = createWorktree(dir, "/root/worker")!;
     // 子 agent 什么都没改
     const result = completeWorktree(dir, info);
     expect(result.status).toBe("no_changes");
@@ -298,7 +445,7 @@ describe("Git Worktree 隔离", () => {
     initGitRepo(dir);
     // 仓库 pre-commit hook 拒绝提交（模拟 commit 真实失败）
     writeFileSync(path.join(dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n");
-    const info = createWorktree(dir, "worker")!;
+    const info = createWorktree(dir, "/root/worker")!;
     // 子 agent 在 worktree 里写文件
     writeFileSync(path.join(info.dir, "output.txt"), "产出数据");
 
@@ -318,8 +465,8 @@ describe("Git Worktree 隔离", () => {
     execSync("git add -A && git commit -qm second", { cwd: dir });
 
     // A、B 同时派生（同一 base）：A 改第 1 行、B 改第 3 行（同一文件不同位置）
-    const infoA = createWorktree(dir, "agent_a")!;
-    const infoB = createWorktree(dir, "agent_b")!;
+    const infoA = createWorktree(dir, "/root/agent_a")!;
+    const infoB = createWorktree(dir, "/root/agent_b")!;
     writeFileSync(path.join(infoA.dir, "a.txt"), "A 改第一行\n第二行\n第三行\n");
     const msgA = completeWorktree(dir, infoA);
     expect(msgA.status).toBe("merged");
@@ -340,8 +487,8 @@ describe("Git Worktree 隔离", () => {
     execSync("git add -A && git commit -qm second", { cwd: dir });
 
     // A、B 同时派生（同一 base），改同一行（冲突）
-    const infoA = createWorktree(dir, "agent_a")!;
-    const infoB = createWorktree(dir, "agent_b")!;
+    const infoA = createWorktree(dir, "/root/agent_a")!;
+    const infoB = createWorktree(dir, "/root/agent_b")!;
     writeFileSync(path.join(infoA.dir, "a.txt"), "A 的版本\n第二行\n第三行\n");
     const msgA = completeWorktree(dir, infoA);
     expect(msgA.status).toBe("merged");

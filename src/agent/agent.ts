@@ -205,8 +205,9 @@ export class Agent {
       for (const tool of createCollaborationTools({
         team: this.team,
         getAgentPath: () => this.agentPath,
-        createChildAgent: (agentName, path) => this.createChildAgent(agentName, path),
+        createChildAgent: (agentName, path, worktree) => this.createChildAgent(agentName, path, worktree),
         sendMessage: (target, mail) => this.team!.sendMessage(target, mail),
+        worktreeDefault: () => this.team!.worktreeDefault,
       })) {
         this.registry.register(tool);
       }
@@ -228,13 +229,15 @@ export class Agent {
    * （模型 / 权限 / Hook / 团队 / 落盘目录），工具 = 父工具集过滤协作工具 + 协作工具。
    * @param agentName 子 agent 名（路径末段，已由 reserveSpawn 校验）
    * @param path 子 agent 在团队中的路径
+   * @param worktree 是否给子 agent 独立 git worktree 工作区（spawn 派生时的逐次选择，
+   *  缺省随 Team 全局缺省）；不可用（非 git 仓库/创建失败）时自动继承父 cwd
    * @returns 子 agent 实例（路径已设置，待 commitSpawn 登记）
    */
-  private createChildAgent(agentName: string, path: AgentPath): Agent {
-    // Git Worktree 隔离：worktrees 开启且父在 git 仓库内时，
-    // 子 agent 绑定独立工作区（cwd），文件写与父物理隔离；非 git 仓库继承父 cwd
-    const worktree = this.team?.createChildWorktree(path.parent(), agentName);
-    const childCwd = worktree?.dir ?? this.cwd;
+  private createChildAgent(agentName: string, path: AgentPath, worktree?: boolean): Agent {
+    // Git Worktree 隔离：开启且父在 git 仓库内时，子 agent 绑定独立工作区（cwd），
+    // 文件写与父物理隔离；不可用时继承父 cwd
+    const worktreeInfo = this.team?.createChildWorktree(path, worktree);
+    const childCwd = worktreeInfo?.dir ?? this.cwd;
     // 子 agent 提示词：固定协作提示 + 装配段（项目指令/可用技能，
     // 宿主传入）+ 环境段（按子 agent 实际 cwd 生成，worktree 隔离时是子工作区路径）
     const childPrompt = [

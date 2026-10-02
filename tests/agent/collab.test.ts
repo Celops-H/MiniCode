@@ -18,6 +18,7 @@ function collabTool(team: Team, name: string, agentPath?: () => AgentPath | unde
       throw new Error("该测试未走 createChildAgent 路径");
     },
     sendMessage: (target, mail) => team.sendMessage(target, mail),
+    worktreeDefault: () => team.worktreeDefault,
   });
   return tools.find((t) => t.name === name)!;
 }

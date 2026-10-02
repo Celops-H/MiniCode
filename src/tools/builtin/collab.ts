@@ -41,10 +41,13 @@ export interface CollabDeps {
   team: Team;
   /** 当前 agent 在团队中的路径（未注册时返回 undefined，按 root 处理） */
   getAgentPath: () => AgentPath | undefined;
-  /** 创建协作子 agent（运行时继承 + 工具集组装由 Agent 内部完成） */
-  createChildAgent: (agentName: string, path: AgentPath) => Agent;
+  /** 创建协作子 agent（运行时继承 + 工具集组装由 Agent 内部完成）；
+   *  worktree 为派生时的隔离选择（缺省随全局缺省，见 worktreeDefault） */
+  createChildAgent: (agentName: string, path: AgentPath, worktree?: boolean) => Agent;
   /** 投递消息到目标 agent（Team.sendMessage，triggerTurn 时自动后台驱动） */
   sendMessage: (target: AgentPath, mail: MailMessage) => Promise<string | undefined>;
+  /** worktree 隔离的全局缺省（spawn 工具 worktree 参数缺省随它） */
+  worktreeDefault: () => boolean;
 }
 
 /** 多 Agent 协作工具集合 */
@@ -67,23 +70,32 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
       "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
       "agent 名只能用小写字母、数字和下划线。" +
+      "worktree 参数控制是否给子 agent 独立的 git worktree 工作区（缺省随全局设置）：会写文件的任务建议开启，" +
+      "避免并行写冲突；纯只读任务不必。隔离不可用时子 agent 与你共享工作目录，结果中会注明。" +
       "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
       "多个互不依赖的子任务可在同一轮并行派生，等待期间可继续做不依赖它们结果的本地工作，" +
       "需要等结果时用 wait_agent",
     inputSchema: z.object({
       agentName: z.string().regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线"),
       prompt: z.string(),
+      worktree: z.boolean().optional(),
     }),
     isReadOnly: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
-      const { agentName, prompt } = input as { agentName: string; prompt: string };
+      const { agentName, prompt, worktree } = input as {
+        agentName: string;
+        prompt: string;
+        worktree?: boolean;
+      };
       if (!prompt.trim()) return failure("任务内容不能为空");
       const parentPath = deps.getAgentPath() ?? AgentPath.root();
       const path = deps.team.reserveSpawn(parentPath, agentName);
       if (typeof path === "string") return failure(path); // 守卫失败：按失败回灌，父 agent 可据此调整
+      // 隔离缺省随全局开关，派生方可按任务性质逐次覆盖
+      const wantWorktree = worktree ?? deps.worktreeDefault();
       try {
-        const child = deps.createChildAgent(agentName, path);
+        const child = deps.createChildAgent(agentName, path, wantWorktree);
         deps.team.commitSpawn(path, child);
         const error = await deps.sendMessage(path, {
           type: "NEW_TASK",
@@ -92,6 +104,10 @@ function spawnAgentTool(deps: CollabDeps): Tool {
           triggerTurn: true,
         });
         if (error) return failure(error);
+        // 要求隔离但未生效（非 git 仓库/创建失败）：结果中注明退化，父 agent 不误以为已隔离
+        if (wantWorktree && deps.team.getWorktree(path) === undefined) {
+          return `已派生 ${path}，初始任务已下达；worktree 隔离未生效（当前目录不是 git 仓库或创建失败），子 agent 与你共享工作目录`;
+        }
         return `已派生 ${path}，初始任务已下达`;
       } catch (err) {
         // 创建/投递中途失败：释放已预留的 spawn 槽位与路径（防计数泄漏）
