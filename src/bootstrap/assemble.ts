@@ -184,6 +184,8 @@ export function createSessionAgent(options: {
   /** 会话记忆开关（缺省关；透传给 Agent，开启后每轮后台增量维护记忆文本、
    *  压缩时记忆替代现场摘要省一次模型调用） */
   memory?: boolean;
+  /** 会话 id（透传给 Agent：超限工具输出落盘文件名编入，产出方可回溯） */
+  sessionId?: string;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;

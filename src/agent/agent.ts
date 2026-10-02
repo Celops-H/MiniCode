@@ -94,6 +94,8 @@ export interface AgentOptions {
   hooks?: HookBus;
   /** 工具输出超限的落盘目录；缺省 `~/.minicode/outputs/`（测试可注入 tmp 目录） */
   outputDir?: string;
+  /** 会话 id（超限工具输出落盘文件名编入，产出方可回溯；子 agent 随继承透传） */
+  sessionId?: string;
   /** 思考等级活引用（/model 左右调整实时生效）：每轮组装 Context 时读一次，透传 reasoning_effort（仅支持的厂商） */
   thinkingLevelRef?: () => ThinkingLevel | undefined;
   /** 工具执行的工作目录（相对路径解析基准）；缺省进程 cwd */
@@ -139,6 +141,7 @@ export class Agent {
   agentPath?: AgentPath;
   /** 工具输出超限的落盘目录 */
   private readonly outputDir: string;
+  private readonly sessionId: string | undefined;
   /** 工具执行的工作目录（相对路径解析基准） */
   private readonly cwd: string;
   /** checkpoint 回调：工具执行前宿主落盘用 */
@@ -192,6 +195,7 @@ export class Agent {
     this.permission = options.permission;
     this.hooks = options.hooks;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
+    this.sessionId = options.sessionId;
     this.cwd = options.cwd ?? process.cwd();
     this.team = options.team;
     this.checkpoint = options.checkpoint;
@@ -255,6 +259,7 @@ export class Agent {
       team: this.team,
       maxTurns: this.maxTurns,
       outputDir: this.outputDir,
+      sessionId: this.sessionId,
       cwd: childCwd,
       // 思考等级随父继承（会话级偏好，子 agent 与 root 一致）
       thinkingLevelRef: this.thinkingLevelRef,
@@ -1263,7 +1268,10 @@ export class Agent {
           typeof result === "string"
             ? { output: result, contextModifier: undefined, isError: undefined }
             : result;
-        const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir);
+        const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir, {
+          sessionId: this.sessionId,
+          toolName: call.name,
+        });
         const finalOutput = truncated.content;
         // PostToolUse：工具执行完成（含标记失败的结果），供观测；带执行耗时
         await this.safeEmit({

@@ -43,6 +43,22 @@ describe("spillOutput（工具输出超限落盘）", () => {
     expect(result.content.length).toBeLessThan(full.length);
   });
 
+  it("文件名编入会话 id 与工具名（产出方可回溯），非法字符归一", () => {
+    const full = "y".repeat(100);
+    const result = spillOutput(full, 10, outDir, { sessionId: "550e8400-e29b-41d4-a716-446655440000", toolName: "mcp__srv__search" });
+    expect(result.outputPath).toBeDefined();
+    const name = path.basename(result.outputPath!);
+    expect(name).toContain("550e8400-e29b-41d4-a716-446655440000");
+    expect(name).toContain("mcp__srv__search");
+    expect(readFileSync(result.outputPath!, "utf8")).toBe(full);
+  });
+
+  it("不带归属信息时保持 tool-<毫秒>-<随机> 命名（向后兼容）", () => {
+    const result = spillOutput("z".repeat(100), 10, outDir);
+    const name = path.basename(result.outputPath!);
+    expect(name).toMatch(/^tool-\d+-[0-9a-f]{8}\.txt$/);
+  });
+
   it("落盘失败（输出目录被文件占位）：退化为纯截断标记", () => {
     // 用同名文件占位输出目录路径，使 mkdirSync 抛错 → 退化为截断
     const blocked = path.join(dir, "blocked");

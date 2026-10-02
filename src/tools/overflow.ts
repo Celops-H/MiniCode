@@ -19,24 +19,39 @@ export interface SpillResult {
   outputPath?: string;
 }
 
+/** 落盘文件名的归属信息：输出目录跨会话共享，名字里编入会话与工具才回溯得了产出方 */
+export interface SpillMeta {
+  sessionId?: string;
+  toolName?: string;
+}
+
+/** 文件名安全化：替换路径分隔符等非法字符（会话 id 与工具名本身可信，防御性归一） */
+function safeNamePart(part: string): string {
+  return part.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
 /**
  * 输出超限落盘：未超限原样返回；超限时完整内容写盘，回灌预览与路径。
  * @param content 工具原始输出
  * @param maxChars 结果字符上限；undefined 或非有限数视为不截断
  * @param outputDir 落盘目录（不存在时创建）
+ * @param meta 文件名归属（会话 id 与工具名，缺省时名字不带该段）
  * @returns 落盘结果（回灌文本、是否截断、原始长度、落盘路径）
  */
 export function spillOutput(
   content: string,
   maxChars: number | undefined,
   outputDir: string,
+  meta: SpillMeta = {},
 ): SpillResult {
   const truncated = truncateOutput(content, maxChars);
   if (!truncated.truncated) {
     return { content: truncated.content, truncated: false, originalLength: truncated.originalLength };
   }
   try {
-    const file = path.join(outputDir, `tool-${Date.now()}-${randomUUID().slice(0, 8)}.txt`);
+    const owner = meta.sessionId ? `-${safeNamePart(meta.sessionId)}` : "";
+    const tool = meta.toolName ? `-${safeNamePart(meta.toolName)}` : "";
+    const file = path.join(outputDir, `tool${tool}${owner}-${Date.now()}-${randomUUID().slice(0, 8)}.txt`);
     mkdirSync(outputDir, { recursive: true, mode: 0o700 });
     writeFileSync(file, content, { mode: 0o600, encoding: "utf8" });
     return {
