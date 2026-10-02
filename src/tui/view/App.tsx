@@ -57,10 +57,14 @@ export function App(props: AppProps): JSX.Element {
   // 判定必须包 createMemo：组件体常量只在挂载时求值一次、不建立订阅（store 更新后不重算），
   // 曾致全屏化完全不生效（审查 S-1，同 AgentStrip「组件体 if return null 不刷新」同型坑）
   const fullscreen = createMemo(() => props.state.modal?.kind === "session");
-  // 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills 面板不与输入框并存
+  // 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills、/settings 面板不与输入框并存
   //（/session 已整页全屏；权限确认与 /connect 输入流程保留输入框）
   const panelOpen = createMemo(
-    () => props.state.modal?.kind === "model" || props.state.modal?.kind === "mcp" || props.state.modal?.kind === "skill",
+    () =>
+      props.state.modal?.kind === "model" ||
+      props.state.modal?.kind === "mcp" ||
+      props.state.modal?.kind === "skill" ||
+      props.state.modal?.kind === "settings",
   );
 
   // 秒级时钟（P12）：agent 条完成条目的「10s 消失」由时间驱动，老化出树后 store 没有新通知，
@@ -102,7 +106,7 @@ export function App(props: AppProps): JSX.Element {
       <Show when={!fullscreen() && !panelOpen() && props.state.queue.length > 0}>
         <QueueStrip items={props.state.queue} />
       </Show>
-      {/* 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills 面板不与输入框并存 */}
+      {/* 面板打开时输入框隐藏让位（E29）：/model、/mcp、/skills、/settings 面板不与输入框并存 */}
       <Show when={!fullscreen() && !panelOpen()}>
         <PromptView
           prompt={props.state.prompt}

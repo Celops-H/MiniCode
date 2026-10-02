@@ -186,13 +186,13 @@ export interface ModelModalState {
  *  Enter 应用——按「写回定义层」规则写配置并重装配，当前会话立即生效（BACKEND §19/§20 回写规则）。
  *  拆成两个单字面量 kind 变体（与各弹窗一致）：联合判别字段在 TS 取反分支不收窄，会污染 session 分支。 */
 export interface ExtensionModalRow {
-  /** mcp=服务名 / skill=技能名（回写定位键） */
+  /** 回写定位键：mcp=服务名 / skill=技能名 / settings=配置定位键（如 compact.enabled） */
   id: string;
   label: string;
-  /** 副列：mcp=连接状态，skill=描述 */
+  /** 副列：mcp=连接状态，skill=描述，settings=功能说明 */
   detail: string;
   enabled: boolean;
-  /** skill 行来源层（回写落层用）；mcp 行不带 */
+  /** skill 行来源层（回写落层用）；mcp 与 settings 行不带 */
   source?: "project" | "user";
 }
 
@@ -204,6 +204,14 @@ export interface McpModalState {
 
 export interface SkillModalState {
   kind: "skill";
+  rows: ExtensionModalRow[];
+  selected: number;
+}
+
+/** /settings 设置面板（E115）：功能开关集中查看与切换，交互同扩展面板（行选择 + ←→ 切换 +
+ *  Enter 应用写回定义层 + 重装配生效） */
+export interface SettingsModalState {
+  kind: "settings";
   rows: ExtensionModalRow[];
   selected: number;
 }
@@ -235,7 +243,7 @@ export function thinkingLevelLabel(level: ThinkingLevel | undefined): string {
   return level ?? "默认";
 }
 
-/** 嵌入弹层：权限确认 / 会话切换 / /connect 选供应商与输 key / /model 选模型 / /mcp 与 /skill 扩展面板 */
+/** 嵌入弹层：权限确认 / 会话切换 / /connect 选供应商与输 key / /model 选模型 / /mcp 与 /skill 扩展面板 / /settings 设置面板 */
 export type ModalState =
   | PermissionModalState
   | SessionModalState
@@ -243,7 +251,8 @@ export type ModalState =
   | ConnectKeyModalState
   | ModelModalState
   | McpModalState
-  | SkillModalState;
+  | SkillModalState
+  | SettingsModalState;
 
 /** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
@@ -253,7 +262,7 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/skills"] as const;
+export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/settings", "/skills"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
 export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];

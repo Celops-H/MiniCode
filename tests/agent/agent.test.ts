@@ -893,6 +893,55 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages().at(-1)).toMatchObject({ role: "assistant" });
   });
 
+  it("autoCompact=false：撞线不自动压缩，/compact 手动路径照常可用（E115 解耦）", async () => {
+    // 摘要调用（tools 为空）返回摘要文本；正常调用返回普通文本
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "手动压缩摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const longHistory: Message[] = Array.from({ length: 20 }, (_, i) =>
+      userMessage(`消息${i} `.repeat(50)),
+    );
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: longHistory,
+      tools: [{
+        name: "echo",
+        description: "回显",
+        inputSchema: z.object({}),
+        isReadOnly: false,
+        maxResultSizeChars: 1000,
+        execute: () => "回显",
+      }],
+      // 窗口极小必然撞线，但自动压缩关闭
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      autoCompact: false,
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+    // 撞线未触发自动压缩：历史原样保留（无摘要消息）
+    expect(agent.getMessages().some((m) => typeof m.content === "string" && m.content.includes("【会话摘要】"))).toBe(false);
+
+    // 手动压缩不受开关影响：压缩配置照常提供给手动路径
+    expect(await agent.compactNow()).toBe(true);
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("【会话摘要】"),
+    });
+  });
+
   it("compactNow：带压缩指导时跳过记忆替代走现场摘要，指导入摘要提示词末尾（DESIGN 9.8）", async () => {
     const isMemoryRequest = (context: Context): boolean =>
       context.messages.some(

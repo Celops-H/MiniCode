@@ -330,9 +330,10 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
   );
 }
 
-/** /mcp 与 /skills 扩展面板（UI-SPEC §8b）：行 = ✓/✕ 开关（绿/红，E21）+ ▸/空格 标记 + 名称 + 详情；
+/** /mcp /skills /settings 面板（UI-SPEC §8b；/settings 设置面板同交互模式，E115）：
+ *  行 = ✓/✕ 开关（绿/红，E21）+ ▸/空格 标记 + 名称 + 详情；
  *  E23/E28：去线框走 PanelFrame——条目白、选中正绿、提示灰；空列表显示占位行 */
-function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "skill" }> }): JSX.Element {
+function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "skill" | "settings" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
   const view = createMemo(() => {
@@ -347,7 +348,11 @@ function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "sk
     if (total === 0) {
       items.push(
         <text fg={theme.textMuted}>
-          {b.kind === "mcp" ? "无已配置 MCP 服务（配置 mcpServers 后重开会话）" : "无可用技能（.minicode/skills/ 目录）"}
+          {b.kind === "mcp"
+            ? "无已配置 MCP 服务（配置 mcpServers 后重开会话）"
+            : b.kind === "skill"
+              ? "无可用技能（.minicode/skills/ 目录）"
+              : "无可用设置项"}
         </text>,
       );
     } else {
@@ -390,5 +395,6 @@ export function ModalView(props: { modal: ModalState }): JSX.Element {
   if (props.modal.kind === "model") return <ModelModal modal={props.modal} />;
   if (props.modal.kind === "mcp") return <ExtensionsModal modal={props.modal} />;
   if (props.modal.kind === "skill") return <ExtensionsModal modal={props.modal} />;
+  if (props.modal.kind === "settings") return <ExtensionsModal modal={props.modal} />;
   return <SessionModal modal={props.modal} />;
 }

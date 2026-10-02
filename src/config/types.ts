@@ -125,6 +125,9 @@ export const configSchema = z
   /** 上下文压缩配置：撞线自动压缩 + /compact 手动压缩；未配置则压缩不启用 */
   compact: z
     .object({
+      /** 撞线自动压缩开关（E115，缺省开）：false 仅关掉撞线自动触发，压缩配置照常提供给
+       *  /compact 手动路径（开关与压缩配置的有无解耦，手动压缩不受限） */
+      enabled: z.boolean().optional(),
       /** 模型上下文窗口 token；缺省用模型定义值，模型也没有则默认 128000 */
       contextWindow: z.number().optional(),
       /** 保留给模型回复输出的 token，默认 8192 */
@@ -140,6 +143,12 @@ export const configSchema = z
   mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
   /** Skill 技能配置（BACKEND §20）：disabled 关闭名单，全局/项目两层取并集 */
   skills: skillsConfigSchema.optional(),
+  /** 多 Agent 协作开关（缺省开，语义对齐 --no-agents 旗标）：false 时单 agent 会话，协作工具不注册 */
+  agents: z.boolean().optional(),
+  /** 子 agent git worktree 隔离开关（缺省开）：作为派生时隔离参数的默认值，派生方可按任务性质逐次选择 */
+  worktrees: z.boolean().optional(),
+  /** 会话记忆开关（缺省关）：开启后每轮后台增量维护记忆文本，压缩时用记忆替代现场摘要 */
+  memory: z.boolean().optional(),
   /** 调试开关（诊断用，E68）：默认全关，零行为影响 */
   debug: debugConfigSchema.optional(),
   /** 可观测性（OBSERVABILITY §7）：运行轨迹落盘开关与目录；缺省开启 */

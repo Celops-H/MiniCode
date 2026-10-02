@@ -85,6 +85,9 @@ export interface AgentOptions {
   maxTurns?: number;
   /** 上下文压缩配置；不传则不做撞线压缩 */
   compactConfig?: CompactConfig;
+  /** 撞线自动压缩开关（E115，缺省开）：false 仅关掉撞线自动触发；压缩配置仍供
+   *  /compact 手动路径使用（开关与配置有无解耦，手动压缩不受限） */
+  autoCompact?: boolean;
   /** 权限管线；不传则工具执行前不做权限检查（DESIGN 8 权限审批） */
   permission?: PermissionPipeline;
   /** Hook 事件总线；不传则不触发 Hook 事件（DESIGN 13） */
@@ -124,6 +127,8 @@ export class Agent {
   private readonly subagentPromptSections: string[];
   private readonly registry: ToolRegistry;
   private readonly compactConfig?: CompactConfig;
+  /** 撞线自动压缩开关（E115）：false 时 maybeCompact 不触发，手动 compactNow 不受影响 */
+  private readonly autoCompact: boolean;
   private readonly permission?: PermissionPipeline;
   private readonly hooks?: HookBus;
   /** 本 agent 的文件状态快照（DESIGN 7.6）：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
@@ -180,6 +185,7 @@ export class Agent {
     this.toolTimeoutMs = options.toolTimeoutMs ?? TOOL_READONLY_TIMEOUT_MS;
     this.subagentPromptSections = options.subagentPromptSections ?? [];
     this.compactConfig = options.compactConfig;
+    this.autoCompact = options.autoCompact ?? true;
     this.permission = options.permission;
     this.hooks = options.hooks;
     this.outputDir = options.outputDir ?? resolveOutputsDir();
@@ -661,7 +667,7 @@ export class Agent {
    * 摘要压缩失败后置位停止后续尝试（DESIGN 9.5 失败保护）。
    */
   private async maybeCompact(): Promise<void> {
-    if (!this.compactConfig || this.compactDisabled) return;
+    if (!this.compactConfig || !this.autoCompact || this.compactDisabled) return;
     if (!needsCompact(this.estimateContextTokens(), this.compactConfig)) return;
     await this.doCompact("auto");
   }

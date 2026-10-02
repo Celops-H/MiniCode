@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { assembleSessionExtensions } from "../../src/bootstrap/assemble.js";
+import { assembleSessionExtensions, resolveAgentsEnabled } from "../../src/bootstrap/assemble.js";
 import { writeFakeServer } from "../mcp/helpers.js";
 
 describe("assembleSessionExtensions（扩展生态装配）", () => {
@@ -76,5 +76,20 @@ describe("assembleSessionExtensions（扩展生态装配）", () => {
     expect(ext.tools).toEqual([]);
     expect(ext.mcpErrors).toHaveLength(1);
     expect(ext.mcpErrors[0]).toMatch(/^MCP 服务 bad 启动失败：/);
+  });
+});
+
+describe("resolveAgentsEnabled（多 Agent 协作生效判定，E115）", () => {
+  it("旗标与配置合取，任一显式关闭即单 agent；都未定义为开启", () => {
+    expect(resolveAgentsEnabled(undefined, undefined)).toBe(true);
+    expect(resolveAgentsEnabled(true, true)).toBe(true);
+    expect(resolveAgentsEnabled(true, undefined)).toBe(true);
+    expect(resolveAgentsEnabled(undefined, true)).toBe(true);
+    // CLI 旗标 --no-agents 关闭
+    expect(resolveAgentsEnabled(false, true)).toBe(false);
+    // config.agents=false 关闭
+    expect(resolveAgentsEnabled(true, false)).toBe(false);
+    expect(resolveAgentsEnabled(undefined, false)).toBe(false);
+    expect(resolveAgentsEnabled(false, false)).toBe(false);
   });
 });

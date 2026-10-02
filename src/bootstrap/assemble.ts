@@ -158,6 +158,11 @@ export function buildCompactConfig(
   };
 }
 
+/** 多 agent 协作生效判定：CLI 旗标（--no-agents）与 config.agents 合取，任一显式关闭即单 agent 会话 */
+export function resolveAgentsEnabled(flag: boolean | undefined, configAgents: boolean | undefined): boolean {
+  return flag !== false && configAgents !== false;
+}
+
 /**
  * 按 agents 开关组装会话 agent（DESIGN 11.4，默认开启）：
  * 开启时创建 Team 并注册 root、传入 agent（协作工具随 team 注册，模型可自主 spawn）；
@@ -171,6 +176,8 @@ export function createSessionAgent(options: {
   tools?: Tool[];
   initialMessages?: Message[];
   agents?: boolean;
+  /** 撞线自动压缩开关（E115，缺省开；透传给 Agent） */
+  autoCompact?: boolean;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;

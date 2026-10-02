@@ -18,6 +18,7 @@ import {
   buildHookBus,
   createFileLogger,
   createSessionAgent,
+  resolveAgentsEnabled,
   MINICODE_VERSION,
 } from "../bootstrap/assemble.js";
 import { attachRecorder, deleteTrace } from "../observability/index.js";
@@ -172,7 +173,9 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         models,
         config,
         session,
-        agents: options.agents ?? true,
+        // 多 Agent 协作生效判定（E115）：CLI 旗标（--no-agents）与 config.agents 合取；
+        // config 随 reconfigure 重读，协作开关改配置后重装配即生效
+        agents: resolveAgentsEnabled(options.agents, config.agents),
         thinkingLevelBox,
         permissionModeBox,
         startupConnect: startup.needsConnect && firstRound,
@@ -287,6 +290,9 @@ async function runTuiSession(opts: {
     safetyMargin: 4096,
     keepRecentToolResults: 5,
   };
+  // 撞线自动压缩开关（E115）：compactConfig 的有无只管压缩参数供给（手动 /compact 不受限），
+  // 自动触发由本开关单独门控（Agent.autoCompact）
+  const autoCompact = config.compact?.enabled !== false;
   // /init 过程免审批盒子（E24）：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
   const initPolicyBox: { value: boolean } = { value: false };
   const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
@@ -308,6 +314,8 @@ async function runTuiSession(opts: {
       mcpServers: config.mcpServers ?? {},
       getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
       skillsDisabled: config.skills?.disabled ?? [],
+      // 设置面板数据源（/settings，E115）：行启用态按合并配置生效值展示
+      config,
       startupNotices: [...(opts.modelWarnings ?? []), ...extensions.mcpErrors],
       startupConnect: opts.startupConnect,
       shared: opts.shared,
@@ -373,6 +381,7 @@ async function runTuiSession(opts: {
           agents,
           hooks,
           compactConfig,
+          autoCompact,
           // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
           subagentPromptSections: [instructionsSection, extensions.promptSection],
           // 思考等级活引用：/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）

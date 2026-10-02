@@ -136,8 +136,9 @@ export function diffExtensionRows(
   return rows.filter((r) => base.get(r.id) !== undefined && base.get(r.id) !== r.enabled);
 }
 
-/** 读 config 原始 JSON；文件不存在返回 {}，解析失败抛错（坏配置不该被静默重置） */
-async function readConfigRaw(file: string): Promise<Record<string, unknown>> {
+/** 读 config 原始 JSON；文件不存在返回 {}，解析失败抛错（坏配置不该被静默重置）。
+ *  导出供 /settings 面板复用（settings.ts 同一套写盘风格） */
+export async function readConfigRaw(file: string): Promise<Record<string, unknown>> {
   try {
     return JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
   } catch (err) {
@@ -146,8 +147,9 @@ async function readConfigRaw(file: string): Promise<Record<string, unknown>> {
   }
 }
 
-/** strict 校验后写回（沿用 connect.ts 写盘风格：缩进 2 + 尾换行）；校验失败不落盘 */
-async function writeConfigRaw(file: string, raw: Record<string, unknown>): Promise<void> {
+/** strict 校验后写回（沿用 connect.ts 写盘风格：缩进 2 + 尾换行）；校验失败不落盘。
+ *  导出供 /settings 面板复用（settings.ts 同一套写盘风格） */
+export async function writeConfigRaw(file: string, raw: Record<string, unknown>): Promise<void> {
   const validated = configSchema.parse(raw);
   // POSIX 权限同 connect.ts：目录 700 / 配置 600（配置含落盘 apiKey）；存量 644 写回前显式收紧
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });

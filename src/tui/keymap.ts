@@ -52,8 +52,8 @@ export interface KeymapContext {
   /** 输入弹层：slash 候选 / 权限或会话 modal（弹层时 Enter/↑↓/Tab 不落输入框） */
   popup?: "candidate" | "modal";
   /** 弹窗具体类型（/model 弹窗里 ←→ 用于思考等级；/connect key 弹窗里键入字符进 key 缓冲；
-   *  /mcp /skill 弹窗里 ←→ 切启用/关闭） */
-  modalKind?: "permission" | "session" | "connect" | "connect-key" | "model" | "mcp" | "skill";
+   *  /mcp /skill /settings 弹窗里 ←→ 切启用/关闭） */
+  modalKind?: "permission" | "session" | "connect" | "connect-key" | "model" | "mcp" | "skill" | "settings";
   /** 输入框是否为空（空时 ↑↓ 回溯历史；非空在框内移光标） */
   inputEmpty?: boolean;
   /** 是否正在浏览历史（已按 ↑ 载入条目后继续 ↑↓ 在历史间移动） */
@@ -148,9 +148,9 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
   }
 }
 
-/** modal 态（权限确认 / 会话面板 / /connect / /model / /mcp /skill）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
+/** modal 态（权限确认 / 会话面板 / /connect / /model / /mcp /skill /settings）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
  *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
- *  /mcp /skill 弹窗里 ←→ 切当前行启用/关闭（extensions-toggle）；
+ *  /mcp /skill /settings 弹窗里 ←→ 切当前行启用/关闭（extensions-toggle）；
  *  /connect key 弹窗里字符键输 API Key、Backspace 删、Enter 确认；
  *  Ctrl+D 保留退出；Ctrl+C 不产生动作（打断语义由 Esc 承担，应用内复制在 normal 态）。 */
 function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiAction {
@@ -216,7 +216,7 @@ function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiActio
         return { type: "noop" };
     }
   }
-  if (modalKind === "mcp" || modalKind === "skill") {
+  if (modalKind === "mcp" || modalKind === "skill" || modalKind === "settings") {
     switch (key.kind) {
       case "up":
       case "down":
