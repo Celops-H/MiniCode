@@ -94,6 +94,39 @@ describe("文件类内置工具", () => {
     expect(out).not.toContain("b.txt");
   });
 
+  it("grep glob 带目录段时归一为文件名匹配（不再对所有文件永不命中）", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "a.tsx"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "b.txt"), "匹配行 xyz");
+    // 旧实现按 basename 匹配带目录的模式，**/*.tsx 永不命中，与真空结果不可区分
+    const out = await tool("grep").execute({ pattern: "xyz", path: dir, glob: "**/*.tsx" });
+    expect(out).toContain("a.tsx");
+    expect(out).not.toContain("b.txt");
+  });
+
+  it("grep path 指向单个文件时直接搜该文件（不再当目录抛 ENOTDIR）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "single.txt");
+    writeFileSync(file, "目标行 here");
+    const out = await tool("grep").execute({ pattern: "目标行", path: file });
+    expect(out).toContain("single.txt");
+    expect(out).toContain("目标行 here");
+  });
+
+  it("grep path 不存在时返回可读提示（不抛 ENOENT 原始错误）", async () => {
+    const dir = setup();
+    const out = await tool("grep").execute({ pattern: "x", path: path.join(dir, "不存在目录") });
+    expect(out).toContain("搜索路径不存在");
+  });
+
+  it("grep 单文件路径同样应用 glob 过滤（显式路径 + glob 不匹配时静默为空，rg 同款语义）", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "目标行 here");
+    const out = await tool("grep").execute({ pattern: "目标行", path: file, glob: "*.ts" });
+    expect(out).toContain("未找到匹配内容");
+  });
+
   it("grep 正则无效时返回可读错误不崩溃", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "a.txt"), "Hello world");

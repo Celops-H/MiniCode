@@ -1,4 +1,5 @@
-import { open, readdir, readFile } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { validateInput } from "../base.js";
@@ -10,16 +11,19 @@ const BINARY_SNIFF_BYTES = 8000;
 
 const schema = z.object({
   pattern: z.string(),
-  /** 搜索起始目录，默认当前工作目录 */
+  /** 搜索起始目录或单个文件，默认当前工作目录 */
   path: z.string().optional(),
-  /** 文件名过滤，支持 * 通配符 */
+  /** 文件名过滤，支持 * 通配符；模式中的目录部分被忽略（只按文件名匹配） */
   glob: z.string().optional(),
 });
 
 /** 按正则搜索文件内容，返回 文件:行号:内容 的匹配列表 */
 export const grepTool: Tool = {
   name: "grep",
-  description: "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表",
+  description:
+    "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表。" +
+    "glob 参数只按文件名过滤（支持 * 通配符），模式里的目录部分（如 **/*.tsx 的目录段）会被忽略；" +
+    "path 可传目录或单个文件",
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
@@ -39,9 +43,31 @@ export const grepTool: Tool = {
     }
     const cwd = dir ? resolvePath(dir) : currentCwd();
     const results: string[] = [];
-    const { files, truncated } = await listTextFiles(cwd);
+    // path 指向文件时直接搜该文件（rg 同款语义）；不存在与无法访问分开提示
+    // （原实现把文件当目录 readdir，抛 ENOTDIR 原始错误）
+    let statResult: Stats | undefined;
+    let statError: NodeJS.ErrnoException | undefined;
+    try {
+      statResult = await stat(cwd);
+    } catch (err) {
+      statError = err as NodeJS.ErrnoException;
+    }
+    if (!statResult) {
+      if (statError?.code === "ENOENT") return `搜索路径不存在：${dir ?? cwd}`;
+      return `搜索路径无法访问：${dir ?? cwd}（${statError?.message ?? "未知错误"}）`;
+    }
+    let files: string[];
+    let truncated = false;
+    if (statResult.isFile()) {
+      files = [cwd];
+    } else {
+      ({ files, truncated } = await listTextFiles(cwd));
+    }
+    // glob 只按文件名匹配：带目录段的模式（如 **/*.tsx）归一为末段（*.tsx），
+    // 原实现带目录的模式对所有文件永不匹配，返回「未找到匹配内容」与真空结果不可区分
+    const nameGlob = fileGlob ? fileGlob.split(/[\\/]/).pop() : undefined;
     for (const file of files) {
-      if (fileGlob && !matchesGlob(path.basename(file), fileGlob)) continue;
+      if (nameGlob && !matchesGlob(path.basename(file), nameGlob)) continue;
       let content: string;
       try {
         // 二进制文件嗅探跳过：readFile("utf8") 对二进制不抛错，整读大体积二进制
