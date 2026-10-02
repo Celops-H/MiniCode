@@ -1421,9 +1421,9 @@ describe("maxTurns 耗尽收尾", () => {
     };
     // Stop 是 Hook 事件（TUI 靠它回空闲并驱动排队出队），经 HookBus 断言
     const hooks = new HookBus();
-    let stopFired = false;
-    hooks.on("Stop", () => {
-      stopFired = true;
+    const stopEvents: Array<{ reason?: string }> = [];
+    hooks.on("Stop", (e) => {
+      stopEvents.push({ reason: e.reason });
     });
     const agent = new Agent({
       modelClient: client,
@@ -1438,9 +1438,31 @@ describe("maxTurns 耗尽收尾", () => {
     for await (const e of agent.run()) {
       events.push(e);
     }
-    expect(stopFired).toBe(true);
-    // 事件流照常以 done(tool_calls) 结束，Stop 由 hook 通道补发
+    // 撞线收尾：Stop 带 max_turns 原因（与正常收尾可区分，可统计截断率）
+    expect(stopEvents).toHaveLength(1);
+    expect(stopEvents[0]!.reason).toBe("max_turns");
+    // 主 agent 合成显式截断提示消息入上下文（不再是「模型不说话」）
+    const messages = agent.getMessages();
+    expect(messages.at(-1)).toMatchObject({ role: "user", source: "system" });
+    expect(String(messages.at(-1)?.content)).toContain("轮次上限");
+    // 事件流照常以 done(tool_calls) 结束，截断收尾不产生额外流事件
     expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "tool_calls" });
+  });
+
+  it("conclusionText 只认最后一条 assistant 消息：全程无正文返回占位而非早期旧文本", () => {
+    const agent = new Agent({
+      modelClient: mockTextClient("x"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [
+        userMessage("任务"),
+        assistantMessage([{ type: "text", text: "第 1 轮开场白" }]),
+        assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+        toolResultMessage("c1", "read", "内容"),
+      ],
+    });
+    // 旧实现向前放宽会把「第 1 轮开场白」当结论回灌父 agent
+    expect(agent.conclusionText()).toBe("(子代理未产出结论)");
   });
 });
 

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent/agent.js";
 import { AgentPath } from "../../src/agent/agent-path.js";
 import { Team } from "../../src/agent/team.js";
+import { HookBus } from "../../src/hooks/index.js";
 import type { ModelClient } from "../../src/agent/agent.js";
+
+/** 毫秒睡眠（等子 agent 后台驱动收尾） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const mockTextClient: ModelClient = {
   async *stream() {
@@ -145,5 +151,64 @@ describe("Team（注册表与并发限制）", () => {
     expect(child.hasPendingMail()).toBe(true);
     team.clear();
     expect(child.hasPendingMail()).toBe(false);
+  });
+
+  it("子 agent 撞轮次上限：补一次禁用工具的收尾调用，结论回灌父不再是早期旧文本", async () => {
+    const toolAlwaysClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          // 收尾调用（不带工具）：产出文本结论
+          yield { type: "text_delta", text: "收尾结论：任务完成一半被截断" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        // 正常轮：永远调工具（撞 maxTurns 的典型形态）
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      },
+    };
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const stopReasons: Array<string | undefined> = [];
+    hooks.on("Stop", (e) => {
+      stopReasons.push(e.reason);
+    });
+
+    // 生命周期事件（AgentCompleted/Stop）由 Team 经构造注入的总线发射
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: toolAlwaysClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+      maxTurns: 1,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 收尾调用产出结论并回灌父（不再是占位或第 1 轮旧文本）
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.conclusion).toContain("收尾结论");
+    // 撞线收尾的 Stop 带 max_turns 原因
+    expect(stopReasons).toContain("max_turns");
+    // 子 agent 最后一条 assistant 是收尾结论
+    const messages = child.getMessages();
+    const lastAssistant = messages.findLast((m) => m.role === "assistant");
+    expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
   });
 });

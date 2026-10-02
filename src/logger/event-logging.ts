@@ -48,6 +48,12 @@ export function attachHookLogging(bus: HookBus, logger: Logger): () => void {
         : `失败${e.error ? `（${e.error}）` : ""}`;
       logger.info(`压缩${e.trigger === "auto" ? "（撞线自动）" : ""}${outcome}`);
     }),
+    bus.on("Stop", (e) => {
+      // 撞轮次上限的截断收尾：曾与正常收尾同形无法统计，warn 级可筛
+      if (e.reason === "max_turns") {
+        logger.warn(`agent ${e.agentPath} 达到单次任务轮次上限，本轮被截断`);
+      }
+    }),
     bus.on("PostToolUseFailure", (e) => {
       logger.info(`工具失败 ${e.toolName}：${e.error}`);
       // 参数全文只在 debug 级展开（隐私口径：info 不含工具参数全文）

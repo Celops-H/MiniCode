@@ -382,15 +382,13 @@ export class Agent {
           this.interruptController = new AbortController();
           continue;
         }
-        // 收件箱空且终态（本轮模型回复无工具调用 → stopped；或续跑预算耗尽 → 补发 Stop）
+        // 收件箱空且终态（本轮模型回复无工具调用 → stopped；或续跑预算耗尽 → 收尾截断）
         // → 会话结束；两者皆否则继续下一轮（工具循环续轮）
         if (this.stopped) return;
         if (this.turnCount >= this.maxTurns) {
           // maxTurns 耗尽收尾：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
           // 界面永远「运行中」、排队命令不 drain——与「回复无工具调用」分支真正同形
-          // （先置 stopped：唤醒路径的 runTurn 入口分支见 stopped 直接返回，不重复发 Stop）
-          this.stopped = true;
-          await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+          yield* this.finalizeMaxTurns();
           return;
         }
       }
@@ -427,6 +425,54 @@ export class Agent {
   }
 
   /**
+   * 撞轮次上限的收尾（resume 续跑预算耗尽与 runTurn 入口守卫共用）：
+   * 子 agent 补一次禁用工具的收尾模型调用产出结论——结论回灌父即终态，没有第二次机会，
+   * 全靠这次调用；主 agent（含单 agent 会话）合成显式截断提示消息入上下文，
+   * 用户看得到「为什么没了下文」。收尾后发带 max_turns 原因的 Stop，
+   * 与正常收尾可区分（截断率可统计，宿主据此发 warn 日志）。
+   */
+  private async *finalizeMaxTurns(): AsyncGenerator<StreamEvent> {
+    const isChild = this.team !== undefined && this.agentPath !== undefined && !this.agentPath.isRoot();
+    if (isChild) {
+      const startedAt = Date.now();
+      try {
+        // 收尾调用不带工具：模型只能产出文本结论（正常轮工具循环可能就是撞线主因）
+        const context = createContext(this.systemPrompt, this.messages, [], this.thinkingLevelRef?.());
+        const collected: StreamEvent[] = [];
+        for await (const event of withInterruptTimeout(
+          this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
+          this.interruptController.signal,
+          INTERRUPT_STREAM_TIMEOUT_MS,
+        )) {
+          if (this.interruptController.signal.aborted) break;
+          collected.push(event);
+          yield event;
+        }
+        const assistant = await assembleAssistantMessage(toAsyncIterable(collected));
+        assistant.meta = { ...assistant.meta, model: this.modelId };
+        await this.appendMessage(assistant);
+        await this.emitLlmCallEnd({ model: this.modelId, durationMs: Date.now() - startedAt });
+      } catch (err) {
+        // 收尾调用失败不抛：结论缺位时父收到占位说明（lastAssistantText 只认最后一条 assistant）
+        await this.emitLlmCallEnd({
+          model: this.modelId,
+          durationMs: Date.now() - startedAt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else {
+      await this.appendMessage(
+        userMessage(
+          `已连续执行 ${this.maxTurns} 轮工具调用，达到单次任务轮次上限，本轮到此为止。如需继续请再次发起或让我继续。`,
+          "system",
+        ),
+      );
+    }
+    this.stopped = true;
+    await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root", reason: "max_turns" });
+  }
+
+  /**
    * 执行单个 turn（多 Agent 协作的 turn 级调度单元）。
    * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
    * 无工具调用则置 Stop 结束，否则执行工具调用并回灌结果。
@@ -439,11 +485,8 @@ export class Agent {
     this.flushPendingRepairMirrors();
     if (this.stopped) return;
     if (this.turnCount >= this.maxTurns) {
-      // maxTurns 耗尽收尾：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
-      // 界面永远「运行中」、排队命令不 drain——契约约定 Stop 由主循环触发，这里与
-      // 「回复无工具调用」分支同形发射
-      this.stopped = true;
-      await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+      // maxTurns 耗尽收尾（与 resume 续跑预算耗尽共用，见 finalizeMaxTurns）
+      yield* this.finalizeMaxTurns();
       return;
     }
 
@@ -1304,17 +1347,19 @@ function repairOrphanToolCalls(messages: Message[]): Message[] {
  * @param messages 消息数组
  * @returns 文本结论；找不到时返回占位说明
  */
+/**
+ * 最后一条 assistant 消息的结论文本（completion watcher 回灌父 agent 用）。
+ * 只认最后一条 assistant 消息：向前放宽会把更早轮次的旧文本当结论
+ * （子 agent 全程无正文时把第 1 轮开场白当任务结论，父据此误判完成或重派）；
+ * 最后一条没有正文（只有 thinking/工具调用，或收尾调用失败）返回占位说明。
+ */
 function lastAssistantText(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i]!;
-    if (message.role !== "assistant") continue;
-    const text = message.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-    if (text.trim()) return text;
-  }
-  return "(子代理未产出结论)";
+  const last = messages.findLast((message) => message.role === "assistant");
+  const text = last
+    ?.content.filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+  return text && text.trim() ? text : "(子代理未产出结论)";
 }
 
 /**
