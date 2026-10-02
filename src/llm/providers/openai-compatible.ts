@@ -17,7 +17,7 @@ export interface ChatCompletionsClient {
   };
 }
 
-/** OpenAI 兼容 client 工厂：headers 为 provider 配置的附加请求头（E64，经 SDK defaultHeaders 透传） */
+/** OpenAI 兼容 client 工厂：headers 为 provider 配置的附加请求头（经 SDK defaultHeaders 透传） */
 export type ChatCompletionsClientFactory = (
   apiKey: string,
   baseUrl: string,
@@ -30,25 +30,25 @@ export interface OpenAICompatibleOptions {
   baseUrl: string;
   /** 存放 API key 的环境变量名 */
   apiKeyEnv: string;
-  /** 落盘 API key（配置 provider.apiKey，E33：与环境变量同权、env 优先） */
+  /** 落盘 API key（配置 provider.apiKey，与环境变量同权、env 优先） */
   apiKey?: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
   /** DeepSeek 等推理厂商：assistant 的 thinking 回传为 reasoning_content 字段（工具调用后必须，否则 400） */
   reasoningContent?: boolean;
-  /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系；且仅对 reasoning 模型随思考等级下发，E60） */
+  /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系；且仅对 reasoning 模型随思考等级下发） */
   reasoningEffort?: boolean;
-  /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope；仅对 reasoning 模型随思考等级发送，E60） */
+  /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope；仅对 reasoning 模型随思考等级发送） */
   enableThinking?: boolean;
-  /** 请求流式真实用量（stream_options.include_usage，E63；严格网关可能 400，按厂商能力位开关） */
+  /** 请求流式真实用量（stream_options.include_usage；严格网关可能 400，按厂商能力位开关） */
   includeUsage?: boolean;
-  /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头等，E64） */
+  /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头等） */
   headers?: Record<string, string>;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
-  /** 收尾宽限窗（ms，E47）：finish_reason 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
+  /** 收尾宽限窗（ms）：finish_reason 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
   streamTailGraceMs?: number;
-  /** E68 诊断开关（调试排查用）：记录流解析中未产出事件的被丢弃 chunk 样本，来自 config.debug.streamChunks */
+  /** 诊断开关（调试排查用）：记录流解析中未产出事件的被丢弃 chunk 样本，来自 config.debug.streamChunks */
   debugDroppedChunks?: boolean;
   /** 创建 client 的工厂（测试注入 mock） */
   createClient?: ChatCompletionsClientFactory;
@@ -124,8 +124,8 @@ export class OpenAICompatibleProvider implements Provider {
       if (userSignal.aborted) controller.abort();
       else userSignal.addEventListener("abort", forwardAbort, { once: true });
     }
-    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）；
-    // 模型定义随请求传给协议——思考类请求参数按模型能力位（reasoning）决定是否下发（E60）
+    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id；
+    // 模型定义随请求传给协议——思考类请求参数按模型能力位（reasoning）决定是否下发
     const info = this.modelList.find((m) => m.id === modelId);
     const vendorModelId = info?.vendorId ?? modelId;
     const request = this.protocol.buildRequest(context, info);
@@ -140,7 +140,7 @@ export class OpenAICompatibleProvider implements Provider {
       );
       // 空闲超时包在原始流外：厂商 ping、仅 role 的 chunk 等不产出事件的 chunk 也算活跃，
       // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出。
-      // 收尾宽限（E47）：finish_reason 已到即响应完整，个别厂商握着连接不发 [DONE]，
+      // 收尾宽限：finish_reason 已到即响应完整，个别厂商握着连接不发 [DONE]，
       // 宽限窗后正常关流（协议以 finish_reason 收 done），不再误报超时丢整轮
       yield* this.protocol.parseStream(
         withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort(), {
@@ -156,7 +156,7 @@ export class OpenAICompatibleProvider implements Provider {
   /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
   private getClient(): ChatCompletionsClient {
     if (!this.apiKey) {
-      // E59：文案带上具体环境变量名，用户可直接定位要配的变量
+      // 文案带上具体环境变量名，用户可直接定位要配的变量
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
     this.client ??= this.createClient(this.apiKey, this.baseUrl, this.headers);
@@ -165,7 +165,7 @@ export class OpenAICompatibleProvider implements Provider {
 }
 
 /**
- * finish_reason 判定（E47 收尾宽限）：首个 choice 带停止原因即响应逻辑完成
+ * finish_reason 判定（收尾宽限）：首个 choice 带停止原因即响应逻辑完成
  * （与协议 parseStream 的 firstChoice 同口径，只认第一个 choice）。
  * @param chunk 一个流式响应片段
  * @returns 是否携带 finish_reason
@@ -181,11 +181,11 @@ function openaiChunkFinished(chunk: unknown): boolean {
 
 /**
  * 默认用官方 OpenAI SDK 创建 client（带请求超时，防厂商请求挂起无限等待）。
- * maxRetries 显式为 0（E58）：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
+ * maxRetries 显式为 0：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
  * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址
- * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传，E64）
+ * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传）
  * @returns OpenAI 兼容 client
  */
 export function defaultCreateClient(

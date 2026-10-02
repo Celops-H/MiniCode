@@ -1,11 +1,11 @@
 /**
- * 嵌入弹块（R4 + 收尾打磨批 ⑪ + P6-3 弹窗观感修正 + 面板样式统一批 E20~E29）：权限确认 / 会话面板 / /connect / /model / /mcp / /skills。
+ * 嵌入弹块：权限确认 / 会话面板 / /connect / /model / /mcp / /skills。
  * state.modal 由 loop 的 approver（权限请求）与 /session、/connect、/model 命令写入；组件只读呈现。
- * 弹窗（权限确认、/connect）保留 rounded 框线；面板（/model、/mcp、/skills）去线框只留浅紫上界线
- * （E28），提示行固定面板最下一行、上方有分隔线（E23），配色统一——提示灰/条目白/选中正绿（E23），
- * 会话列表选中行同样正绿高亮（E25），扩展面板开关前置绿对勾/红叉（E21），/connect key 未输入显示
- * 灰色占位字、键入消失（E20）。
- * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）；面板打开时底部输入框隐藏让位（E29，App 层）。
+ * 弹窗（权限确认、/connect）保留 rounded 框线；面板（/model、/mcp、/skills）去线框只留浅紫上界线，
+ * 提示行固定面板最下一行、上方有分隔线，配色统一——提示灰/条目白/选中正绿，
+ * 会话列表选中行同样正绿高亮，扩展面板开关前置绿对勾/红叉，/connect key 未输入显示
+ * 灰色占位字、键入消失。
+ * 各弹窗固定宽度（超出高度窗口滚动，不随内容无限变高）；面板打开时底部输入框隐藏让位（App 层）。
  * 键位：权限三决策 1/2/3 或 ←→ 选择 Enter 确认 Esc 拒绝；会话列表 ↑↓ 选择 Enter 切换 Esc 取消。
  * 注意：选项行/光标这类「For 里随标量变化」的渲染不能用 <For>+条件（opentui reconciler 下不随
  * 非 each 依赖的标量刷新），改用 createMemo 直接读 selected 重算——高亮随 ←→ 移动。
@@ -18,15 +18,15 @@ import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
 import { theme } from "./theme.js";
 import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "./fit.js";
 
-/** 弹窗内层 box 固定宽度：终端宽 - 四周余量（C-2 固定大小，不随内容自适应抖动） */
+/** 弹窗内层 box 固定宽度：终端宽 - 四周余量（固定大小，不随内容自适应抖动） */
 function modalWidth(dims: { width?: number }): number {
   return Math.max(30, (dims.width ?? 80) - 6);
 }
 
 /**
- * 面板容器（E23/E28）：去线框只留浅紫上界线；内容区（窗口化行）限高，
+ * 面板容器：去线框只留浅紫上界线；内容区（窗口化行）限高，
  * 提示行固定面板最下一行、上方有分隔线，配色统一——提示灰、条目白、选中正绿。
- * 供 /model、/mcp、/skills 三块面板共用（E23 一致性）。
+ * 供 /model、/mcp、/skills 三块面板共用（样式一致性）。
  */
 function PanelFrame(props: {
   dims: { width?: number };
@@ -38,7 +38,7 @@ function PanelFrame(props: {
   hint: string;
 }): JSX.Element {
   const width = modalWidth(props.dims);
-  // 行级滚动条（E23）：可见行右侧一列轨道，滑块位置随窗口滚动；行高与内容行一一对齐
+  // 行级滚动条：可见行右侧一列轨道，滑块位置随窗口滚动；行高与内容行一一对齐
   const track: JSX.Element[] = [];
   if (props.scroll.total > props.scroll.visible) {
     const thumbPos = Math.floor(
@@ -106,12 +106,12 @@ function PermissionModal(props: { modal: Extract<ModalState, { kind: "permission
   );
 }
 
-/** 会话切换面板（P4-3 全屏化 + P5 C-3/4/5/6 + P6-4/5）：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
- *  四周留边距、标题与列表间空行分隔；每会话两行——主行「标题 模型 哈希」三列各自定宽对齐（P6-5 会话名
- *  第一列、间距加大），副行缩进对齐标题列；条目间空行加大间距（C-5）；
- *  「新建会话」置顶固定为第一项并默认选中（P6-4），＋ 图标 + 选中浅蓝底黑字特殊化，不随会话滚动区滚出。
- *  当前活跃会话不在列表（loop 已过滤）；选中行操作态进入/删除 ←→ 切换（P4-2）。
- *  滚动：选中项落在页底、到本页最后一个再按 ↓ 才滚下一页（C-6）；滚动只作用于会话区。 */
+/** 会话切换面板：完全全屏页面（消息/输入/状态行隐藏，App 层条件渲染），
+ *  四周留边距、标题与列表间空行分隔；每会话两行——主行「标题 模型 哈希」三列各自定宽对齐（会话名
+ *  第一列、间距加大），副行缩进对齐标题列；条目间空行加大间距；
+ *  「新建会话」置顶固定为第一项并默认选中，＋ 图标 + 选中浅蓝底黑字特殊化，不随会话滚动区滚出。
+ *  当前活跃会话不在列表（loop 已过滤）；选中行操作态进入/删除 ←→ 切换。
+ *  滚动：选中项落在页底、到本页最后一个再按 ↓ 才滚下一页；滚动只作用于会话区。 */
 function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
@@ -123,20 +123,20 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     // 每条占 3 行：主行 + 副行 + 条目间空行
     const perRow = 3;
     const sessRows = Math.max(1, Math.min(total, Math.floor(avail / perRow)));
-    // 会话区选中索引：selected 0=新建会话、1..n=会话（P6-4 新建置顶）；-1 表示无会话行被选中。
-    // 不做下限截断：截到 0 会让第一个普通会话在「新建会话选中」时也带 ▸（P3）
+    // 会话区选中索引：selected 0=新建会话、1..n=会话（新建置顶）；-1 表示无会话行被选中。
+    // 不做下限截断：截到 0 会让第一个普通会话在「新建会话选中」时也带 ▸
     const selIndex = b.selected - 1;
-    // 滚动（C-6）：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）；
+    // 滚动：选中项落在页底，到页底再按 ↓ 才滚下一页（start 随 selected 越界才增）；
     // selIndex 为 -1 时两个 min/max 结果都落回 0，滚动停在列表头
     const start = Math.max(0, Math.min(selIndex - (sessRows - 1), total - sessRows));
     const visible = b.sessions.slice(start, start + sessRows);
-    // 三列（P6-5）：标题第一列、模型第二列、哈希第三列；列宽按可见内容取最大（截断上限防顶开），列间距 GAP
+    // 三列：标题第一列、模型第二列、哈希第三列；列宽按可见内容取最大（截断上限防顶开），列间距 GAP
     const titleCols = Math.min(26, Math.max(4, ...visible.map((s) => colWidth(s.title || "新会话"))));
     const modelCols = Math.min(18, Math.max(4, ...visible.map((s) => colWidth(s.model))));
     const idCols = 6;
     const GAP = 6;
     const items: JSX.Element[] = [];
-    // 新建会话固定顶部（P6-4）：不随会话滚动区滚出、无删除操作态；选中=浅蓝底黑字（与普通会话白字+操作态区分）。
+    // 新建会话固定顶部：不随会话滚动区滚出、无删除操作态；选中=浅蓝底黑字（与普通会话白字+操作态区分）。
     // 缩进一律用字面空格——opentui 的 text 元素水平 padding 无效（实测 captureCharFrame 无位移），
     // 只有 box 生效；行首两格与下面会话行的「▸ / 空格」标记位对齐
     const newSel = b.selected === 0;
@@ -152,7 +152,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     visible.forEach((s, i) => {
       const sel = start + i === selIndex;
       const title = padCols(fitWidth(s.title || "新会话", titleCols), titleCols);
-      // 模型列同样补齐定宽：哈希列（第三列）不随各会话模型宽度错位（S-1 审查修正）
+      // 模型列同样补齐定宽：哈希列（第三列）不随各会话模型宽度错位
       const model = padCols(fitWidth(s.model, modelCols), modelCols);
       const idCell = padCols(s.id.slice(0, idCols), idCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
@@ -162,7 +162,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
             {`${sel ? "▸ " : "  "}${title}${" ".repeat(GAP)}${model}${" ".repeat(GAP)}${idCell}${actionTag}`}
           </text>
           {/* 副行缩进对齐第一列标题文字：外层 paddingX 2 + 字面空格 2 = 第 4 列，
-              与主行「▸/空格标记 + 标题」的标题起始列一致（P4，text 的 paddingLeft 在 opentui 无效） */}
+              与主行「▸/空格标记 + 标题」的标题起始列一致（text 的 paddingLeft 在 opentui 无效） */}
           <text fg={theme.textMuted}>
             {`  ${relativeTime(s.updatedAt)} · ${formatBytes(s.sizeBytes)}`}
           </text>
@@ -206,7 +206,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
   const rows = createMemo(() => {
     // key 输入阶段
     if (b.kind === "connect-key") {
-      // E20：未输入显示背景字（灰），键入即消失——占位文本与实际输入同位置不同色
+      // 未输入显示背景字（灰），键入即消失——占位文本与实际输入同位置不同色
       const display = b.key ? (b.key.length <= 24 ? b.key : `…${b.key.slice(-12)}`) : "（未输入）";
       return [
         <text paddingY={1} fg={theme.textMuted}>
@@ -217,7 +217,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
         </text>,
         <text fg={b.key ? theme.text : theme.textMuted}>
           {display}
-          {/* 竖线光标（P4-5）：key 输入位置细竖线指示，明灭闪烁 */}
+          {/* 竖线光标：key 输入位置细竖线指示，明灭闪烁 */}
           <span style={{ fg: cursorOn() ? theme.text : theme.background }}>│</span>
         </text>,
         <text fg={theme.textMuted} paddingY={1}>
@@ -234,8 +234,8 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
       <text paddingY={1} fg={theme.textMuted}>
         连接供应商
       </text>,
-      // 供应商名只显名称、不附默认模型（C-7=62）；选中项浅蓝背景块黑字（P6 审查修正：
-      // 此前只有 ▸ 无背景块，与权限/新建会话的选中观感不一致——用户要求统一）
+      // 供应商名只显名称、不附默认模型；选中项浅蓝背景块黑字（
+      // 此前只有 ▸ 无背景块，与权限/新建会话的选中观感不一致）
       ...b.providers.slice(start, start + visible).map((p, i) =>
         start + i === b.selected ? (
           <text paddingTop={1}>
@@ -270,7 +270,7 @@ function ConnectFlowModal(props: { modal: ConnectPickModalState | ConnectKeyModa
 
 /** /model 模型选择：按厂商分组（● 厂商名 组头 + 缩进模型行，组头不可选中、模型行与厂商名不对齐）
  *  + 思考等级行（←→ 调）；窗口渲染防超页（选中模型居中滚动、越界贴边）。
- *  E23/E28：去线框走 PanelFrame——浅紫上界线、提示固定最下一行带分隔、配色条目白/选中正绿/提示灰 */
+ *  去线框走 PanelFrame——浅紫上界线、提示固定最下一行带分隔、配色条目白/选中正绿/提示灰 */
 function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
@@ -293,7 +293,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const visible = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), total - visible));
     const windowed = display.slice(start, start + visible);
-    // 配色统一（E23）：条目白、选中正绿（success + ▸），组头/提示灰
+    // 配色统一：条目白、选中正绿（success + ▸），组头/提示灰
     const items = windowed.map((d) =>
       d.kind === "group" ? (
         <text fg={theme.textMuted}>
@@ -330,9 +330,9 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
   );
 }
 
-/** /mcp /skills /settings 面板（UI-SPEC §8b；/settings 设置面板同交互模式，E115）：
- *  行 = ✓/✕ 开关（绿/红，E21）+ ▸/空格 标记 + 名称 + 详情；
- *  E23/E28：去线框走 PanelFrame——条目白、选中正绿、提示灰；空列表显示占位行 */
+/** /mcp /skills /settings 面板（/settings 设置面板同交互模式）：
+ *  行 = ✓/✕ 开关（绿/红）+ ▸/空格 标记 + 名称 + 详情；
+ *  去线框走 PanelFrame——条目白、选中正绿、提示灰；空列表显示占位行 */
 function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "skill" | "settings" }> }): JSX.Element {
   const b = props.modal;
   const dims = useTerminalDimensions();
@@ -358,7 +358,7 @@ function ExtensionsModal(props: { modal: Extract<ModalState, { kind: "mcp" | "sk
     } else {
       for (let i = start; i < Math.min(start + visible, total); i++) {
         const row = b.rows[i]!;
-        // 开关前置为条目首字符：✓ 绿=启用、✕ 红=关闭（E21），替代原「启用/关闭」文字
+        // 开关前置为条目首字符：✓ 绿=启用、✕ 红=关闭，替代原「启用/关闭」文字
         const toggle = row.enabled ? (
           <span style={{ fg: theme.success }}>✓ </span>
         ) : (

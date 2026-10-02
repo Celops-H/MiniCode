@@ -111,7 +111,7 @@ describe("协作工具集（多 agent 环境）", () => {
     ).toBe(true);
   });
 
-  it("子 agent 提示词注入（E12+E14）：装配段（指令/技能）与环境段随派生注入子 agent", async () => {
+  it("子 agent 提示词注入：装配段（指令/技能）与环境段随派生注入子 agent", async () => {
     const team = new Team();
     const childPrompts: string[] = [];
     const root = new Agent({
@@ -162,7 +162,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(childPrompt.indexOf("【可用技能】")).toBeLessThan(childPrompt.indexOf("当前环境"));
   });
 
-  it("装配段随派生链传递（E12+E14）：孙 agent 的提示词同样注入", async () => {
+  it("装配段随派生链传递：孙 agent 的提示词同样注入", async () => {
     const team = new Team();
     const childPrompts: string[] = [];
     const root = new Agent({
@@ -799,7 +799,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(worker.isInterrupted()).toBe(true);
   });
 
-  it("interrupt 后复活：新一轮驱动复位中断状态，完成结论正常回灌父（review 修复：原实现不复位导致结论被吞）", async () => {
+  it("interrupt 后复活：新一轮驱动复位中断状态，完成结论正常回灌父（原实现不复位导致结论被吞）", async () => {
     const team = new Team();
     const root = new Agent({
       modelClient: toolThenTextClient("x", {}),
@@ -872,7 +872,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(final).toBeDefined();
   });
 
-  it("root 被后台驱动（子 agent 完成唤醒续跑）时事件经 onRootEvent 转发，迟到结论不被丢弃（review 修复）", async () => {
+  it("root 被后台驱动（子 agent 完成唤醒续跑）时事件经 onRootEvent 转发，迟到结论不被丢弃", async () => {
     const forwarded: string[] = [];
     const team = new Team({ onRootEvent: (event) => {
       if (event.type === "text_delta") forwarded.push(event.text);
@@ -911,7 +911,7 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(forwarded).toContain("汇总结论");
   });
 
-  it("子 agent 生命周期事件（此前确认）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
+  it("子 agent 生命周期事件（）：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
     const events: string[] = [];
     const hooks = new HookBus();
     hooks.on("AgentSpawned", (e) => {
@@ -951,14 +951,14 @@ describe("协作工具集（多 agent 环境）", () => {
     const completed = (await root.getMessages()).find((m) => m.role === "user" && m.source === "system");
     expect(String(completed?.content)).toContain("完成");
 
-    // followup 唤醒已完成 agent（P9）：后台驱动再次发 AgentSpawned——
+    // followup 唤醒已完成 agent：后台驱动再次发 AgentSpawned——
     // 宿主据此把已完成/中断的树条目重新置为运行态（否则唤醒后树仍停在旧状态）
     await team.sendMessage(path, { type: "NEW_TASK", from: AgentPath.root(), content: "再干一次", triggerTurn: true });
     await sleep(200);
     expect(events.filter((e) => e === "spawn:/root/worker")).toHaveLength(2);
     // 唤醒后完成结论再回灌父（同一 worker 二次生命周期完整走通）
     expect(events.filter((e) => e === "complete:/root/worker").length).toBeGreaterThanOrEqual(2);
-    // root 被唤醒（子完成回灌）不发 AgentSpawned（P9 负向：root 常驻、无派生语义）
+    // root 被唤醒（子完成回灌）不发 AgentSpawned（负向：root 常驻、无派生语义）
     expect(events.some((e) => e === "spawn:/root")).toBe(false);
 
     // 被中断的 agent：发 AgentInterrupted（而非 Completed）
@@ -1024,7 +1024,7 @@ const waitTool = collabTool(team, "wait_agent");
 });
 
 
-describe("子 agent 失败终态（E81）", () => {
+describe("子 agent 失败终态", () => {
   it("模型流失败：AgentCompleted 带 failed 标记，回灌明确失败文本而非半截结论", async () => {
     const completed: Array<{ conclusion: string; failed?: boolean }> = [];
     const hooks = new HookBus();

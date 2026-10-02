@@ -8,7 +8,7 @@
  * 厂商 API 错误事件（不抛异常）、流意外结束（不抛）、流中断异常
  * （yield error 后原样抛出供控制流处理，剥组重试等）。
  * done 携带 usage（真实 token 用量，厂商未给时缺省）：两协议解析各自格式后统一挂
- * done，assemble 回填 assistant meta.usage（E63）。
+ * done，assemble 回填 assistant meta.usage。
  * model_fallback 为观察事件：模型路由切换到备选时发出，供宿主提示用户（TUI toast）；
  * 发出时机有三——主模型流内失败切备选、轮开始主模型冷却中 select 直接落到备选、
  * 链上不可解析条目跳转（Models.stream）；不进内容组装（assemble 忽略），不参与轮产出判定。
@@ -16,7 +16,7 @@
  */
 import type { ModelUsage } from "./message.js";
 
-/** 模型链切换原因（可观测性 B1，OBSERVABILITY §4.3）：cooldown=轮开始主模型冷却中从备选起步；
+/** 模型链切换原因：cooldown=轮开始主模型冷却中从备选起步；
  *  unresolved=链上条目不可解析被跳过；error=调用失败切备选。定义在 core 供 hooks 侧 ModelFallback 事件复用 */
 export type ModelFallbackReason = "cooldown" | "unresolved" | "error";
 

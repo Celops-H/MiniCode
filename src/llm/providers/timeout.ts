@@ -1,17 +1,17 @@
 /** 请求超时（ms）：厂商慢/挂起时不再无限等待——超时抛错走路由切换或错误渲染；
  *  25s 覆盖正常模型首 token 延迟，不可达厂商（如 openai.com 在部分网络）快速判死路由，
- *  不再干等一分钟（用户对齐 2026-08-26） */
+ *  不再干等一分钟 */
 export const REQUEST_TIMEOUT_MS = 25_000;
 
 /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错（SDK timeout 不覆盖流式响应体读取） */
 export const STREAM_IDLE_TIMEOUT_MS = 30_000;
 
-/** 收尾宽限窗（ms，E47）：停止原因（finish_reason / stop_reason）已到即响应逻辑完整，
+/** 收尾宽限窗（ms）：停止原因（finish_reason / stop_reason）已到即响应逻辑完整，
  *  个别厂商此后握着连接不发结束帧也不关流——宽限窗内无新数据按正常收尾关流
  *  （协议以已收到的停止原因收 done），不再按超时报错丢整轮 */
 export const TAIL_GRACE_TIMEOUT_MS = 10_000;
 
-/** 收尾宽限配置（E47）：isTailChunk 判定「响应逻辑完成」的原始 chunk（各协议自行识别停止原因），
+/** 收尾宽限配置：isTailChunk 判定「响应逻辑完成」的原始 chunk（各协议自行识别停止原因），
  *  命中后空闲计时切换为 tailGraceMs，宽限窗耗尽按正常收尾关流而不是报超时 */
 export interface IdleTailOptions {
   isTailChunk: (chunk: unknown) => boolean;
@@ -27,7 +27,7 @@ type IdleRaceOutcome<T> = IteratorResult<T> | typeof TAIL_CLOSED;
  * 流空闲超时包装：底层流 N 秒无产出（厂商 SSE 静默挂起、网络中断但连接不关）时，
  * 触发 onIdle 中断底层请求并抛「模型响应超时」错误——SDK 的 timeout 只覆盖响应头，
  * 读流式 body 无超时，这里补上，防正常运行期无限挂起（真机「卡住不返回」根因）。
- * 收尾宽限（E47）：命中 tail.isTailChunk 的 chunk 之后响应已逻辑完成，空闲计时切换为
+ * 收尾宽限：命中 tail.isTailChunk 的 chunk 之后响应已逻辑完成，空闲计时切换为
  * tail.tailGraceMs；宽限耗尽同样触发 onIdle 释放底层挂连接，但按正常收尾关流（不抛错），
  * 协议层以已收到的停止原因收 done，整轮不丢。
  * 中断不碰用户 signal：用户打断语义（interrupt）由调用方处理，二者不互相污染。

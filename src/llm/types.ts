@@ -23,7 +23,7 @@ export interface ModelInfo {
   providerId: string;
   contextWindow?: number;
   maxTokens?: number;
-  /** 推理系列模型（支持思考输出）：思考类请求参数仅对推理系列模型下发（E60，来自 provider 配置） */
+  /** 推理系列模型（支持思考输出）：思考类请求参数仅对推理系列模型下发（来自 provider 配置） */
   reasoning?: boolean;
 }
 

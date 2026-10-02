@@ -16,14 +16,14 @@ export interface RecorderOptions {
   sessionsRoot: string;
   /** 轨迹目录；缺省 resolveTracesDir()（~/.minicode/traces） */
   dir?: string;
-  /** header.metadata（评测宿主注入任务身份等自由扩展字段，OBSERVABILITY §4.2）；交互场景省略 */
+  /** header.metadata（评测宿主注入任务身份等自由扩展字段）；交互场景省略 */
   metadata?: Record<string, unknown>;
   /** 攒批条数阈值（测试可注入小值观察落盘时机）；缺省 32 */
   batchSize?: number;
 }
 
 /**
- * 轨迹记录器（OBSERVABILITY §3.1）：hook 总线的普通订阅者，收到事件与消息即转成
+ * 轨迹记录器：hook 总线的普通订阅者，收到事件与消息即转成
  * 轨迹行。镜像全部 hook 事件——新增事件自动入轨迹，采集零维护（§11 取舍 5）。
  * agent 核心（core）只发事件，不知道本模块存在；core 与 observability 之间只有
  * 事件这一条关系。
@@ -99,7 +99,7 @@ export class Recorder {
       const { type, ...data } = event;
       this.writeEventLine(type, undefined, data);
     }
-    // 会话结束：冲刷收尾批次（OBSERVABILITY §4.4 冲刷触发点），等写完再返回
+    // 会话结束：冲刷收尾批次（冲刷触发点），等写完再返回
     if (event.type === "SessionEnd") await this.writer.flush();
     // 会话开始：惰性清理兜底，清掉会话文件已不存在的残留轨迹（后台进行不阻塞会话开始）
     if (event.type === "SessionStart") {

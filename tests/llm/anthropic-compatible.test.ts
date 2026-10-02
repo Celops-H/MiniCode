@@ -118,7 +118,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     }).rejects.toThrow("请设置环境变量 ZHIPU_API_KEY");
   });
 
-  it("headers 配置经工厂透传（defaultHeaders，E64）", async () => {
+  it("headers 配置经工厂透传（defaultHeaders）", async () => {
     const seen: Array<Record<string, string> | undefined> = [];
     const factory = (apiKey: string, baseUrl: string, headers?: Record<string, string>) => {
       seen.push(headers);
@@ -146,7 +146,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(seen[0]).toEqual({ "anthropic-beta": "interleaved-thinking" });
   });
 
-  it("requireThinkingSignature 端点带 tools 期间不发 thinking 参数（E61 廉价缓解）", async () => {
+  it("requireThinkingSignature 端点带 tools 期间不发 thinking 参数（廉价缓解）", async () => {
     let lastRequest: Record<string, unknown> | undefined;
     const client: AnthropicMessagesClient = {
       messages: {
@@ -182,7 +182,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(lastRequest!.thinking).toEqual({ type: "enabled", budget_tokens: 7168 });
   });
 
-  it("缺省（兼容端点）带 tools 也照发 thinking，工具循环思考不受影响（E61）", async () => {
+  it("缺省（兼容端点）带 tools 也照发 thinking，工具循环思考不受影响", async () => {
     let lastRequest: Record<string, unknown> | undefined;
     const client: AnthropicMessagesClient = {
       messages: {
@@ -217,7 +217,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
   });
 
-  it("默认 client 关闭 SDK 内置重试（E58：失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
+  it("默认 client 关闭 SDK 内置重试（失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
     const client = defaultAnthropicCreateClient("sk", "https://open.bigmodel.cn/api/anthropic") as unknown as {
       maxRetries: number;
     };
@@ -263,7 +263,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
-  it("stop_reason 后厂商握着连接不发 message_stop：宽限窗后正常收尾 done，不再误报超时（E47）", async () => {
+  it("stop_reason 后厂商握着连接不发 message_stop：宽限窗后正常收尾 done，不再误报超时", async () => {
     async function* tailHangingStream(signal?: AbortSignal): AsyncIterable<unknown> {
       yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
       yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } };
@@ -305,7 +305,7 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
-  it("思考等级随请求下发为 thinking 预算（E17）", async () => {
+  it("思考等级随请求下发为 thinking 预算", async () => {
     const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
     // 缺省 maxTokens 8192：high 基础预算 8192 被钳制到 maxTokens-1024=7168
     for await (const _ of provider.stream("claude-sonnet-4-5", createContext("s", [userMessage("q")], [], "high"))) {

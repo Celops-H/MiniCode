@@ -27,7 +27,7 @@ function spanFgOf(spans: { lines: Array<{ spans: Array<{ text: string; fg?: unkn
   return undefined;
 }
 
-it("用户消息带头部与文本；「你」标签与圆点为绿、模型标签为浅蓝（2026-08-28 用户定论）", async () => {
+it("用户消息带头部与文本；「你」标签与圆点为绿、模型标签为浅蓝", async () => {
   const setup = await app([
     { kind: "message", id: "u1", role: "user", text: "重构 partition 逻辑", time: "14:00:01", thinkingCollapsed: true },
     { kind: "message", id: "a1", role: "assistant", text: "好的", thinkingCollapsed: true },
@@ -36,7 +36,7 @@ it("用户消息带头部与文本；「你」标签与圆点为绿、模型标�
   const frame = setup.captureCharFrame();
   expect(frame).toContain("你");
   expect(frame).toContain("重构 partition 逻辑");
-  // 「你」标签绿（success #7fd88f）、模型标签浅蓝（modelColor #61afef），与 UI-SPEC §11 色板一致
+  // 「你」标签绿（success #7fd88f）、模型标签浅蓝（modelColor #61afef），与 主题色板一致
   expect(spanFgOf(setup.captureSpans(), "你")).toBe("#7fd88f");
   expect(spanFgOf(setup.captureSpans(), "test-model")).toBe("#61afef");
 });
@@ -325,7 +325,7 @@ it("圆点配色：你=绿、模型=蓝、工具/思考=灰、通知=红（2026-
   );
   await setup.waitForVisualIdle();
   const colors = dotColors(setup.captureSpans());
-  expect(colors[0]).toBe("#7fd88f"); // 你=绿（success，2026-08-28 用户定论：与模型蓝区分）
+  expect(colors[0]).toBe("#7fd88f"); // 你=绿（success，与模型蓝区分）
   expect(colors[1]).toBe("#61afef"); // 模型=蓝
   expect(colors[2]).toBe("#8f9096"); // 工具=灰
   expect(colors[3]).toBe("#e06c75"); // 通知=警示红（P4-5 色板：红色承担严重/警告语义）
@@ -342,7 +342,7 @@ it("助手消息头模型名蓝色（与圆点同色 modelColor）；用户侧�
   expect(textFg(spans, "你")).toBe("#7fd88f"); // 你=绿（success，与模型蓝区分）
 });
 
-it("思考/工具展开后内容保持灰色（与折叠提示同灰调，用户复核反馈）", async () => {
+it("思考/工具展开后内容保持灰色（与折叠提示同灰调）", async () => {
   const setup = await app([
     { kind: "message", id: "a1", role: "assistant", text: "结论", thinking: "这一步要核对分区逻辑…", thinkingCollapsed: false },
     { kind: "tool", index: 0, turn: 0, name: "read", args: "{}", status: "success", collapsedArgs: true, collapsedOutput: false, output: "export function a() {}" },
@@ -353,7 +353,7 @@ it("思考/工具展开后内容保持灰色（与折叠提示同灰调，用户
   expect(textFg(spans, "export function a() {}")).toBe("#8f9096"); // 工具输出展开=灰
 });
 
-it("思考块渲染在消息文本之前（思考在前、结论在后，用户复核反馈）", async () => {
+it("思考块渲染在消息文本之前（思考在前、结论在后）", async () => {
   const setup = await app([
     { kind: "message", id: "a1", role: "assistant", text: "先看结论", thinking: "思考步骤…", thinkingCollapsed: false },
   ]);

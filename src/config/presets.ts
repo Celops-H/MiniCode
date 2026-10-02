@@ -1,7 +1,7 @@
 /**
  * 厂商预设（种子模板）：CLI/TUI 同源共享——全局配置播种按这份列表写 providers，
  * /connect 弹窗按这份列表展示。key 不进预设：只写 baseUrl/apiKeyEnv（环境变量名），
- * key 由 /connect 写用户级全局配置的 provider apiKey 字段（E27，项目目录不落 .env）或用户自设环境变量。
+ * key 由 /connect 写用户级全局配置的 provider apiKey 字段（项目目录不落 .env）或用户自设环境变量。
  */
 
 /** 供应商预设：id 即 provider id，写入 config.providers；apiKeyEnv 是读取 key 的环境变量名（key 本体由 /connect 写用户级配置或用户自设环境变量） */
@@ -15,13 +15,13 @@ export interface ProviderPreset {
   protocol?: "openai-chat-completions" | "anthropic-messages";
   models: string[];
   defaultModel: string;
-  /** 厂商能力开关默认值（E60，语义见 config schema）：推理厂商 thinking 回传 reasoning_content */
+  /** 厂商能力开关默认值：推理厂商 thinking 回传 reasoning_content */
   reasoningContent?: boolean;
-  /** 厂商能力开关默认值（E60）：支持 reasoning_effort 请求参数（对 reasoning 模型下发） */
+  /** 厂商能力开关默认值：支持 reasoning_effort 请求参数（对 reasoning 模型下发） */
   reasoningEffort?: boolean;
-  /** 厂商能力开关默认值（E60）：需显式 enable_thinking 参数才开启思考（对 reasoning 模型发送） */
+  /** 厂商能力开关默认值：需显式 enable_thinking 参数才开启思考（对 reasoning 模型发送） */
   enableThinking?: boolean;
-  /** 厂商能力开关默认值（E63）：请求流式真实用量（stream_options.include_usage） */
+  /** 厂商能力开关默认值：请求流式真实用量（stream_options.include_usage） */
   includeUsage?: boolean;
   /** models 中属于推理系列（支持思考输出）的模型 id：写配置时对应模型标 reasoning: true */
   reasoningModels?: string[];
@@ -41,7 +41,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     apiKeyEnv: "OPENAI_API_KEY",
-    // 支持 reasoning_effort 的厂商（E60）：预设模型 gpt-4o 系非推理系列不带该参数，
+    // 支持 reasoning_effort 的厂商：预设模型 gpt-4o 系非推理系列不带该参数，
     // 用户加推理系列模型（reasoning: true）后思考等级经此参数下发
     reasoningEffort: true,
     includeUsage: true,
@@ -55,7 +55,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyEnv: "DEEPSEEK_API_KEY",
     // V4 起不再分对话/推理两条线：pro 旗舰（复杂分析与 Agent 任务）、flash 高速双模式；
     // 旧名 deepseek-chat/deepseek-reasoner 已于 2026-07-24 停用
-    // 推理厂商（E60）：thinking 必须以 reasoning_content 字段回传，否则工具轮 400
+    // 推理厂商：thinking 必须以 reasoning_content 字段回传，否则工具轮 400
     reasoningContent: true,
     includeUsage: true,
     reasoningModels: ["deepseek-v4-pro", "deepseek-v4-flash"],
@@ -86,7 +86,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     name: "通义千问（DashScope）",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     apiKeyEnv: "DASHSCOPE_API_KEY",
-    // DashScope 需显式 enable_thinking 才开启思考（E60）：随思考等级对 reasoning 模型发送，
+    // DashScope 需显式 enable_thinking 才开启思考：随思考等级对 reasoning 模型发送，
     // 不发送则思考等级静默无效
     enableThinking: true,
     includeUsage: true,

@@ -21,7 +21,7 @@ function modelInfo(reasoning?: boolean): { id: string; name: string; api: "opena
 }
 
 describe("buildRequest：消息与工具转换", () => {
-  it("emitReasoningEffort 开关 + 推理系列模型 + thinkingLevel → 带 reasoning_effort，否则不带（E60）", () => {
+  it("emitReasoningEffort 开关 + 推理系列模型 + thinkingLevel → 带 reasoning_effort，否则不带", () => {
     const effProtocol = new OpenAICompletionsProtocol({ emitReasoningEffort: true });
     const withEff = effProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "medium"), modelInfo(true)) as { reasoning_effort?: string };
     expect(withEff.reasoning_effort).toBe("medium");
@@ -39,7 +39,7 @@ describe("buildRequest：消息与工具转换", () => {
     expect(notEmit.reasoning_effort).toBeUndefined();
   });
 
-  it("enableThinking 开关 + 推理系列模型 + thinkingLevel → 带 enable_thinking: true，否则不带（E60）", () => {
+  it("enableThinking 开关 + 推理系列模型 + thinkingLevel → 带 enable_thinking: true，否则不带", () => {
     const dashscopeProtocol = new OpenAICompletionsProtocol({ enableThinking: true });
     const withParam = dashscopeProtocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
     expect(withParam.enable_thinking).toBe(true);
@@ -53,7 +53,7 @@ describe("buildRequest：消息与工具转换", () => {
     const notEnabled = protocol.buildRequest(createContext("s", [userMessage("hi")], [], "high"), modelInfo(true)) as { enable_thinking?: boolean };
     expect(notEnabled.enable_thinking).toBeUndefined();
   });
-  it("includeUsage 开关决定请求体是否带 stream_options.include_usage（E63 能力位）", () => {
+  it("includeUsage 开关决定请求体是否带 stream_options.include_usage（能力位）", () => {
     // 缺省（未开能力位）：不带该参数——严格网关对未知参数 400 且不可切换
     const req = protocol.buildRequest(createContext("s", [userMessage("hi")])) as { stream_options?: { include_usage?: boolean } };
     expect(req.stream_options).toBeUndefined();
@@ -235,7 +235,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("content 块数组全无文本：不产 text_delta（不空发，审查补）", async () => {
+  it("content 块数组全无文本：不产 text_delta（不空发）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -433,7 +433,7 @@ describe("parseStream：SSE → 统一事件", () => {
   });
 });
 
-describe("parseStream：E16 五类现象", () => {
+describe("parseStream：五类现象", () => {
   it("content 块数组里的思考块路由进思考管道（glm 思考+正文根因）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -569,7 +569,7 @@ describe("parseStream：E16 五类现象", () => {
   });
 });
 
-describe("parseStream：E56 流内 error 载荷", () => {
+describe("parseStream：流内 error 载荷", () => {
   it("HTTP 200 SSE 里无 choices、带 error 对象的 chunk：解析出真实原因转 error 事件", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -597,7 +597,7 @@ describe("parseStream：E56 流内 error 载荷", () => {
     expect(events).toEqual([{ type: "error", message: '{"code":1302}' }]);
   });
 
-  it("error 载荷为退化形态（false/空对象）：占位噪声不当真实错误，维持静默跳过（E56 review 补）", async () => {
+  it("error 载荷为退化形态（false/空对象）：占位噪声不当真实错误，维持静默跳过", async () => {
     for (const degenerate of [false, {}, 0]) {
       const events: StreamEvent[] = [];
       for await (const e of protocol.parseStream(chunkGen({ error: degenerate }))) {
@@ -627,7 +627,7 @@ describe("parseStream：E56 流内 error 载荷", () => {
   });
 });
 
-describe("parseStream：E62 两处兜底", () => {
+describe("parseStream：两处兜底", () => {
   it("tool_calls 缺 index、有 id：按新调用分组（此前整条调用被丢弃）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -671,7 +671,7 @@ describe("parseStream：E62 两处兜底", () => {
     ]);
   });
 
-  it("tool_calls 缺 index 且每片重发同一 id：归并同一条调用，不裂成多条（E62 review 补）", async () => {
+  it("tool_calls 缺 index 且每片重发同一 id：归并同一条调用，不裂成多条", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -737,7 +737,7 @@ describe("parseStream：E62 两处兜底", () => {
     ]);
   });
 
-  it("message 形式的 tool_calls（无 index 有 id）完整组装成 tool_call 块（E62 a+b 组合）", async () => {
+  it("message 形式的 tool_calls（无 index 有 id）完整组装成 tool_call 块", async () => {
     const assistant = await assembleAssistantMessage(
       protocol.parseStream(
         chunkGen(
@@ -764,8 +764,8 @@ describe("parseStream：E62 两处兜底", () => {
   });
 });
 
-describe("parseStream：E68 零产出 chunk 诊断", () => {
-  /** 捕获诊断 stderr 输出（E68 报告走 process.stderr.write） */
+describe("parseStream：零产出 chunk 诊断", () => {
+  /** 捕获诊断 stderr 输出（报告走 process.stderr.write） */
   async function captureDiagnostics(run: () => Promise<void>): Promise<string[]> {
     const writes: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation(((line: unknown) => {
@@ -833,7 +833,7 @@ describe("parseStream：E68 零产出 chunk 诊断", () => {
     expect(writes.join("")).toContain("1 个未产出任何事件");
   });
 
-  it("超长零产出 chunk 的样本截断，保留可辨识度（E68 review 补）", async () => {
+  it("超长零产出 chunk 的样本截断，保留可辨识度", async () => {
     const debugProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
     const writes = await captureDiagnostics(async () => {
       for await (const _ of debugProtocol.parseStream(
@@ -850,7 +850,7 @@ describe("parseStream：E68 零产出 chunk 诊断", () => {
   });
 });
 
-describe("parseStream：真实用量挂 done（E63）", () => {
+describe("parseStream：真实用量挂 done", () => {
   it("流尾 usage chunk 转统一用量挂 done", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -869,7 +869,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     ]);
   });
 
-  it("prompt_tokens_details.cached_tokens → cacheReadTokens（可观测性 B1；openai 无写缓存概念不产出）", async () => {
+  it("prompt_tokens_details.cached_tokens → cacheReadTokens（openai 无写缓存概念不产出）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -927,7 +927,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop", usage: { inputTokens: 7 } });
   });
 
-  it("usage chunk 不计入 E68 零产出诊断（解析用量即有产出意义）", async () => {
+  it("usage chunk 不计入零产出诊断（解析用量即有产出意义）", async () => {
     const usageProtocol = new OpenAICompletionsProtocol({ debugDroppedChunks: true });
     const writes: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation(((line: unknown) => {

@@ -15,19 +15,19 @@ export interface InteractOptions {
   /**
    * 输出函数。承担两类文本：状态文本（[已压缩]/[未压缩]/[历史已压缩]/[未知命令]）
    * 与工具结果回显（[工具结果]，文本宿主遗留路径）。TUI 不依赖 write 做结构化渲染——
-   * 流式事件走 onEvent，工具结果走 PostToolUse Hook 事件（此前确认）。
+   * 流式事件走 onEvent，工具结果走 PostToolUse Hook 事件。
    */
   write: (text: string) => void;
   /** 流式事件渲染回调（必填：渲染归属调用方，TUI 结构化消费、测试注入收集回调）。
    * 注意与 Team.onRootEvent 配套接入：onEvent 覆盖用户输入驱动的流，onRootEvent 覆盖
    * root 后台驱动（迟到子 agent 结论）的流，两侧都要接才不遗漏。 */
   onEvent: (event: StreamEvent) => void;
-  /** Hook 总线（宿主触发会话级事件的通道，DESIGN 13.3）；缺省不触发 */
+  /** Hook 总线（宿主触发会话级事件的通道）；缺省不触发 */
   hooks?: HookBus;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
   /**
-   * 会话期错误回调（E82）：run 消费抛错（单次模型链瞬时失败等）时渲染
+   * 会话期错误回调：run 消费抛错（单次模型链瞬时失败等）时渲染
    * 后继续输入循环，不终止会话进程；文案经 modelErrorText 与装配期「启动失败」区分。
    * 缺省不注入（TUI 宿主）：错误原样上抛，由 TUI 主循环 catch 渲染错误块（现状不变）。
    */
@@ -37,9 +37,9 @@ export interface InteractOptions {
 /**
  * 交互循环：逐行读取输入 → Agent 跑 → 增量渲染（文本/思考/工具调用/错误）→
  * 展示工具结果 → 消息持久化。
- * 会话内命令（统一 / 前缀，DESIGN 15）：/exit 退出、/compact [指导] 强制压缩并重写落盘、
+ * 会话内命令（统一 / 前缀）：/exit 退出、/compact [指导] 强制压缩并重写落盘、
  * /init 生成/改进项目根 AGENTS.md、/help 列出命令；UserPromptSubmit 由宿主（本函数）
- * 在每次输入后触发（DESIGN 13.3）。
+ * 在每次输入后触发。
  * @param options 交互选项（agent / store / session / inputs / write / hooks）
  */
 export async function interact(options: InteractOptions): Promise<void> {
@@ -54,14 +54,14 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 本轮真正发给模型的输入：/init 等命令会生成提示词顶替原输入走正常回合
     let turnInput: string | null = null;
     if (input.startsWith("/")) {
-      // 会话内命令（统一 / 前缀，DESIGN 15）
+      // 会话内命令（统一 / 前缀）
       if (input === "/exit") break;
       if (input === "/compact" || input.startsWith("/compact ")) {
         // 强制压缩：替换消息后重写整份落盘（压缩是重写不是追加，session 内存随之整体替换）；
-        // 带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径
+        // 带指导时按指导侧重视现场场摘要，无指导保留记忆替代省调用路径
         const guidance = input === "/compact" ? undefined : input.slice("/compact ".length).trim() || undefined;
         if (await agent.compactNow(guidance)) {
-          // 命令痕迹（E98）：与 TUI 同口径落命令消息，跨宿主续看同一会话命令痕迹一致
+          // 命令痕迹：与 TUI 同口径落命令消息，跨宿主续看同一会话命令痕迹一致
           agent.appendCommand(guidance ? `/compact ${guidance}` : "/compact");
           await store.rewriteMessages(session, agent.getMessages());
           agent.consumeHistoryRewritten(); // 消费压缩置位的历史改写标记，防下轮误报重写
@@ -75,11 +75,11 @@ export async function interact(options: InteractOptions): Promise<void> {
         // 分析代码库生成/改进项目根 AGENTS.md：生成 init 提示词当作用户输入走正常回合
         // （模型用 write 工具落盘）；已存在时提示词要求不覆盖、先建议改进。
         // 读文件失败（权限等）只报错不终止会话——命令失败不该带崩交互循环，
-        // 且必须 continue 跳过本行（E76：字面 "/init" 落到下方会被当用户输入跑完整回合）
+        // 且必须 continue 跳过本行（字面 "/init" 落到下方会被当用户输入跑完整回合）
         try {
           const existing = await readInstructionFile(projectAgentsFile);
           write(existing ? "\n[init] 已存在 AGENTS.md，将分析并在其基础上建议改进（不覆盖）。\n" : "\n[init] 开始分析代码库，生成项目根 AGENTS.md。\n");
-          // 命令痕迹（E98）：与 TUI 同口径落命令消息（随本轮轮末落盘持久化）
+          // 命令痕迹：与 TUI 同口径落命令消息（随本轮轮末落盘持久化）
           agent.appendCommand(input);
           turnInput = buildInitPrompt(existing);
         } catch (err) {
@@ -95,7 +95,7 @@ export async function interact(options: InteractOptions): Promise<void> {
       }
     }
     const prompt = turnInput ?? input;
-    // 会话级 hook 发射兜底（E82 审查补充）：hook 命令故障不按「启动失败」退出整个会话，
+    // 会话级 hook 发射兜底：hook 命令故障不按「启动失败」退出整个会话，
     // 与 turn 内工具级 hook 的兜底语义对齐（注入 onError 时渲染后跳过本轮；缺省上抛）
     try {
       await hooks?.emit({ type: "UserPromptSubmit", input: prompt });
@@ -114,19 +114,19 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
     const roundStart = agent.getMessages().length;
     agent.start(prompt);
-    // 轮末落盘（E48）：放 finally——api error 当轮（模型流抛错）时 agent 内存里已有本轮
+    // 轮末落盘：放 finally——api error 当轮（模型流抛错）时 agent 内存里已有本轮
     // 用户消息，异常路径跳过落盘会让盘上缺这条，reconfigure/重开后的 UI 与模型上下文不一致；
     // 历史被改写（压缩/裁剪/剥组）按内存整份重写，否则补落盘游标之后的新消息，与正常轮末同一套
     try {
-      // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方，此前确认）
+      // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方）
       for await (const event of agent.run()) {
         render(event);
       }
     } catch (err) {
-      // 会话期错误（E82）：注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
+      // 会话期错误：注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
       // （429/5xx/网络）渲染后可继续对话而非终止进程，与 TUI 渲染错误块继续输入循环同向；
       // 未注入（TUI 宿主）保持原样上抛。
-      // 覆盖面注意（审查补充）：catch 同时兜住 turn 内宿主 checkpoint 回调的落盘故障，
+      // 覆盖面注意：catch 同时兜住 turn 内宿主 checkpoint 回调的落盘故障，
       // 该类错误会被标成会话错误继续循环、随后 finally 落盘大概率再抛穿透——概率极低，
       // 真遇到按两层报错排查即可
       if (!options.onError) throw err;

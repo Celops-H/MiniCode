@@ -1,5 +1,5 @@
 /**
- * /mcp 与 /skill 扩展面板的数据构造与配置回写（BACKEND §19/§20 回写规则）。
+ * /mcp 与 /skill 扩展面板的数据构造与配置回写。
  * 回写规则「写回定义层」：配置有两层（全局 ~/.minicode/config.json 与项目 .minicode.json），
  * MCP server 定义在哪层就把 enabled 写回哪层；技能本体来自目录扫描，关闭名单按技能来源落层
  * （项目技能写项目配置、用户技能写全局配置）。失败不抛进程：返回/抛出错误由 loop 展示 toast。
@@ -90,7 +90,7 @@ export async function setMcpServerEnabled(name: string, enabled: boolean, opts: 
 }
 
 /**
- * 切换技能启用状态并写回配置的 skills.disabled 名单（BACKEND §20 回写规则）：
+ * 切换技能启用状态并写回配置的 skills.disabled 名单：
  * 关闭按来源落层——项目技能写项目配置、用户技能写全局配置（关闭标记跟技能本体同层）；
  * 启用从两层名单同时移出——名单合并语义是「任一层关闭即生效」，只清来源层时另一层
  * 的旧标记会让启用静默无效。目标文件不存在时新建。

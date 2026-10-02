@@ -19,11 +19,11 @@ describe("resolveConfigPaths", () => {
 });
 
 describe("resolveSessionsDir", () => {
-  it("按启动工作目录分子目录（E46）：非字母数字替换为「-」并追加内容哈希后缀（防有损编码撞名）", () => {
+  it("按启动工作目录分子目录：非字母数字替换为「-」并追加内容哈希后缀（防有损编码撞名）", () => {
     const cwd = path.resolve(path.join(os.tmpdir(), "my proj", "app-v2"));
     const dir = resolveSessionsDir({ homedir: "/home/tester", cwd });
     const name = dir.split(path.sep).pop()!;
-    // win32 编码前统一小写（E89）：期望值按同口径归一
+    // win32 编码前统一小写：期望值按同口径归一
     const normalized = process.platform === "win32" ? cwd.toLowerCase() : cwd;
     expect(name).toBe(`${normalized.replace(/[^a-zA-Z0-9]/g, "-")}-${name.split("-").pop()}`);
     // 有损编码撞名的路径（project-a 与 project_a）哈希不同：隔离不失效
@@ -94,7 +94,7 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("info");
   });
 
-  it("debug 调试开关可经配置文件开启（E68）；缺省不出现", async () => {
+  it("debug 调试开关可经配置文件开启；缺省不出现", async () => {
     const config = await loadConfig({
       paths: setup({ global: { debug: { streamChunks: true } } }),
     });

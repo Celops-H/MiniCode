@@ -27,7 +27,7 @@ describe("loadInstructionFiles（指令文件加载）", () => {
     expect(files[0]!.path).toContain(path.join(".minicode", "AGENTS.md"));
   });
 
-  it("项目级：cwd 有指令文件就用它，不向上加载祖先目录的（E37 当前目录有即停）", async () => {
+  it("项目级：cwd 有指令文件就用它，不向上加载祖先目录的（当前目录有即停）", async () => {
     const home = tempDir();
     const root = tempDir();
     const cwd = path.join(root, "proj");
@@ -39,7 +39,7 @@ describe("loadInstructionFiles（指令文件加载）", () => {
     expect(files.map((f) => f.content)).toEqual(["cwd 级指令"]);
   });
 
-  it("项目级：cwd 没有才逐级向上，找到最近的一个即停（E37 越界加载根因修复）", async () => {
+  it("项目级：cwd 没有才逐级向上，找到最近的一个即停", async () => {
     const home = tempDir();
     const root = tempDir();
     const mid = path.join(root, "a");

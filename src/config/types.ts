@@ -12,7 +12,7 @@ export const modelConfigSchema = z
     maxTokens: z.number().optional(),
     /** 推理系列模型（支持思考输出）：思考类请求参数（reasoning_effort/enable_thinking）
      *  仅对推理系列模型随思考等级下发——同一厂商混排思考/非思考模型，对不支持的模型
-     *  照发会被厂商 400 拒绝（E60） */
+     *  照发会被厂商 400 拒绝 */
     reasoning: z.boolean().optional(),
   })
   .strict();
@@ -28,42 +28,42 @@ export const providerConfigSchema = z
     id: z.string(),
     /** API 端点。两种拼接约定不同：openai-chat-completions 需含 /v1（SDK 在其下追加
      *  /chat/completions）；anthropic-messages 不带 /v1（SDK 自动追加 /v1/messages），
-     *  多写会请求到 /v1/v1/messages 404（E67）。不做自动归一化（猜前缀风险大于收益） */
+     *  多写会请求到 /v1/v1/messages 404。不做自动归一化（猜前缀风险大于收益） */
     baseUrl: z.string().url(),
     apiKeyEnv: z.string(),
-    /** 落盘 API key（/connect 写用户级全局配置，E27）；环境变量 key 同权且优先（E33） */
+    /** 落盘 API key（/connect 写用户级全局配置）；环境变量 key 同权且优先 */
     apiKey: z.string().optional(),
-    /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂（BACKEND §5） */
+    /** 协议（缺省 openai-chat-completions）：装配层按它选 Provider 工厂 */
     protocol: z.enum(PROVIDER_PROTOCOLS).optional(),
-    /** 端点按 Anthropic 官方语义强制校验 thinking 块签名（仅 anthropic-messages 协议，
-     *  E61）：为 true 时请求带 tools 期间不发 thinking 参数，避免真 Anthropic API 对
+    /** 端点按 Anthropic 官方语义强制校验 thinking 块签名（仅 anthropic-messages 协议）：
+     *  为 true 时请求带 tools 期间不发 thinking 参数，避免真 Anthropic API 对
      *  无签名历史 thinking 块的二轮 400；GLM/Kimi/DeepSeek 兼容端点不校验，缺省 false */
     requireThinkingSignature: z.boolean().optional(),
     /** 推理厂商（DeepSeek 等）：assistant 思考回传为 reasoning_content 字段，工具调用后
      *  必须回传否则厂商 400；有思考内容才发，缺省 false。仅 openai-chat-completions
-     *  协议有意义（anthropic 协议不消费，E60） */
+     *  协议有意义（anthropic 协议不消费） */
     reasoningContent: z.boolean().optional(),
     /** 支持 reasoning_effort 请求参数的厂商（OpenAI 系）：随思考等级仅对 reasoning 模型
-     *  下发，其余厂商或非推理模型发该字段可能 400（E60）。仅 openai-chat-completions
+     *  下发，其余厂商或非推理模型发该字段可能 400。仅 openai-chat-completions
      *  协议有意义 */
     reasoningEffort: z.boolean().optional(),
     /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：随思考等级仅对
-     *  reasoning 模型发送，否则思考等级静默无效（E60）。仅 openai-chat-completions
+     *  reasoning 模型发送，否则思考等级静默无效。仅 openai-chat-completions
      *  协议有意义 */
     enableThinking: z.boolean().optional(),
-    /** 请求流式真实用量（stream_options.include_usage，E63）：支持的厂商开启后流尾
+    /** 请求流式真实用量（stream_options.include_usage）：支持的厂商开启后流尾
      *  回传 token 用量挂 done.usage。个别严格网关对未知参数 400 且不可切换，故为
      *  能力位开关而非无条件发送；仅 openai-chat-completions 协议有意义 */
     includeUsage: z.boolean().optional(),
     /** 附加请求头，经 SDK defaultHeaders 透传（Azure OpenAI 的 api-key 认证头、
-     *  anthropic-beta 等，E64） */
+     *  anthropic-beta 等） */
     headers: z.record(z.string(), z.string()).optional(),
     models: z.array(modelConfigSchema),
   })
   .strict();
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
-/** 单个 MCP server 配置（stdio 传输，BACKEND §19）；strict：拼错字段直接报错而非默认忽略 */
+/** 单个 MCP server 配置（stdio 传输）；strict：拼错字段直接报错而非默认忽略 */
 export const mcpServerConfigSchema = z
   .object({
     /** 启动命令（如 npx、node） */
@@ -80,7 +80,7 @@ export const mcpServerConfigSchema = z
   .strict();
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>;
 
-/** Skill 技能配置（BACKEND §20）；strict：拼错字段直接报错而非默认忽略 */
+/** Skill 技能配置；strict：拼错字段直接报错而非默认忽略 */
 export const skillsConfigSchema = z
   .object({
     /** 关闭名单：命中技能名的技能不注入系统提示词（全局/项目两层名单取并集） */
@@ -89,7 +89,7 @@ export const skillsConfigSchema = z
   .strict();
 export type SkillsConfig = z.infer<typeof skillsConfigSchema>;
 
-/** 调试开关（诊断用，E68）；strict：拼错字段直接报错而非默认忽略 */
+/** 调试开关（诊断用）；strict：拼错字段直接报错而非默认忽略 */
 export const debugConfigSchema = z
   .object({
     /** 记录 openai 流解析中未产出任何事件的被丢弃 chunk（数量 + 样本，流结束时输出到
@@ -99,7 +99,7 @@ export const debugConfigSchema = z
   .strict();
 export type DebugConfig = z.infer<typeof debugConfigSchema>;
 
-/** 可观测性配置（OBSERVABILITY §7）；strict：拼错字段直接报错而非默认忽略 */
+/** 可观测性配置；strict：拼错字段直接报错而非默认忽略 */
 export const observabilityConfigSchema = z
   .object({
     /** 总开关（缺省 true）：false 时不装配 Recorder、不写轨迹；日志文件不受影响 */
@@ -110,11 +110,11 @@ export const observabilityConfigSchema = z
   .strict();
 export type ObservabilityConfig = z.infer<typeof observabilityConfigSchema>;
 
-/** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错（DESIGN 16） */
+/** 配置 schema：config 模块是 schema 单一权威，随功能演进扩展字段；strict：未知字段直接报错 */
 export const configSchema = z
   .object({
     logLevel: z.enum(LOG_LEVELS).default("info"),
-  /** 会话存储根目录（按启动工作目录分子目录，DESIGN 14）；缺省 ~/.minicode/sessions/ */
+  /** 会话存储根目录（按启动工作目录分子目录）；缺省 ~/.minicode/sessions/ */
   sessionsDir: z.string().optional(),
   /** 模型 Provider 列表（多厂商）；未配置回退默认单模型 */
   providers: z.array(providerConfigSchema).optional(),
@@ -125,7 +125,7 @@ export const configSchema = z
   /** 上下文压缩配置：撞线自动压缩 + /compact 手动压缩；未配置则压缩不启用 */
   compact: z
     .object({
-      /** 撞线自动压缩开关（E115，缺省开）：false 仅关掉撞线自动触发，压缩配置照常提供给
+      /** 撞线自动压缩开关（缺省开）：false 仅关掉撞线自动触发，压缩配置照常提供给
        *  /compact 手动路径（开关与压缩配置的有无解耦，手动压缩不受限） */
       enabled: z.boolean().optional(),
       /** 模型上下文窗口 token；缺省用模型定义值，模型也没有则默认 128000 */
@@ -138,10 +138,10 @@ export const configSchema = z
       keepRecentToolResults: z.number().default(5),
     })
     .optional(),
-  /** MCP 外部工具服务（BACKEND §19）：服务名 → stdio 启动配置；装配时启动并接入工具池，
+  /** MCP 外部工具服务：服务名 → stdio 启动配置；装配时启动并接入工具池，
    *  全局/项目按服务名归并（load 层例外逻辑，同 providers 按 id 合并） */
   mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
-  /** Skill 技能配置（BACKEND §20）：disabled 关闭名单，全局/项目两层取并集 */
+  /** Skill 技能配置：disabled 关闭名单，全局/项目两层取并集 */
   skills: skillsConfigSchema.optional(),
   /** 多 Agent 协作开关（缺省开，语义对齐 --no-agents 旗标）：false 时单 agent 会话，协作工具不注册 */
   agents: z.boolean().optional(),
@@ -149,9 +149,9 @@ export const configSchema = z
   worktrees: z.boolean().optional(),
   /** 会话记忆开关（缺省关）：开启后每轮后台增量维护记忆文本，压缩时用记忆替代现场摘要 */
   memory: z.boolean().optional(),
-  /** 调试开关（诊断用，E68）：默认全关，零行为影响 */
+  /** 调试开关（诊断用）：默认全关，零行为影响 */
   debug: debugConfigSchema.optional(),
-  /** 可观测性（OBSERVABILITY §7）：运行轨迹落盘开关与目录；缺省开启 */
+  /** 可观测性：运行轨迹落盘开关与目录；缺省开启 */
   observability: observabilityConfigSchema.optional(),
 })
   .strict();

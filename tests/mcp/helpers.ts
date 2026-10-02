@@ -31,7 +31,7 @@ rl.on("line", (line) => {
     const text = msg.params?.arguments?.text;
     if (process.env.FAKE_MODE === "server-request") {
       // 先发一条 server→client 请求（id 与客户端在途 tools/call 撞号、无 result）再正常回复：
-      // 旧实现会把该请求当响应以 undefined resolve，tools/call 拿不到真结果（E85）
+      // 旧实现会把该请求当响应以 undefined resolve，tools/call 拿不到真结果
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, method: "sampling/createMessage", params: {} }) + "\\n");
       reply(msg.id, { content: [{ type: "text", text: "echo: " + text }] });
       return;

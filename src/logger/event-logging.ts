@@ -16,7 +16,7 @@ const DECISION_SOURCES: Record<string, string> = {
 };
 
 /**
- * 把 hook 事件流水接到日志（可观测性 B3 埋点，OBSERVABILITY §6）：
+ * 把 hook 事件流水接到日志（埋点）：
  * 模型请求耗时与结果、token 用量（debug）、fallback 决策、压缩动作、工具失败详情、
  * 权限拒绝。隐私口径：info 级不含消息正文与工具参数全文，参数只在 debug 级展开。
  * @param bus hook 事件总线

@@ -61,7 +61,7 @@ describe("connect key 输入态（弹窗内）", () => {
   });
 });
 
-describe("sessionModalTarget：/session 面板确认目标（P6-4 新建置顶，selected 0=新建、1..n=会话）", () => {
+describe("sessionModalTarget：/session 面板确认目标（新建置顶，selected 0=新建、1..n=会话）", () => {
   const sessions = [{ id: "aaa" }, { id: "bbb" }];
   it("selected 0 = 新建会话（默认选项）", () => {
     expect(sessionModalTarget(0, sessions)).toEqual({ kind: "new" });
@@ -76,7 +76,7 @@ describe("sessionModalTarget：/session 面板确认目标（P6-4 新建置顶�
   });
 });
 
-describe("C2 /model 边界：模型调用 error 事件渲染进消息区且回到空闲（不退出、可换回）", () => {
+describe("/model 边界：模型调用 error 事件渲染进消息区且回到空闲（不退出、可换回）", () => {
   it("无前缀内容时错误作为独立错误块，带引导且状态回空闲", () => {
     const s = reduceEvent(initState([]), { type: "error", message: "Incorrect API key" });
     expect(s.status).toBe("idle");
@@ -163,7 +163,7 @@ describe("paste（bracketed paste 整段插入）", () => {
     expect(s.prompt.lines).not.toContain("行23");
   });
 
-  it("粘贴超行截断：已有内容 + 光标在中间，光标后文本不丢（D-6=45）", () => {
+  it("粘贴超行截断：已有内容 + 光标在中间，光标后文本不丢", () => {
     let s = initState([]);
     // 两行已有内容：第一行 aaaa、第二行 bbbb；光标在第一行末尾
     s = reduceAction(s, { type: "input", text: "aaaa" });
@@ -183,13 +183,13 @@ describe("paste（bracketed paste 整段插入）", () => {
     expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-12345" });
   });
 
-  it("connect-key 粘贴含换行/空白：key 清掉（API key 无空白，误带换行污染提交值，G-7）", () => {
+  it("connect-key 粘贴含换行/空白：key 清掉（API key 无空白，误带换行污染提交值）", () => {
     let s = withKeyModal(initState([]));
     s = reduceAction(s, { type: "paste", text: "sk-123\n456\t " });
     expect(s.modal).toMatchObject({ kind: "connect-key", key: "sk-123456" });
   });
 
-  it("非 connect 弹窗打开时粘贴忽略（session/permission 输入框不可见，G-6 边界）", () => {
+  it("非 connect 弹窗打开时粘贴忽略（session/permission 输入框不可见）", () => {
     const base = initState([]);
     const s1: TuiState = { ...base, modal: { kind: "session", sessions: [], selected: 0 } };
     expect(reduceAction(s1, { type: "paste", text: "x" }).prompt.lines).toEqual([""]);
@@ -198,7 +198,7 @@ describe("paste（bracketed paste 整段插入）", () => {
   });
 });
 
-describe("输入编辑（D-2 Ctrl+U 连续删 / D-3 一键清空）", () => {
+describe("输入编辑（Ctrl+U 连续删 / 一键清空）", () => {
   it("Ctrl+U（delete-line）删当前行，行已空时继续删上一行（连续按住一行行往上清）", () => {
     let s = initState([]);
     s = reduceAction(s, { type: "input", text: "第一行" });
@@ -233,7 +233,7 @@ describe("输入编辑（D-2 Ctrl+U 连续删 / D-3 一键清空）", () => {
   });
 });
 
-describe("命令消息重演（E24）", () => {
+describe("命令消息重演", () => {
   it("initState 把 source=command 的用户消息重演为命令块（剥掉标记前缀）", () => {
     const state = initState([
       userMessage(`${COMMAND_MARKER}/init`, "command"),
@@ -246,7 +246,7 @@ describe("命令消息重演（E24）", () => {
   });
 });
 
-describe("消息署名跟随实际产出模型（E18）", () => {
+describe("消息署名跟随实际产出模型", () => {
   it("model_fallback 后 done 落的消息块署名为备选模型，并清除本轮暂存", () => {
     let s = initState([]);
     s = reduceEvent(s, { type: "text_delta", text: "回复" });
@@ -260,7 +260,7 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     expect(s.activeModel).toBeUndefined();
   });
 
-  it("工具循环续轮保留快照：续轮 done 落块署名不回落当前模型名（E70 review 补）", () => {
+  it("工具循环续轮保留快照：续轮 done 落块署名不回落当前模型名", () => {
     let s = initState([], "", "glm-5.3");
     s = reduceHook(s, { type: "UserPromptSubmit", input: "查一下" });
     s = reduceEvent(s, { type: "text_delta", text: "思考中" });
@@ -278,18 +278,18 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     expect(s.activeModel).toBeUndefined();
   });
 
-  it("运行中排队消息转正同样快照当前模型（E70 review 补）", () => {
+  it("运行中排队消息转正同样快照当前模型", () => {
     let s = initState([], "", "glm-5.3");
     s = { ...s, status: "running", prompt: { ...s.prompt, lines: ["排队消息"], curCol: 4 } };
     s = reduceAction(s, { type: "send" });
-    // 运行中发送：进排队条，不直接上消息块（E72）
+    // 运行中发送：进排队条，不直接上消息块
     expect(s.queue).toHaveLength(1);
     expect(s.blocks.some((b) => b.kind === "message" && b.role === "user")).toBe(false);
     s = reduceHook(s, { type: "UserPromptSubmit", input: "排队消息" });
     expect(s.activeModel).toBe("glm-5.3");
   });
 
-  it("打断收尾的半截块署名本轮实际产出模型（E70 review 补）", () => {
+  it("打断收尾的半截块署名本轮实际产出模型", () => {
     let s = initState([], "", "glm-5.3");
     s = reduceHook(s, { type: "UserPromptSubmit", input: "长回答" });
     s = reduceEvent(s, { type: "text_delta", text: "半截" });
@@ -311,7 +311,7 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     expect(blocks[1]?.model).toBeUndefined();
   });
 
-  it("UserPromptSubmit 快照当前模型：普通轮 done 落块署名不再缺省（E70）", () => {
+  it("UserPromptSubmit 快照当前模型：普通轮 done 落块署名不再缺省", () => {
     let s = initState([], "", "glm-5.3");
     s = reduceHook(s, { type: "UserPromptSubmit", input: "你好" });
     s = reduceEvent(s, { type: "text_delta", text: "回复" });
@@ -321,7 +321,7 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     expect(s.activeModel).toBeUndefined();
   });
 
-  it("/model 切换后：新轮署名跟新模型，历史块署名不翻转（E70）", () => {
+  it("/model 切换后：新轮署名跟新模型，历史块署名不翻转", () => {
     let s = initState([], "", "glm-5.3");
     s = reduceHook(s, { type: "UserPromptSubmit", input: "第一问" });
     s = reduceEvent(s, { type: "text_delta", text: "旧答" });
@@ -338,7 +338,7 @@ describe("消息署名跟随实际产出模型（E18）", () => {
     expect(msgs[1]).toMatchObject({ text: "新答", model: "deepseek-v4-pro" });
   });
 
-  it("回退事件覆盖快照：切换备选后署名仍是实际产出模型（E70）", () => {
+  it("回退事件覆盖快照：切换备选后署名仍是实际产出模型", () => {
     let s = initState([], "", "main-1");
     s = reduceHook(s, { type: "UserPromptSubmit", input: "你好" });
     s = reduceEvent(s, { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" });
@@ -349,7 +349,7 @@ describe("消息署名跟随实际产出模型（E18）", () => {
   });
 });
 
-describe("重装配族命令守卫（E13）：reassemblyBlocked 覆盖子 agent 后台运行", () => {
+describe("重装配族命令守卫：reassemblyBlocked 覆盖子 agent 后台运行", () => {
   it("root 运行中拦截", () => {
     const s: TuiState = { ...initState([]), status: "running" };
     expect(reassemblyBlocked(s)).toBe(true);
@@ -381,7 +381,7 @@ describe("重装配族命令守卫（E13）：reassemblyBlocked 覆盖子 agent 
   });
 });
 
-describe("在途排队（E52/E72）", () => {
+describe("在途排队", () => {
   it("运行中 send：消息进排队条不混进消息区，输入框清空、状态保持 running", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const, prompt: { ...s.prompt, lines: ["排队的问题"], curCol: 5 } };
@@ -444,7 +444,7 @@ describe("在途排队（E52/E72）", () => {
     expect(s.prompt.lines).toEqual([""]);
   });
 
-  it("Ctrl+P 取消时输入框已被清空：直接恢复，不残留空行（E107①）", () => {
+  it("Ctrl+P 取消时输入框已被清空：直接恢复，不残留空行", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const };
     s = reduceAction(s, { type: "input", text: "排队的问题" });
@@ -457,7 +457,7 @@ describe("在途排队（E52/E72）", () => {
     expect(s.prompt.curCol).toBe(5);
   });
 
-  it("Ctrl+P 取消时输入框仅剩空白草稿：同样直接恢复，不残留空白行（E107① 审查补）", () => {
+  it("Ctrl+P 取消时输入框仅剩空白草稿：同样直接恢复，不残留空白行", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const };
     s = reduceAction(s, { type: "input", text: "排队的问题" });
@@ -467,7 +467,7 @@ describe("在途排队（E52/E72）", () => {
     expect(s.prompt.lines).toEqual(["排队的问题"]);
   });
 
-  it("Ctrl+P 恢复多行文本：行结构与光标位置一致，无残留空行（E107①）", () => {
+  it("Ctrl+P 恢复多行文本：行结构与光标位置一致，无残留空行", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const, prompt: { ...s.prompt, lines: ["第一行", "第二行"], curLine: 1, curCol: 3 } };
     s = reduceAction(s, { type: "send" });
@@ -477,7 +477,7 @@ describe("在途排队（E52/E72）", () => {
     expect(s.prompt.curCol).toBe(3);
   });
 
-  it("恢复后可正常编辑（E107②）：方向键移动光标、退格删字、Enter 重发重新排队", () => {
+  it("恢复后可正常编辑：方向键移动光标、退格删字、Enter 重发重新排队", () => {
     let s = initState([]);
     s = { ...s, status: "running" as const };
     s = reduceAction(s, { type: "input", text: "排队的问题" });
@@ -505,7 +505,7 @@ describe("在途排队（E52/E72）", () => {
   });
 });
 
-describe("流中断 error 按轮边界收口（E77）", () => {
+describe("流中断 error 按轮边界收口", () => {
   it("error 带流式内容：半截正文合并为 isError 消息块，流式区清空回空闲", () => {
     let s = reduceHook(initState([]), { type: "UserPromptSubmit", input: "写个长回复" });
     s = reduceEvent(s, { type: "text_delta", text: "半截正文" });
@@ -516,7 +516,7 @@ describe("流中断 error 按轮边界收口（E77）", () => {
     expect(last).toMatchObject({
       kind: "message",
       role: "assistant",
-      // 正文含错误原因（审查修正：优雅收尾路径无处展示原因）
+      // 正文含错误原因（优雅收尾路径无处展示原因）
       text: "半截正文" + String.fromCharCode(10) + "[错误] 流意外结束（未收到 finish_reason）",
       isError: true,
     });
@@ -531,7 +531,7 @@ describe("流中断 error 按轮边界收口（E77）", () => {
   });
 });
 
-describe("PreToolUse 兜底回填 id（E84）", () => {
+describe("PreToolUse 兜底回填 id", () => {
   it("无 id 工具卡兜底命中时回填 toolCallId，PostToolUse 按 id 配对成功", () => {
     let s = reduceEvent(initState([]), {
       type: "toolcall_start",

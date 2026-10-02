@@ -755,7 +755,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
-  it("压缩触发估算计入系统提示词（E15）：消息未撞线、加提示词后撞线仍触发压缩", async () => {
+  it("压缩触发估算计入系统提示词：消息未撞线、加提示词后撞线仍触发压缩", async () => {
     const modelClient: ModelClient = {
       async *stream(_modelId, context) {
         if (context.tools.length === 0) {
@@ -829,7 +829,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       initialMessages: longResults,
       tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
       // 全部裁剪后仅剩裁剪标记，估算低于可用窗口，不触发摘要
-      //（窗口按 E79 分段计价口径重校准：10 条裁剪标记为 CJK 文本、比旧系数更大）
+      //（窗口按分段计价口径重校准：10 条裁剪标记为 CJK 文本、比旧系数更大）
       compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
     });
     agent.start("继续");
@@ -893,7 +893,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages().at(-1)).toMatchObject({ role: "assistant" });
   });
 
-  it("autoCompact=false：撞线不自动压缩，/compact 手动路径照常可用（E115 解耦）", async () => {
+  it("autoCompact=false：撞线不自动压缩，/compact 手动路径照常可用（解耦）", async () => {
     // 摘要调用（tools 为空）返回摘要文本；正常调用返回普通文本
     const modelClient: ModelClient = {
       async *stream(_modelId, context) {
@@ -942,7 +942,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
-  it("compactNow：带压缩指导时跳过记忆替代走现场摘要，指导入摘要提示词末尾（DESIGN 9.8）", async () => {
+  it("compactNow：带压缩指导时跳过记忆替代走现场摘要，指导入摘要提示词末尾", async () => {
     const isMemoryRequest = (context: Context): boolean =>
       context.messages.some(
         (m) => typeof m.content === "string" && m.content.includes(MEMORY_REQUEST_MARKER),
@@ -1019,7 +1019,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     expect(agent.getMessages()).toHaveLength(1);
   });
 
-  it("compactNow：带指导时裁剪达标也不短路，仍走现场摘要让指导生效（DESIGN 9.8）", async () => {
+  it("compactNow：带指导时裁剪达标也不短路，仍走现场摘要让指导生效", async () => {
     let summaryCalled = false;
     const modelClient: ModelClient = {
       async *stream(_modelId, context) {
@@ -1111,7 +1111,7 @@ describe("Agent 主循环：模型对话闭环", () => {
     });
   });
 
-  it("增量合并（DESIGN 9.7）：第二次压缩只读旧摘要后的增量，附旧摘要合并，不重读全量历史", async () => {
+  it("增量合并：第二次压缩只读旧摘要后的增量，附旧摘要合并，不重读全量历史", async () => {
     // 记录每次摘要调用收到的消息数与请求内容
     const summaryRequests: { messages: number; hasPrevious: boolean; deltaFirstStartsRecovery: boolean }[] = [];
     const modelClient: ModelClient = {
@@ -1156,7 +1156,7 @@ describe("Agent 主循环：模型对话闭环", () => {
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
-      // 窗口：首次撞线（10 条历史约 2250 token，E79 分段计价）；摘要后增量（恢复上下文+大输入）
+      // 窗口：首次撞线（10 条历史约 2250 token，分段计价）；摘要后增量（恢复上下文+大输入）
       // 远低于可用窗口不撞线，第二次压缩由 compactNow 显式触发
       compactConfig: { contextWindow: 2300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
     });
@@ -1400,7 +1400,7 @@ describe("Agent 主循环：模型对话闭环", () => {
 });
 
 
-describe("maxTurns 耗尽收尾（E83）", () => {
+describe("maxTurns 耗尽收尾", () => {
   it("maxTurns 耗尽时发 Stop Hook 事件（TUI 不会永远停在运行中）", async () => {
     const tool: Tool = {
       name: "echo",
@@ -1445,7 +1445,7 @@ describe("maxTurns 耗尽收尾（E83）", () => {
 });
 
 
-describe("只读工具执行超时定时器清理（E75）", () => {
+describe("只读工具执行超时定时器清理", () => {
   it("cancel 后定时器不再触发（race settle 后不残留 ref'd 定时器拖住退出）", async () => {
     vi.useFakeTimers();
     try {

@@ -15,7 +15,7 @@ export type Key =
   | { kind: "down" }
   | { kind: "left" }
   | { kind: "right" }
-  /** Shift+方向键：扩展输入框选区（B-2，需终端带 shift 修饰标志上报，kitty 协议下可靠） */
+  /** Shift+方向键：扩展输入框选区（需终端带 shift 修饰标志上报，kitty 协议下可靠） */
   | { kind: "shift-up" }
   | { kind: "shift-down" }
   | { kind: "shift-left" }
@@ -30,11 +30,11 @@ export type Key =
   | { kind: "ctrl-a" }
   | { kind: "ctrl-e" }
   | { kind: "ctrl-u" }
-  /** Ctrl+Shift+U：一键清空输入框全部内容（D-3=49） */
+  /** Ctrl+Shift+U：一键清空输入框全部内容 */
   | { kind: "ctrl-shift-u" }
   | { kind: "ctrl-k" }
   | { kind: "ctrl-w" }
-  /** Ctrl+P：取消最后一个排队项（消息/命令，恢复到输入框供编辑重发，E72） */
+  /** Ctrl+P：取消最后一个排队项（消息/命令，恢复到输入框供编辑重发） */
   | { kind: "ctrl-p" }
   /** 不支持的转义序列（鼠标、组合键等），消费掉但不产生键 */
   | { kind: "ignore" };

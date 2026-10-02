@@ -8,10 +8,10 @@ import { SessionStore } from "../../src/storage/index.js";
 import { createBuiltinTools } from "../../src/tools/index.js";
 
 /**
- * 端到端冒烟测试：mock 模型 + 真实文件工具，验证 M1 核心闭环。
+ * 端到端冒烟测试：mock 模型 + 真实文件工具，验证核心闭环。
  * 不依赖真实 API，用脚本化模型流驱动一次「读文件 → 回灌 → 继续」的完整链路。
  */
-describe("M1 端到端冒烟", () => {
+describe("端到端冒烟", () => {
   let dir: string;
 
   afterEach(() => {

@@ -79,7 +79,7 @@ describe("assembleSessionExtensions（扩展生态装配）", () => {
   });
 });
 
-describe("resolveAgentsEnabled（多 Agent 协作生效判定，E115）", () => {
+describe("resolveAgentsEnabled（多 Agent 协作生效判定）", () => {
   it("旗标与配置合取，任一显式关闭即单 agent；都未定义为开启", () => {
     expect(resolveAgentsEnabled(undefined, undefined)).toBe(true);
     expect(resolveAgentsEnabled(true, true)).toBe(true);

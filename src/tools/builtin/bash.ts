@@ -16,7 +16,7 @@ const schema = z.object({
   command: z.string(),
   /** 超时毫秒数，默认 30 秒 */
   timeoutMs: z.number().int().positive().optional(),
-  /** 后台执行：立即返回任务 id，命令放后台跑，用 bash_task 工具查询与终止（DESIGN 7.5） */
+  /** 后台执行：立即返回任务 id，命令放后台跑，用 bash_task 工具查询与终止 */
   background: z.boolean().optional(),
 });
 
@@ -143,7 +143,7 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       signal?.removeEventListener("abort", onAbort);
     };
 
-    // 输出解码（E91）：stdout/stderr 各用 StringDecoder 按流累积解码——chunk.toString()
+    // 输出解码：stdout/stderr 各用 StringDecoder 按流累积解码——chunk.toString()
     // 按段解码会把恰在 chunk 边界被劈开的多字节字符（中文输出常见）解成 U+FFFD 乱码
     const stdoutDecoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
@@ -190,7 +190,7 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       openStreams++;
       stream.on("data", (chunk: Buffer) => collect(chunk, decoder));
       stream.on("close", () => {
-        // 流关闭 flush 解码器残料（E91）：完整字符不丢、状态不跨流污染；真不完整的尾字节按 U+FFFD 产出
+        // 流关闭 flush 解码器残料：完整字符不丢、状态不跨流污染；真不完整的尾字节按 U+FFFD 产出
         appendText(decoder.end());
         openStreams--;
         maybeSettle();

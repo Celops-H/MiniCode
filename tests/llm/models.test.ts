@@ -130,7 +130,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     ]);
   });
 
-  it("401（认证/余额不足）走熔断：recordFailure 冷却主模型、切备选，冷却期不再请求主模型（F-3=60）", async () => {
+  it("401（认证/余额不足）走熔断：recordFailure 冷却主模型、切备选，冷却期不再请求主模型", async () => {
     const router = new ModelRouter({ cooldownMs: 5_000 });
     const models = new Models({ router, chain: ["openrouter-1", "deepseek-1"] });
     models.register(makeFaultyProvider("openrouter", "openrouter-1", { failWith: 401 }));
@@ -168,7 +168,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(openrouterCalls).toBe(1);
 
     // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求；轮开始跳过也发
-    // model_fallback 观察事件（署名与提示跟实际产出者，批次 18 review 补）
+    // model_fallback 观察事件（署名与提示跟实际产出者）
     const second: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) second.push(e);
     expect(openrouterCalls).toBe(1); // 坏 key 模型零重试
@@ -230,7 +230,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.isHealthy("main-1")).toBe(true); // 流中断不计数
   });
 
-  it("首 token 前厂商故障（error 事件后异常收尾）仍切备选：error 事件不算已产出内容（E57 审查补充）", async () => {
+  it("首 token 前厂商故障（error 事件后异常收尾）仍切备选：error 事件不算已产出内容", async () => {
     const router = new ModelRouter({ cooldownMs: 60_000 });
     const models = new Models({ router, chain: ["main-1", "backup-1"] });
     // 模拟空闲超时路径：协议先 yield error 事件再抛异常（此前 error 置 started 挡住切换）
@@ -312,7 +312,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.isHealthy("main-1")).toBe(false); // error 流不计成功，仍不健康
   });
 
-  it("流以 error 收尾且未产出内容：记失败进冷却，下次请求直接路由到健康备选（E57）", async () => {
+  it("流以 error 收尾且未产出内容：记失败进冷却，下次请求直接路由到健康备选", async () => {
     const router = new ModelRouter({ cooldownMs: 60_000 });
     const models = new Models({ router, chain: ["main-1", "backup-1"] });
     const errorProvider: Provider = {
@@ -327,7 +327,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     };
     models.register(errorProvider);
     models.register(makeFaultyProvider("backup", "backup-1"));
-    // 第一次：未产出内容以 error 收尾 → 记 recordFailure 进冷却（E57 前永不冷却，每次都先撞一遍）
+    // 第一次：未产出内容以 error 收尾 → 记 recordFailure 进冷却（此前永不冷却，每次都先撞一遍）
     const first: StreamEvent[] = [];
     for await (const e of models.stream("main-1", createContext("s"))) first.push(e);
     expect(first[0]).toMatchObject({ type: "error" });
@@ -339,7 +339,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(second.at(-1)).toEqual({ type: "done", stopReason: "stop" });
   });
 
-  it("流以 error 收尾但已产出内容（半截响应）：不误标失败（E57）", async () => {
+  it("流以 error 收尾但已产出内容（半截响应）：不误标失败", async () => {
     const router = new ModelRouter();
     const models = new Models({ router, chain: ["main-1"] });
     const partialErrorProvider: Provider = {
@@ -360,7 +360,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(router.isHealthy("main-1")).toBe(true); // 半截响应不记失败
   });
 
-  it("链上不可解析条目跳过继续下一个，两次切换都有观察事件（E54）", async () => {
+  it("链上不可解析条目跳过继续下一个，两次切换都有观察事件", async () => {
     const router = new ModelRouter();
     const models = new Models({ router, chain: ["main-1", "ghost-1", "backup-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
@@ -376,7 +376,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     ]);
   });
 
-  it("整链尝试完后抛最后的真实错误，不被「未知模型」遮蔽（E54）", async () => {
+  it("整链尝试完后抛最后的真实错误，不被「未知模型」遮蔽", async () => {
     const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1", "backup-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
@@ -387,7 +387,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     }).rejects.toThrow("backup 失败");
   });
 
-  it("整链全部不可解析时抛「未知模型」，不发自我切换的虚假事件（E54 review 补）", async () => {
+  it("整链全部不可解析时抛「未知模型」，不发自我切换的虚假事件", async () => {
     const models = new Models({ router: new ModelRouter(), chain: ["ghost-1"] });
     models.register(makeProvider("a", ["a-1"], "A"));
     const events: StreamEvent[] = [];
@@ -398,7 +398,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(events).toEqual([]);
   });
 
-  it("单条目链真实失败：不发自我切换事件，直接上抛真实错误（review 补既有路径）", async () => {
+  it("单条目链真实失败：不发自我切换事件，直接上抛真实错误", async () => {
     const models = new Models({ router: new ModelRouter(), chain: ["main-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     const events: StreamEvent[] = [];
@@ -408,7 +408,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     expect(events).toEqual([]);
   });
 
-  it("真实失败在前、死条目收尾：抛真实厂商错误，不被「未知模型」反向遮蔽（E54 review 补）", async () => {
+  it("真实失败在前、死条目收尾：抛真实厂商错误，不被「未知模型」反向遮蔽", async () => {
     const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1"] });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     const events: StreamEvent[] = [];

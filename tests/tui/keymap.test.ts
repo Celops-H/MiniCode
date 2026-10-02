@@ -1,6 +1,6 @@
 /**
  * 层 1：键位映射（keymap）——normal/modal/candidate 三种上下文。
- * 覆盖 M4.4 阶段审视发现的语义回归区（modal/candidate 的 Enter/Tab/1/a/d）。
+ * 覆盖语义回归区（modal/candidate 的 Enter/Tab/1/a/d）。
  */
 import { it, expect } from "vitest";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
@@ -21,11 +21,11 @@ it("输入编辑键：Ctrl+A/E 行首尾、U 删整行、K 删到行尾、W 删�
   expect(mapKey({ kind: "ctrl-u" })).toEqual({ type: "delete-line" });
   expect(mapKey({ kind: "ctrl-k" })).toEqual({ type: "delete-to-end" });
   expect(mapKey({ kind: "ctrl-w" })).toEqual({ type: "delete-word" });
-  // D-3=49：Ctrl+Shift+U 一键清空输入框
+  // Ctrl+Shift+U 一键清空输入框
   expect(mapKey({ kind: "ctrl-shift-u" })).toEqual({ type: "clear-input" });
 });
 
-it("Shift+方向键：输入态扩展选区；历史浏览态仍导航历史（审查 L-5/L-6）", () => {
+it("Shift+方向键：输入态扩展选区；历史浏览态仍导航历史", () => {
   expect(mapKey({ kind: "shift-left" })).toEqual({ type: "select", dir: "left" });
   expect(mapKey({ kind: "shift-right" })).toEqual({ type: "select", dir: "right" });
   expect(mapKey({ kind: "shift-up" })).toEqual({ type: "select", dir: "up" });
@@ -35,7 +35,7 @@ it("Shift+方向键：输入态扩展选区；历史浏览态仍导航历史（�
   expect(mapKey({ kind: "shift-down" }, { inputEmpty: true })).toEqual({ type: "history", dir: 1 });
 });
 
-it("Ctrl+P 取消排队项（E72，normal 态）", () => {
+it("Ctrl+P 取消排队项（normal 态）", () => {
   expect(mapKey({ kind: "ctrl-p" })).toEqual({ type: "queue-cancel" });
 });
 
@@ -97,7 +97,7 @@ it("connect-key 弹窗：字符→input、Backspace→backspace、Enter→modal-
   expect(mapKey({ kind: "ctrl-c" }, m)).toEqual({ type: "noop" });
 });
 
-it("decideEsc：运行中打断 → 空闲双击退出（E100：折叠聚焦半成品链路已删）", () => {
+it("decideEsc：运行中打断 → 空闲双击退出（折叠聚焦半成品链路已删）", () => {
   // 运行中：打断（不消耗计时）
   expect(decideEsc({ running: true, lastEscAt: 0, now: 0 })).toBe("interrupt");
   // 空闲第一次：arm

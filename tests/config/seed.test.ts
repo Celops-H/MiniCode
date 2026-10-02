@@ -35,7 +35,7 @@ describe("ensureGlobalConfigSeed（全局配置播种）", () => {
       // key 不播种：只写环境变量名，不带 key 值
       expect(Object.keys(p).some((k) => /key/i.test(k) && k !== "apiKeyEnv")).toBe(false);
     }
-    // 能力开关与模型 reasoning 标记随预设播种（E60）：deepseek 标思考回传、
+    // 能力开关与模型 reasoning 标记随预设播种：deepseek 标思考回传、
     // openai 标 reasoning_effort、qwen 标 enable_thinking，名单内模型标 reasoning
     const byId = new Map(providers.map((p) => [p.id as string, p]));
     expect(byId.get("deepseek")).toMatchObject({ reasoningContent: true });
@@ -86,7 +86,7 @@ describe("ensureGlobalConfigSeed（全局配置播种）", () => {
   });
 });
 
-describe("播种跨平台权限（E32）", () => {
+describe("播种跨平台权限", () => {
   it.runIf(process.platform !== "win32")("新建目录 0o700、配置文件 0o600（Windows 忽略 mode 跳过）", async () => {
     const paths = tempPaths();
     await ensureGlobalConfigSeed(paths);

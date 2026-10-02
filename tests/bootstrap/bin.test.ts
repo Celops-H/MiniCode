@@ -1,5 +1,5 @@
 /**
- * 层 1：bin 包装入口的 FFI 重启决策（P1）——检测与命令行组装是纯函数，
+ * 层 1：bin 包装入口的 FFI 重启决策——检测与命令行组装是纯函数，
  * spawn/信号转发/退出码镜像走层 3 真机。
  */
 import { describe, expect, it } from "vitest";

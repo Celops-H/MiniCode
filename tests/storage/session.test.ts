@@ -92,7 +92,7 @@ describe("会话持久化与续跑", () => {
     expect(byId.get(empty.meta.id)?.sizeBytes).toBe(0);
   });
 
-  it("listSessions：单个会话 meta 损坏时跳过该条，不拖垮整个列表（P2 审查）", async () => {
+  it("listSessions：单个会话 meta 损坏时跳过该条，不拖垮整个列表", async () => {
     const store = setup();
     const good = await store.createSession({ model: "m", title: "完好" });
     const bad = await store.createSession({ model: "m", title: "损坏" });
@@ -101,7 +101,7 @@ describe("会话持久化与续跑", () => {
     const list = await store.listSessions();
     expect(list.map((m) => m.id)).toEqual([good.meta.id]);
   });
-  it("loadSession 坏 meta（缺 id）抛可读错误，不再照加载（E89）", async () => {
+  it("loadSession 坏 meta（缺 id）抛可读错误，不再照加载", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "session-test-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -110,7 +110,7 @@ describe("会话持久化与续跑", () => {
     await expect(store.loadSession(session.meta.id)).rejects.toThrow("缺少会话 id");
   });
 
-  it("listSessions 非 ENOENT 错误上抛，不再一律吞成空列表（E89）", async () => {
+  it("listSessions 非 ENOENT 错误上抛，不再一律吞成空列表", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "session-test-"));
     const store = new SessionStore(dir);
     // sessionsDir 指向一个文件：readdir 报 ENOTDIR（非 ENOENT），应上抛而非返回 []
@@ -120,7 +120,7 @@ describe("会话持久化与续跑", () => {
     await expect(badStore.listSessions()).rejects.toThrow();
   });
 
-  it("listSessions：meta 缺 updatedAt（JSON 合法但形状不全）同样跳过，排序不崩（审查补）", async () => {
+  it("listSessions：meta 缺 updatedAt（JSON 合法但形状不全）同样跳过，排序不崩", async () => {
     const store = setup();
     const good = await store.createSession({ model: "m", title: "完好" });
     const bad = await store.createSession({ model: "m", title: "缺字段" });
@@ -130,7 +130,7 @@ describe("会话持久化与续跑", () => {
     expect(list.map((m) => m.id)).toEqual([good.meta.id]);
   });
 
-  it("deleteSession：meta 损坏的会话仍可直接删（按 id 删文件，与 meta 内容无关，审查补）", async () => {
+  it("deleteSession：meta 损坏的会话仍可直接删（按 id 删文件，与 meta 内容无关）", async () => {
     const store = setup();
     const bad = await store.createSession({ model: "m" });
     writeFileSync(path.join(dir, `${bad.meta.id}.meta.json`), "{ 坏 json");
@@ -188,7 +188,7 @@ describe("会话持久化与续跑", () => {
     await store.appendMessage(session, userMessage("旧对话一"));
     await store.appendMessage(session, userMessage("旧对话二"));
     await store.flush();
-    // /clear 命令的行为：rewriteMessages([]) 清空整份消息，标题保持（用户复核：会话名不变）
+    // /clear 命令的行为：rewriteMessages([]) 清空整份消息，标题保持（会话名不变）
     await store.rewriteMessages(session, []);
 
     const loaded = await store.loadSession(session.meta.id);
@@ -217,7 +217,7 @@ describe("会话持久化与续跑", () => {
     expect(loaded.getMessages()).toEqual([summary]);
   });
 
-  it("rewriteMessages 清理攒批残留：重写前未 flush 的消息不污染重写后的盘（review 修复）", async () => {
+  it("rewriteMessages 清理攒批残留：重写前未 flush 的消息不污染重写后的盘", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
     // 重写前 append 未 flush（攒批残留：重写前的旧消息）
@@ -231,7 +231,7 @@ describe("会话持久化与续跑", () => {
     expect(loaded.getMessages()).toEqual([summary]);
   });
 
-  it("rewriteMessages 不误删重写期间并发追加的消息（真实并行，review 修复：快照过滤 vs 无条件删除的区分测试）", async () => {
+  it("rewriteMessages 不误删重写期间并发追加的消息（真实并行，快照过滤 vs 无条件删除的区分测试）", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
     // 旧消息攒批未 flush
@@ -249,7 +249,7 @@ describe("会话持久化与续跑", () => {
     expect(loaded.getMessages()[1]?.content).toBe("新消息");
   });
 
-  it("readJsonl 坏行跳过：单行损坏不拖垮整会话加载（review 修复，DESIGN 14 可修复）", async () => {
+  it("readJsonl 坏行跳过：单行损坏不拖垮整会话加载", async () => {
     const store = setup();
     const session = await store.createSession({ model: "mock" });
     await store.appendMessage(session, userMessage("好行"));
@@ -353,7 +353,7 @@ describe("会话持久化与续跑", () => {
   });
 });
 
-describe("会话按启动工作目录隔离（E46）", () => {
+describe("会话按启动工作目录隔离", () => {
   it("不同 cwd 的会话互相不可见（各目录只看自己的会话）", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "minicode-cwd-sessions-"));
     try {

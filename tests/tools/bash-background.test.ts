@@ -68,7 +68,7 @@ describe("bash 后台执行", () => {
     );
   });
 
-  it("多字节字符恰在 chunk 边界被劈开时输出不乱码（E91，StringDecoder 按流解码）", async () => {
+  it("多字节字符恰在 chunk 边界被劈开时输出不乱码（StringDecoder 按流解码）", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "bg-utf8-"));
     const script = path.join(dir, "split.mjs");
     // 先写「你」的前 2 个字节（劈开多字节字符），50ms 后补完——旧实现按段 toString
@@ -95,7 +95,7 @@ describe("bash 后台执行", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("killBackgroundTask 对已完成任务不覆盖状态（E92：真实退出码不丢）", async () => {
+  it("killBackgroundTask 对已完成任务不覆盖状态（真实退出码不丢）", async () => {
     const out = await bashTool.execute({
       command: "node -e \"process.exit(3)\"",
       background: true,
@@ -115,7 +115,7 @@ describe("bash 后台执行", () => {
     expect(before?.status).toBe("failed");
   });
 
-  it("后台任务 spawn 后立即关闭 stdin（E92）：等待输入的命令读到 EOF 即退出", async () => {
+  it("后台任务 spawn 后立即关闭 stdin：等待输入的命令读到 EOF 即退出", async () => {
     // findstr（Windows）/ cat（POSIX）无文件参数时读 stdin 直到 EOF：
     // stdin 未关闭会永挂占任务位，关闭后读到 EOF 立即退出
     const out = await bashTool.execute({

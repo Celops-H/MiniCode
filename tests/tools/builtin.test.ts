@@ -32,7 +32,7 @@ describe("文件类内置工具", () => {
     expect(out).toBe("1\t第一行\n2\t第二行\n3\t第三行");
   });
 
-  it("read offset 超出文件行数时返回越界提示（E93）", async () => {
+  it("read offset 超出文件行数时返回越界提示", async () => {
     const dir = setup();
     const file = path.join(dir, "a.txt");
     writeFileSync(file, "一\n二\n三");
@@ -66,7 +66,7 @@ describe("文件类内置工具", () => {
     expect(out).not.toContain("b.js");
   });
 
-  it("grep 跳过二进制文件（E90）：NUL 嗅探，乱码不再喂给模型", async () => {
+  it("grep 跳过二进制文件：NUL 嗅探，乱码不再喂给模型", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "real.txt"), "has match here");
     // 二进制文件：NUL 字节开头 + 内文含匹配词（旧实现乱码行会命中正则）

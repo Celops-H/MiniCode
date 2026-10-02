@@ -1,5 +1,5 @@
 /**
- * 可观测性模块（OBSERVABILITY，BACKEND §18）：全本地的运行留痕系统。
+ * 可观测性模块：全本地的运行留痕系统。
  * 依赖方向单向：core 发事件 → hook 总线 ← 本模块订阅；宿主（CLI/TUI/评测）装配
  * Recorder、读数据走 TraceReader。存储独立于会话存储，只靠 sessionId 关联。
  */
@@ -30,7 +30,7 @@ export interface AttachRecorderOptions {
 }
 
 /**
- * 装配轨迹记录器（CLI/TUI 宿主调用）：enabled=false（OBSERVABILITY §7）时返回
+ * 装配轨迹记录器（CLI/TUI 宿主调用）：enabled=false时返回
  * undefined、零开销。Recorder 订阅总线上全部事件类型，随会话存亡。
  * @param bus hook 事件总线
  * @param options 装配选项

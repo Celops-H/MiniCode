@@ -7,8 +7,8 @@ interface AnthropicChunk {
   index?: number;
   /** text/thinking 块可能把首段内容放在 start 而非 delta（部分兼容端点） */
   content_block?: { type?: string; id?: string; name?: string; text?: string; thinking?: string };
-  /** message_start 携带的用量（E63：input_tokens，output_tokens 为流初值）；
-   *  cache 字段为可观测性 B1 补充（缓存读命中与缓存写入，官方语义 input_tokens 不含缓存段） */
+  /** message_start 携带的用量（input_tokens，output_tokens 为流初值）；
+   *  cache 字段为补充（缓存读命中与缓存写入，官方语义 input_tokens 不含缓存段） */
   message?: {
     usage?: {
       input_tokens?: number;
@@ -23,7 +23,7 @@ interface AnthropicChunk {
     thinking?: string;
     partial_json?: string;
     stop_reason?: string;
-    /** message_delta 携带的用量（E63：output_tokens 为累计最终值；cache 字段同为累计值时取最后一次） */
+    /** message_delta 携带的用量（output_tokens 为累计最终值；cache 字段同为累计值时取最后一次） */
     usage?: {
       input_tokens?: number;
       output_tokens?: number;
@@ -65,11 +65,11 @@ export class AnthropicMessagesProtocol implements Protocol {
     const toolIndexByBlock = new Map<number, number>();
     let nextToolIndex = 0;
     let stopReason: string | undefined;
-    // 真实用量（E63）：message_start 给 input_tokens（output 为流初值），
+    // 真实用量：message_start 给 input_tokens（output 为流初值），
     // message_delta 给累计 output_tokens（最终值），随 done 事件挂出
     let inputTokens: number | undefined;
     let outputTokens: number | undefined;
-    // 缓存读/写 token（可观测性 B1）：message_start 给初值，message_delta 若带累计值取最后一次
+    // 缓存读/写 token：message_start 给初值，message_delta 若带累计值取最后一次
     let cacheReadTokens: number | undefined;
     let cacheWriteTokens: number | undefined;
     // 每个 text/thinking 块各一份清洗状态（块开始新建、块结束 flush），按块 index 取用
@@ -185,23 +185,23 @@ export class AnthropicMessagesProtocol implements Protocol {
             break;
           }
           case "message_start":
-            // 真实用量（E63）：输入 token 在 message_start 的 usage 里
+            // 真实用量：输入 token 在 message_start 的 usage 里
             inputTokens = event.message?.usage?.input_tokens ?? inputTokens;
             outputTokens ??= event.message?.usage?.output_tokens;
-            // 缓存读/写 token（可观测性 B1）：start 处为初值
+            // 缓存读/写 token：start 处为初值
             cacheReadTokens ??= event.message?.usage?.cache_read_input_tokens;
             cacheWriteTokens ??= event.message?.usage?.cache_creation_input_tokens;
             break;
           case "message_delta":
             // Anthropic 的停止原因在 message_delta.delta.stop_reason；仅在有值时覆盖——
             // 个别兼容厂商在带 stop_reason 的 message_delta 后再发只带 usage 的
-            // message_delta，无条件覆盖会把已收到的停止原因清掉（E47 收尾判定随之失效）
+            // message_delta，无条件覆盖会把已收到的停止原因清掉（收尾判定随之失效）
             stopReason ??= event.delta?.stop_reason;
-            // 真实用量（E63）：output_tokens 为累计最终值，最后一次取值
+            // 真实用量：output_tokens 为累计最终值，最后一次取值
             if (typeof event.delta?.usage?.output_tokens === "number") {
               outputTokens = event.delta.usage.output_tokens;
             }
-            // 缓存读/写 token（可观测性 B1）：delta 带累计值时同样取最后一次
+            // 缓存读/写 token：delta 带累计值时同样取最后一次
             if (typeof event.delta?.usage?.cache_read_input_tokens === "number") {
               cacheReadTokens = event.delta.usage.cache_read_input_tokens;
             }
@@ -233,7 +233,7 @@ export class AnthropicMessagesProtocol implements Protocol {
     // 流尾（断流）：未 stop 的 text 块 flush 标签残料
     yield* flushOpenTextBlocks();
     // 已收到 stop_reason（message_delta 已到，响应逻辑上已完整）：按正常完成收 done。
-    // E47 收尾宽限关流场景（厂商发完 message_delta 后握着连接不发 message_stop）落到这里，
+    // 收尾宽限关流场景（厂商发完 message_delta 后握着连接不发 message_stop）落到这里，
     // 整轮不因缺 message_stop 被误判异常
     if (stopReason) {
       yield {
@@ -250,7 +250,7 @@ export class AnthropicMessagesProtocol implements Protocol {
 
 /**
  * 统一消息 → Anthropic 消息；工具结果归并进 user 消息（Anthropic 要求）。
- * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过（E55）：与 openai 侧
+ * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过：与 openai 侧
  * buildRequest 的过滤对称，跨协议切模型续跑不再把它发给严格校验端点吃 400。
  * 跳过（以及错误轮紧跟工具轮等形态）会让历史出现相邻同角色的 user 消息，而严格
  * 校验端点要求角色交替——相邻 user 合并为一条（内容块数组并列，顺序不变），
@@ -334,8 +334,8 @@ function toAnthropicTool(tool: ToolDefinition): Record<string, unknown> {
 }
 
 /**
- * 统一用量（E63）：input/output 任一存在才产出 done.usage，缺省不带（厂商未给用量
- * 的流 done 与旧契约一致）。cache 字段（可观测性 B1）任一存在才携带。
+ * 统一用量：input/output 任一存在才产出 done.usage，缺省不带（厂商未给用量
+ * 的流 done 与旧契约一致）。cache 字段任一存在才携带。
  * @param inputTokens 输入 token（message_start）
  * @param outputTokens 输出 token（message_delta 累计最终值，回落 message_start 初值）
  * @param cacheReadTokens 缓存读命中 token（cache_read_input_tokens）
@@ -367,7 +367,7 @@ function anthropicUsage(
 }
 
 /**
- * 流内 error 事件的 error 字段 → 可读消息（E96）：官方 overloaded_error 等载荷的
+ * 流内 error 事件的 error 字段 → 可读消息：官方 overloaded_error 等载荷的
  * error 是对象，String() 直转得 "[object Object]" 并经 assemble 写进持久化 stopReason、
  * 透传界面上屏。对象取 message ?? type，非空字符串直用；空串/0/false 等退化形态与
  * openai 侧同判为占位噪声，报「未知错误」而非「0」「false」这类无信息消息。与 openai

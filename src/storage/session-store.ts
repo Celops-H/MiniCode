@@ -61,13 +61,13 @@ export class SessionStore {
   async loadSession(id: string): Promise<Session> {
     const raw = await readFile(this.metaFile(id), "utf8");
     const parsed = JSON.parse(raw) as SessionMeta;
-    // 最小形状校验（E89）：listSessions 有形状检查而这里没有，坏 meta 照加载——缺 id
+    // 最小形状校验：listSessions 有形状检查而这里没有，坏 meta 照加载——缺 id
     // 续聊后以 undefined 为攒批键静默写出 undefined.jsonl；显式报错让用户可定位坏文件
     if (typeof parsed?.id !== "string" || parsed.id.length === 0) {
       throw new Error(`会话元数据损坏（${id}.meta.json 缺少会话 id）：无法加载，可删除该会话文件后重建`);
     }
     if (parsed.id !== id) {
-      // meta.id 与文件名不一致（手改/拷贝改名）：后续 flush 会按 meta.id 写出另一对文件（审查补充）
+      // meta.id 与文件名不一致（手改/拷贝改名）：后续 flush 会按 meta.id 写出另一对文件
       throw new Error(`会话元数据损坏（${id}.meta.json 的 id 与文件名不一致）：无法加载，可删除该会话文件后重建`);
     }
     // 旧会话无 formatVersion 字段，视为版本 1
@@ -91,7 +91,7 @@ export class SessionStore {
 
   /**
    * 强制落盘：把攒批的消息一次 append 写 JSONL，并写回已变更的会话元数据。
-   * 交互关键节点调用（DESIGN 14 flush 屏障），保证崩溃时已完成回合的消息不丢。
+   * 交互关键节点调用（flush 屏障），保证崩溃时已完成回合的消息不丢。
    */
   async flush(): Promise<void> {
     if (this.pending.size === 0) return;
@@ -114,7 +114,7 @@ export class SessionStore {
   async rewriteMessages(session: Session, messages: Message[]): Promise<void> {
     // 快照必须放在函数第一行（首个 await 前）：appendMessage 是同步的，
     // 若快照在 ensureDir 之后，调用 rewrite 后立即 append 的消息会被当成旧消息误删
-    // （review 修复：并发 append 的新消息保留，重写前的旧消息稍后删除）
+    // （并发 append 的新消息保留，重写前的旧消息稍后删除）
     const staleIds = new Set(this.pending.get(session.meta.id)?.messages.map((m) => m.id) ?? []);
     await this.ensureDir();
     const file = this.messageFile(session.meta.id);
@@ -145,7 +145,7 @@ export class SessionStore {
       files = await readdir(this.dir);
     } catch (err) {
       // 目录不存在（从未建过会话）返回空列表；其余错误（EACCES 等）上抛——
-      // 一律吞成「无会话」会让权限问题伪装成空状态，用户误以为会话全丢（E89）
+      // 一律吞成「无会话」会让权限问题伪装成空状态，用户误以为会话全丢
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }

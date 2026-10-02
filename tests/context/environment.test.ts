@@ -1,5 +1,5 @@
 /**
- * 环境信息段测试（E80）：Shell 如实报告实际执行者——Windows 的 bash 工具经
+ * 环境信息段测试：Shell 如实报告实际执行者——Windows 的 bash 工具经
  * spawn(shell:true) 实际由 cmd.exe 执行，报告 SHELL（Git Bash 启动时指向 bash）
  * 会诱导模型写 bash 语法命令。
  */
@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { environmentPrompt } from "../../src/context/index.js";
 
 describe("environmentPrompt（环境信息段）", () => {
-  it("Windows 下报告实际执行者 COMSPEC，不吃 SHELL（E80）", () => {
+  it("Windows 下报告实际执行者 COMSPEC，不吃 SHELL", () => {
     const env = { ...process.env, SHELL: "/usr/bin/bash", COMSPEC: "C:\\Windows\\system32\\cmd.exe" };
     const prompt = environmentPrompt("C:\\proj", { env, platform: "win32" });
     expect(prompt).toContain("cmd.exe");

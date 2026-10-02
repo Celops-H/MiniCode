@@ -52,10 +52,10 @@ export interface RunTuiEntryOptions {
   projectAgentsFile?: string;
 }
 
-/** 初始会话解析（P6-1/2）：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
+/** 初始会话解析：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
  *  启动不发消息不创建会话：草稿不带 meta 文件，第一条用户消息经 interact 轮末 flush 才写盘，
  *  启动不开会走人不在 sessions 目录留空会话。显式 id 支持短前缀——/session 面板展示 id 前 6 位
- *  （P2 审查修正：与面板展示同向，避免照抄仍匹配不上；沿用 git 式唯一前缀惯例，多敲几位可加长区分），
+ *  （与面板展示同向，避免照抄仍匹配不上；沿用 git 式唯一前缀惯例，多敲几位可加长区分），
  *  多个会话撞前缀时取最近活跃的一个。
  *  纯函数便于层 1 测试。 */
 export async function resolveInitialSession(
@@ -90,7 +90,7 @@ export async function resolveInitialSession(
   });
 }
 
-/** reconfigure（/connect、/model）后恢复当前会话（P6-1/S-3）：读盘成功续跑（含 /model 改过的模型）；
+/** reconfigure（/connect、/model）后恢复当前会话：读盘成功续跑（含 /model 改过的模型）；
  *  仅「草稿未落盘」（ENOENT）重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据。
  *  纯函数便于层 1 测试。 */
 export async function reloadOrDraftSession(store: SessionStore, current: Session, modelId: string): Promise<Session> {
@@ -106,9 +106,9 @@ export async function reloadOrDraftSession(store: SessionStore, current: Session
 export const NO_MODEL_ID = "";
 
 /**
- * 启动模型客户端装配（E31）：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
+ * 启动模型客户端装配：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
  * 由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
- * modelChain 死条目等装配告警（E54）收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
+ * modelChain 死条目等装配告警收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
  * @param config 已加载配置（可省略，等同零厂商）
  * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、
  *   needsConnect 是否进连接引导、warnings 装配告警列表
@@ -135,36 +135,36 @@ export function createStartupModels(config?: Config): {
 
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
-  // 全局配置播种（BACKEND §14）：独立启动（dev 入口）也要装配配置前检测；
+  // 全局配置播种：独立启动（dev 入口）也要装配配置前检测；
   // minicode tui 经 CLI main() 已播种，此处 wx/EEXIST 幂等
   await ensureGlobalConfigSeed();
   // .env 注入须先于 loadConfig：项目 .env 里的 MINICODE_* 配置经环境变量层进入
   // 合并链（与 CLI main 顺序一致），后加载会漏读
   await loadDotEnv();
   let config: Config = await loadConfig();
-  // 会话按启动工作目录隔离存储（E46，DESIGN 14）：各目录只看自己的会话
+  // 会话按启动工作目录隔离存储：各目录只看自己的会话
   const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
-  // 零可用厂商（E31）：正常启动进 /connect 引导；CLI 宿主非交互，保持报错退出
+  // 零可用厂商：正常启动进 /connect 引导；CLI 宿主非交互，保持报错退出
   const startup = createStartupModels(config);
   let models: Models = startup.models;
   let modelId: string = startup.modelId;
-  // 装配告警（E54，modelChain 死条目等）：每个会话轮经 startupNotices 提示一次，
+  // 装配告警（modelChain 死条目等）：每个会话轮经 startupNotices 提示一次，
   // reconfigure 重建模型客户端时重置重收
   let modelWarnings: string[] = startup.warnings;
   let session = await resolveInitialSession(options, store, modelId);
   // 思考等级盒子跨 reconfigure 持久：/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
-  // 权限模式盒子上提到入口层（批次 9~14 审查 4c）：carry 续接的 UI 权限模式与管线实际值一致
+  // 权限模式盒子上提到入口层：carry 续接的 UI 权限模式与管线实际值一致
   const permissionModeBox: { value: PermissionMode } = { value: "default" };
-  // 共享终端一次创建跨会话复用（E19：reconfigure 不再销毁重建渲染器——闪屏根源）
+  // 共享终端一次创建跨会话复用（reconfigure 不再销毁重建渲染器——闪屏根源）
   const terminal = await createTuiTerminal();
-  // 共享挂载（批次 9~14 审查必须项 1）：Solid 根只挂一次——同一渲染器重复 render 会叠加旧根
+  // 共享挂载：Solid 根只挂一次——同一渲染器重复 render 会叠加旧根
   //（旧树 useKeyboard 不卸载，按键双份处理）；会话轮换仅重置 store 内容并切换动作分发
   const [sharedState, setSharedState] = createStore<TuiState>(initState(session.getMessages(), session.meta.title, modelId));
   const shared: TuiSharedMount = { state: sharedState, setState: setSharedState, mounted: false };
-  // 共享模式下视图内容是否按当前会话重建：首轮/切会话/新建草稿 true，reconfigure carry 续接 false（E34）
+  // 共享模式下视图内容是否按当前会话重建：首轮/切会话/新建草稿 true，reconfigure carry 续接 false
   let resetView = true;
-  // 启动引导只作用于首轮（批次 3/4 审查问题 1）：连接成功的 reconfigure 后不复位会复弹弹窗
+  // 启动引导只作用于首轮：连接成功的 reconfigure 后不复位会复弹弹窗
   let firstRound = true;
   try {
     for (;;) {
@@ -173,7 +173,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         models,
         config,
         session,
-        // 多 Agent 协作生效判定（E115）：CLI 旗标（--no-agents）与 config.agents 合取；
+        // 多 Agent 协作生效判定：CLI 旗标（--no-agents）与 config.agents 合取；
         // config 随 reconfigure 重读，协作开关改配置后重装配即生效
         agents: resolveAgentsEnabled(options.agents, config.agents),
         thinkingLevelBox,
@@ -192,8 +192,8 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // 成功提示（模型已切换/已连接/配置已写入）正常显示、到期自然消失
         setSharedState({ modal: undefined });
         // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
-        // 会话内视图不按盘上消息重建（store 内容原样续接，E34 历史固定）；切会话/新建草稿才重建视图。
-        // 装配告警随重建重置重收（E54）
+        // 会话内视图不按盘上消息重建（store 内容原样续接，历史固定）；切会话/新建草稿才重建视图。
+        // 装配告警随重建重置重收
         await loadDotEnv();
         config = await loadConfig();
         modelWarnings = [];
@@ -208,7 +208,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
           resetView = true;
         } else {
           session = await reloadOrDraftSession(store, session, modelId);
-          // 引导态先发消息后连接（E31 边界，批次 3/4 审查问题 2）：草稿可能以空模型落盘，
+          // 引导态先发消息后连接：草稿可能以空模型落盘，
           // 载入的会话模型在新配置里不可解析时归位为当前主模型，免得已连接仍报「未知模型」；
           // 内存归位即可，下一轮落盘自然纠正盘上 meta
           if (!session.meta.model || !models.resolve(session.meta.model)) {
@@ -243,23 +243,23 @@ async function runTuiSession(opts: {
   permissionModeBox: { value: PermissionMode };
   /** 零可用厂商启动引导（仅首轮可能为 true） */
   startupConnect?: boolean;
-  /** 装配告警（E54：modelChain 死条目等），随启动提示一并 toast */
+  /** 装配告警（modelChain 死条目等），随启动提示一并 toast */
   modelWarnings?: string[];
-  /** 共享挂载上下文（E19 修正，入口层创建一次） */
+  /** 共享挂载上下文（入口层创建一次） */
   shared: TuiSharedMount;
-  /** 本轮是否按当前会话重建视图内容（false = carry 续接，E34） */
+  /** 本轮是否按当前会话重建视图内容（false = carry 续接） */
   resetView: boolean;
-  /** 共享终端（E19，入口层创建一次） */
+  /** 共享终端（入口层创建一次） */
   terminal?: TuiTerminal;
   /** 项目根 AGENTS.md 路径（/init 免审批判定与生成目标；缺省 <cwd>/AGENTS.md） */
   projectAgentsFile?: string;
 }): Promise<{ switchTo?: string; reconfigure?: boolean; state: TuiState }> {
   const { store, models, config, session, agents, thinkingLevelBox, permissionModeBox } = opts;
-  // hook stderr 通道（E95）：可变盒子由 runTui 挂载后指向 toast，hook 观测输出不直写
+  // hook stderr 通道：可变盒子由 runTui 挂载后指向 toast，hook 观测输出不直写
   // stderr（全屏渲染下会以裸文本插进渲染帧）。盒子指向 toast 前的窗口期输出静默丢弃
   // （当前装配顺序下无事件落在该窗口；若调整装配顺序需留意）
   const hookStderrBox: { value?: (text: string) => void } = {};
-  // 流水日志（OBSERVABILITY §6）：文件 Logger（TUI 全屏渲染，不走控制台输出）
+  // 流水日志：文件 Logger（TUI 全屏渲染，不走控制台输出）
   const logger = createFileLogger(config);
   const onHandlerError = (err: unknown, event: HookEvent): void => logger.error(hookHandlerErrorText(err, event));
   const hooks =
@@ -269,7 +269,7 @@ async function runTuiSession(opts: {
   logger.info(`启动：minicode ${MINICODE_VERSION}（cwd ${process.cwd()}）`);
   logger.info(`配置加载完成（logLevel ${config.logLevel}）`);
   logger.info(`会话 ${session.meta.id}（模型 ${session.meta.model}）开始`);
-  // 可观测性装配（OBSERVABILITY §3.1/§7，与 CLI 同套）：Recorder 订阅总线写轨迹；
+  // 可观测性装配（与 CLI 同套）：Recorder 订阅总线写轨迹；
   // enabled=false 时不装配。轨迹目录同时供 /session 删除联动（先轨迹后会话）使用
   const tracesDir = config.observability?.dir ?? resolveTracesDir();
   attachRecorder(hooks, {
@@ -280,7 +280,7 @@ async function runTuiSession(opts: {
     enabled: config.observability?.enabled,
     dir: config.observability?.dir,
   });
-  // 流水日志埋点（OBSERVABILITY §6）：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
+  // 流水日志埋点：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
   attachHookLogging(hooks, logger);
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
   // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
@@ -290,16 +290,16 @@ async function runTuiSession(opts: {
     safetyMargin: 4096,
     keepRecentToolResults: 5,
   };
-  // 撞线自动压缩开关（E115）：compactConfig 的有无只管压缩参数供给（手动 /compact 不受限），
+  // 撞线自动压缩开关：compactConfig 的有无只管压缩参数供给（手动 /compact 不受限），
   // 自动触发由本开关单独门控（Agent.autoCompact）
   const autoCompact = config.compact?.enabled !== false;
-  // /init 过程免审批盒子（E24）：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
+  // /init 过程免审批盒子：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
   const initPolicyBox: { value: boolean } = { value: false };
   const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
-  // M5 扩展生态装配（BACKEND §19/§20，与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
+  // 扩展生态装配（与 CLI 同套）：MCP server 工具 + 技能清单并入会话；
   // 启动失败的 server 已跳过，错误行 toast 一次提示、完整状态在 /mcp 面板
   const extensions = await assembleSessionExtensions(config, { logger });
-  // 指令文件加载（BACKEND §21，与 CLI 同套）：用户级 + 项目侧逐级拼接进系统提示词
+  // 指令文件加载（与 CLI 同套）：用户级 + 项目侧逐级拼接进系统提示词
   const instructionsSection = buildInstructionsPrompt(await loadInstructionFiles());
   try {
     return await runTui({
@@ -310,11 +310,11 @@ async function runTuiSession(opts: {
       permissionMode: permissionModeBox,
       thinkingLevel: thinkingLevelBox,
       modelList: models.listModels().map((m) => ({ id: m.id, providerId: m.providerId, providerName: models.provider(m.providerId)?.name })),
-      // 扩展面板数据源（/mcp /skill，BACKEND §19/§20）
+      // 扩展面板数据源（/mcp /skill）
       mcpServers: config.mcpServers ?? {},
       getMcpStatuses: () => extensions.mcpManager?.statuses() ?? [],
       skillsDisabled: config.skills?.disabled ?? [],
-      // 设置面板数据源（/settings，E115）：行启用态按合并配置生效值展示
+      // 设置面板数据源（/settings）：行启用态按合并配置生效值展示
       config,
       startupNotices: [...(opts.modelWarnings ?? []), ...extensions.mcpErrors],
       startupConnect: opts.startupConnect,
@@ -324,7 +324,7 @@ async function runTuiSession(opts: {
       terminal: opts.terminal,
       projectAgentsFile: opts.projectAgentsFile,
       tracesDir,
-      // 状态行用量与水位（可观测性 B4，OBSERVABILITY §5.1）：归一口径按协议区分；
+      // 状态行用量与水位（可观测性）：归一口径按协议区分；
       // 水位与压缩触发同口径（compactConfig 即压缩判断用的窗口参数）
       modelApi: (id) => models.resolve(id)?.model.api,
       contextWindow: compactConfig.contextWindow,
@@ -360,7 +360,7 @@ async function runTuiSession(opts: {
           get mode() {
             return permissionModeBox.value;
           },
-          // /init 过程免审批（E24）：只读工具 + 写项目根 AGENTS.md 自动放行，
+          // /init 过程免审批：只读工具 + 写项目根 AGENTS.md 自动放行，
           // 其余工具（bash、写其他路径等）仍走正常审批
           autoApprove: (request) => {
             if (!initPolicyBox.value) return false;
@@ -382,7 +382,7 @@ async function runTuiSession(opts: {
           hooks,
           compactConfig,
           autoCompact,
-          // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
+          // 子 agent 提示词附加段：指令段与技能段派生时注入子 agent
           subagentPromptSections: [instructionsSection, extensions.promptSection],
           // 思考等级活引用：/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）
           thinkingLevelRef: () => thinkingLevelBox.value,

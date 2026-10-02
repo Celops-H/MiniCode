@@ -14,7 +14,7 @@ function mockSummarizer(text: string): Summarizer {
 }
 
 describe("buildSummaryRequest（摘要请求）", () => {
-  it("包含九段结构化摘要格式（对齐 cc，E41）与禁工具调用的前言", () => {
+  it("包含九段结构化摘要格式与禁工具调用的前言", () => {
     const request = buildSummaryRequest();
     expect(request.role).toBe("user");
     const content = (request as { content: string }).content;
@@ -35,7 +35,7 @@ describe("buildSummaryRequest（摘要请求）", () => {
     expect(content).not.toContain("Additional Instructions");
   });
 
-  it("压缩指导以 Additional Instructions 段追加在提示词最末（DESIGN 9.8）", () => {
+  it("压缩指导以 Additional Instructions 段追加在提示词最末", () => {
     const content = (buildSummaryRequest("侧重保留命令与输出") as { content: string }).content;
     const idx = content.indexOf("Additional Instructions：\n侧重保留命令与输出");
     expect(idx).toBeGreaterThan(0);

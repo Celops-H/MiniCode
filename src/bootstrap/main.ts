@@ -51,9 +51,9 @@ program
   });
 
 /**
- * 识别无子命令的顶层 TUI 形态（P6-1/2）：minicode（无参）进 TUI 空态、minicode -c [id] 继续最近/指定、
+ * 识别无子命令的顶层 TUI 形态：minicode（无参）进 TUI 空态、minicode -c [id] 继续最近/指定、
  * minicode --no-agents 禁多 Agent。其余形态返回 null（交 commander 正常分派子命令）。
- * 解析**位置无关**（--no-agents 在 -c 前后等价，整体审视 F 级修正）；-c/--continue 后跟非 flag 参数即会话
+ * 解析**位置无关**（--no-agents 在 -c 前后等价）；-c/--continue 后跟非 flag 参数即会话
  * id，--continue=id 内联；空值（-c 后无值 / --continue= 空串）统一按「继续最近」。
  * 不用 commander 默认 action：commander 15 默认 action 与子命令混用实测不可靠（minicode tui 会被默认
  * action 截走、顶层可选 option 的 -c <id> 报 too many arguments），故 main 在 parseAsync 前手动接管。
@@ -100,7 +100,7 @@ async function tryTopLevelTui(argv: string[]): Promise<boolean> {
     const { runTuiEntry } = await import("../tui/index.js");
     await runTuiEntry(entry);
   } catch (err) {
-    // minicode -c <不存在的会话 id>：loadSession 抛 ENOENT，给可读提示而非原始文件路径（N-6）
+    // minicode -c <不存在的会话 id>：loadSession 抛 ENOENT，给可读提示而非原始文件路径
     if ((err as { code?: string }).code === "ENOENT" && entry.sessionId) {
       console.error(`会话不存在：${entry.sessionId}`);
       return true;
@@ -111,16 +111,16 @@ async function tryTopLevelTui(argv: string[]): Promise<boolean> {
 }
 
 export async function main(): Promise<void> {
-  // 进程退出统一清理后台任务与 MCP server（DESIGN 7.5 + BACKEND §19），防孤儿进程残留：
+  // 进程退出统一清理后台任务与 MCP server，防孤儿进程残留：
   // 崩溃路径（uncaughtException 等先于 process.exit）会话 finally 不执行，exit 钩子是最后防线
   process.on("exit", () => {
     killAllBackgroundTasks();
     killAllMcpServers();
   });
-  // dist 过期自动重建（E5）：产物早于最近提交时先 pnpm build 再进界面，防拿过期产物；
+  // dist 过期自动重建：产物早于最近提交时先 pnpm build 再进界面，防拿过期产物；
   // 源码直跑（tsx dev）与非 git 环境静默跳过
   await rebuildIfStale();
-  // 全局配置播种（BACKEND §14）：任一入口装配配置前检测，config.json 缺失才按预设写种子
+  // 全局配置播种：任一入口装配配置前检测，config.json 缺失才按预设写种子
   await ensureGlobalConfigSeed();
   await loadDotEnv();
   // 顶层 TUI 快捷入口在 commander 前手动接管（见 topLevelTui）；其余交 commander 分派子命令

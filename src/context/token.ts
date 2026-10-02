@@ -1,7 +1,7 @@
 import type { Message } from "../core/index.js";
 
 /**
- * token 估算系数（E79 改分段计价）：中文（CJK）分词器实测约 1 字符 1 token，
+ * token 估算系数（分段计价）：中文（CJK）分词器实测约 1 字符 1 token，
  * 英文/数字/符号约 4 字符 1 token（记 0.25）。此前的单一系数 0.3 注释称「保守较大值
  * 宁高估」，实际对中文系统性低估约 3 倍——本项目提示词/指令/用户输入以中文为主，
  * 压缩触发点系统性滞后、频繁落到应急剥组。分段计价后中文占比越高估算越大，不再依赖
@@ -72,7 +72,7 @@ export function estimateTokens(messages: Message[]): number {
 
 /**
  * 估算一段文本的 token 数（与消息同口径：CJK/其他分段计价）。
- * 系统提示词不占消息位，压缩触发判断按同口径单独计入（E15）。
+ * 系统提示词不占消息位，压缩触发判断按同口径单独计入。
  * @param text 文本
  * @returns 估算 token 数
  */

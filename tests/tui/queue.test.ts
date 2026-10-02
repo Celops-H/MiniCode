@@ -1,5 +1,5 @@
 /**
- * 统一排队泵（E109）：消费决策矩阵与跨类型保序。
+ * 统一排队泵：消费决策矩阵与跨类型保序。
  * 此前消息与命令分两条传输队列各自 FIFO，跨队列不保序——排队条顺序与实际执行顺序不一致；
  * 改为单一待办队列后，泵永远取队首、按类型路由，本文件用泵决策序列锁定该语义。
  * 两扇门（messageWait/commandWait）锁定三个等待窗口：压缩执行中防消息轮次与历史重写并发、
@@ -24,7 +24,7 @@ describe("pumpQueue 消费决策", () => {
     expect(pumpQueue(msg("问题"), IDLE)).toEqual({ op: "message", text: "问题" });
   });
 
-  it("队首消息 + 压缩执行中：等待（防轮次与压缩的历史重写并发，批次 35 整体审视补）", () => {
+  it("队首消息 + 压缩执行中：等待（防轮次与压缩的历史重写并发）", () => {
     expect(pumpQueue(msg("问题"), { messageWait: true, commandWait: true })).toEqual({ op: "wait" });
   });
 
@@ -46,7 +46,7 @@ describe("pumpQueue 消费决策", () => {
   });
 });
 
-describe("消费顺序 = 入队顺序（E109 跨类型保序）", () => {
+describe("消费顺序 = 入队顺序（跨类型保序）", () => {
   /** 模拟门放行后的逐项消费：每次按泵决策取走队首，记录执行序列 */
   function drainAll(queue: QueuedItem[], ctx: PumpQueueCtx): string[] {
     const rest = [...queue];

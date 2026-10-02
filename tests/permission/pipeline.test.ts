@@ -161,7 +161,7 @@ describe("权限模式", () => {
   });
 });
 
-describe("作用域内免审批 autoApprove（E24 /init 只读过程）", () => {
+describe("作用域内免审批 autoApprove（/init 只读过程）", () => {
   it("判定命中直接放行（source=auto），不进用户审批", async () => {
     const approver = vi.fn(async () => ({ action: "allow" as const }));
     const pipeline = new PermissionPipeline({

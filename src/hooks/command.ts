@@ -7,17 +7,17 @@ export interface CommandHookOptions {
   /** 命令超时 ms，默认 60000；超时视为失败 */
   timeoutMs?: number;
   /**
-   * 命令 stderr 观测输出通道（E95）：宿主注入——CLI 缺省直写本进程 stderr，TUI 注入
+   * 命令 stderr 观测输出通道：宿主注入——CLI 缺省直写本进程 stderr，TUI 注入
    * toast/日志通道（全屏渲染下直写 stderr 会以裸文本插进渲染帧）。不注入时保持直写。
    */
   onStderr?: (text: string) => void;
 }
 
 /**
- * 命令 hook 适配器（DESIGN 13：外部程序经 Hook 扩展 Agent 的 CLI 形态）：
+ * 命令 hook 适配器（外部程序经 Hook 扩展 Agent 的 CLI 形态）：
  * 把一条外部命令包装成 Hook 处理器——事件负载以 JSON 写入命令 stdin，
  * stdout 解析裁决（PreToolUse 才需要，其他事件仅观测）。
- * 协议（精简自 claude-code）：
+ * 协议：
  * - stdin：`{"hookEvent": {type, ...事件负载}, "cwd": "..."}`（一次写入后关闭）
  * - stdout：`{"verdict": "allow" | "deny" | "ask"}`（仅 PreToolUse 解析）
  * 失败语义（保守）：命令异常退出 / 超时 / stdout 解析失败 → PreToolUse 判 deny，
@@ -87,7 +87,7 @@ function runCommand(
       settled = true;
       clearTimeout(timer);
       if (stderr) {
-        // 命令 stderr 作观测输出转发（E95）：经宿主注入的通道，不影响裁决；
+        // 命令 stderr 作观测输出转发：经宿主注入的通道，不影响裁决；
         // 缺省直写本进程 stderr（CLI 形态）
         const text = `[hook] ${command}: ${stderr.trim()}`;
         if (onStderr) onStderr(text);

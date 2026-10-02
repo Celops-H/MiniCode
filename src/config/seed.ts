@@ -5,7 +5,7 @@ import { PROVIDER_PRESETS } from "./presets.js";
 import { resolveConfigPaths, type ConfigPaths } from "./paths.js";
 
 /**
- * 全局配置播种（BACKEND §14）：CLI/TUI 任一入口装配配置前调用。
+ * 全局配置播种：CLI/TUI 任一入口装配配置前调用。
  * ~/.minicode/config.json 不存在则递归建目录写入种子（只写 providers，其余字段靠
  * schema 默认值）；文件存在则一个字节不动——用户手编内容绝对尊重。删除文件后重启
  * 按预设重建，这是重置出口，也顺带解决版本升级新预设的获取（升级不回填：无法区分
@@ -24,7 +24,7 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       baseUrl: p.baseUrl,
       apiKeyEnv: p.apiKeyEnv,
       ...(p.protocol ? { protocol: p.protocol } : {}),
-      // 厂商能力开关默认值（E60）：仅非缺省值落盘，种子保持最小
+      // 厂商能力开关默认值：仅非缺省值落盘，种子保持最小
       ...(p.reasoningContent ? { reasoningContent: true } : {}),
       ...(p.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(p.enableThinking ? { enableThinking: true } : {}),

@@ -5,7 +5,7 @@ import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
- * 文件版本令牌（DESIGN 7.6）：read 记录、write/edit 校验。
+ * 文件版本令牌：read 记录、write/edit 校验。
  * mtime+size 对齐覆盖「同一毫秒两次写入」盲区；完整读时记录内容 hash，
  * 供「mtime 变但内容未变」的抖动场景兜底放行。
  */
@@ -24,7 +24,7 @@ export function hashContent(content: string): string {
 /** 模块级 per-path 锁：跨 FileState（多 agent）共享，串行化同路径的「校验+写入+刷新」 */
 const fileLocks = new Map<string, Promise<void>>();
 
-/** 按 agent 隔离的文件状态：磁盘是共享真相，先到先写天然成立（DESIGN 7.6） */
+/** 按 agent 隔离的文件状态：磁盘是共享真相，先到先写天然成立 */
 export class FileState {
   private readonly versions = new Map<string, FileVersion>();
 
@@ -140,9 +140,8 @@ export async function withCwd<T>(cwd: string, fn: () => T | Promise<T>): Promise
 
 /**
  * 按当前工具执行上下文解析路径：相对路径基于当前 cwd；统一过一次 path.resolve
- * （E94）——绝对路径原样返回会让 C:\a\.\b.txt、C:\a\..\a\b.txt、正斜杠写法各占
- * 键，read 记的键与 write 校验的键因拼写差异错开，绕过「后写拒绝」CAS 静默覆盖
- * （与已修大小写绕过 a888e06 同根）。
+ * 不统一的话，绝对路径原样返回会让 C:\a\.\b.txt、C:\a\..\a\b.txt、正斜杠写法各占
+ * 键，read 记的键与 write 校验的键因拼写差异错开，绕过「后写拒绝」CAS 静默覆盖。
  */
 export function resolvePath(p: string): string {
   return path.resolve(currentCwd(), p);

@@ -1,5 +1,5 @@
 /**
- * /settings 设置面板（E115）：功能开关的行定义、生效值读取与配置回写。
+ * /settings 设置面板：功能开关的行定义、生效值读取与配置回写。
  * 全部开关为装配期读取，应用后走重装配链生效（同 /model）。
  * 回写规则「写回定义层」：开关字段被项目配置定义过就写项目层 .minicode.json，否则写全局
  * ~/.minicode/config.json（两层都无时写全局）。嵌套字段（compact.enabled 等）按父对象判定——
@@ -20,7 +20,7 @@ export interface SettingSpec {
   defaultValue: boolean;
 }
 
-/** 首轮列项（E115，均为布尔开关；logLevel 为枚举型不进面板） */
+/** 首轮列项（均为布尔开关；logLevel 为枚举型不进面板） */
 export const SETTING_SPECS: SettingSpec[] = [
   {
     id: "compact.enabled",

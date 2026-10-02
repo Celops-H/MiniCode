@@ -33,7 +33,7 @@ async function readLines(filePath: string): Promise<Record<string, unknown>[]> {
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
-describe("Recorder：轨迹格式与落盘（OBSERVABILITY §4）", () => {
+describe("Recorder：轨迹格式与落盘", () => {
   it("header 在首行，事件行与消息行按 kind 区分、agentPath 提升到行级、data 携带负载", async () => {
     const dir = await tmpDir();
     try {
@@ -209,7 +209,7 @@ describe("Recorder：轨迹格式与落盘（OBSERVABILITY §4）", () => {
   });
 });
 
-describe("TraceWriter：攒批与冲刷（OBSERVABILITY §4.4）", () => {
+describe("TraceWriter：攒批与冲刷", () => {
   it("未达攒批阈值不落盘，flush 后一次写入；文件权限位按 0600 语义创建", async () => {
     const dir = await tmpDir();
     try {
@@ -308,7 +308,7 @@ describe("TraceWriter：攒批与冲刷（OBSERVABILITY §4.4）", () => {
   });
 });
 
-describe("TraceWriter：flushSync 与 header 去重（审查修正）", () => {
+describe("TraceWriter：flushSync 与 header 去重", () => {
   it("flushSync 同步落盘残余缓冲（exit/信号处理器同路径）", async () => {
     const dir = await tmpDir();
     try {
@@ -350,7 +350,7 @@ describe("TraceWriter：flushSync 与 header 去重（审查修正）", () => {
   });
 });
 
-describe("TraceReader：流式读取与容错（OBSERVABILITY §4.4）", () => {
+describe("TraceReader：流式读取与容错", () => {
   it("未知 kind 与损坏行跳过不报错，合法行照常产出；events 按 event/agentPath 过滤", async () => {
     const dir = await tmpDir();
     try {
@@ -401,7 +401,7 @@ describe("TraceReader：流式读取与容错（OBSERVABILITY §4.4）", () => {
   });
 });
 
-describe("会话删除联动与惰性清理（OBSERVABILITY §4.1）", () => {
+describe("会话删除联动与惰性清理", () => {
   it("deleteTrace 删除指定轨迹，文件不存在时静默通过", async () => {
     const dir = await tmpDir();
     try {
@@ -458,7 +458,7 @@ describe("会话删除联动与惰性清理（OBSERVABILITY §4.1）", () => {
   });
 });
 
-describe("attachRecorder 装配（OBSERVABILITY §7）", () => {
+describe("attachRecorder 装配", () => {
   it("enabled=false 不装配；缺省开启；dir 缺省解析", async () => {
     const bus = new HookBus();
     expect(attachRecorder(bus, { sessionId: "s", cwd: "x", minicodeVersion: "0.0.1", sessionsRoot: "sr", enabled: false })).toBeUndefined();

@@ -6,18 +6,18 @@ import { Agent, type ModelClient } from "../../src/agent/index.js";
 import { z } from "zod";
 import { withCwd, resolvePath, currentCwd } from "../../src/tools/file-state.js";
 
-describe("工具执行上下文 cwd（DESIGN 4.2）", () => {
+describe("工具执行上下文 cwd", () => {
   let dir: string;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("resolvePath：相对路径基于上下文 cwd，绝对路径归一化（E94）", async () => {
+  it("resolvePath：相对路径基于上下文 cwd，绝对路径归一化", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "cwd-"));
     await withCwd(dir, () => {
       expect(resolvePath("a.txt")).toBe(path.join(dir, "a.txt"));
       expect(resolvePath("./x/y.txt")).toBe(path.join(dir, "x", "y.txt"));
-      // E94：绝对路径统一过 path.resolve，`.`/`..` 段与分隔符写法归一到同一键
+      // 绝对路径统一过 path.resolve，`.`/`..` 段与分隔符写法归一到同一键
       //（read 记的键与 write 校验的键因拼写差异错开会绕过 CAS）
       expect(resolvePath(path.join(dir, "sub", "..", "a.txt"))).toBe(path.join(dir, "a.txt"));
     });

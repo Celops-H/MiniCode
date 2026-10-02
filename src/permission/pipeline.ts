@@ -1,7 +1,7 @@
 import { checkDangerousCommand } from "./dangerous.js";
 import { evaluateRules, ruleMatches, type PermissionBehavior, type PermissionRule } from "./rule.js";
 
-/** 权限模式（DESIGN 8.3，用户选定 1/3/4）：default 正常审批 / plan 只读放行 / bypassPermissions 跳过默认询问 */
+/** 权限模式：default 正常审批 / plan 只读放行 / bypassPermissions 跳过默认询问 */
 export type PermissionMode = "default" | "plan" | "bypassPermissions";
 
 export interface PermissionRequest {
@@ -37,7 +37,7 @@ export interface PermissionPipelineOptions {
   mode?: PermissionMode;
   /** plan 模式放行的只读工具集合（宿主从 Tool.isReadOnly 收集） */
   readOnlyTools?: Set<string>;
-  /** 作用域内免审批判定（E24 /init 只读过程）：命中直接放行不弹审批块；宿主活读提供（/init 过程置位）。
+  /** 作用域内免审批判定（/init 只读过程）：命中直接放行不弹审批块；宿主活读提供（/init 过程置位）。
    *  置于 Hook 之后、用户审批之前——保留 Hook 拦截语义，危险命令检查与规则层不受影响 */
   autoApprove?: (request: PermissionRequest) => boolean;
 }
@@ -45,7 +45,7 @@ export interface PermissionPipelineOptions {
 /**
  * 权限决策管线：危险命令检查 → 规则层 → 会话缓存 → Hook → 用户审批。
  * 规则层是前置过滤器，deny 优先；仅 ask 进入后续决策链。
- * 三种模式（DESIGN 8.3）：
+ * 三种模式：
  * - default：完整审批链
  * - plan：只放行注入的只读工具集合，其余拒绝
  * - bypassPermissions：跳过「默认询问」（未命中规则），但保留危险命令检查与显式规则
@@ -98,14 +98,14 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
     const cacheKey = this.cacheKey(toolName, content);
     if (this.cache.get(cacheKey)) return { allowed: true, source: "cache" };
 
-    // Hook 环节（DESIGN 8.1 决策链）：规则层 ask 时介入，deny 拒绝 / allow 放行 / ask 继续走用户审批
+    // Hook 环节（决策链）：规则层 ask 时介入，deny 拒绝 / allow 放行 / ask 继续走用户审批
     if (hook) {
       const hookVerdict = await hook(request);
       if (hookVerdict === "deny") return { allowed: false, reason: "Hook 拒绝", source: "hook" };
       if (hookVerdict === "allow") return { allowed: true, source: "hook" };
     }
 
-    // 作用域内免审批（E24）：宿主判定命中直接放行（/init 只读工具 + 目标写入）
+    // 作用域内免审批：宿主判定命中直接放行（/init 只读工具 + 目标写入）
     if (this.options.autoApprove?.(request)) {
       return { allowed: true, source: "auto" };
     }
@@ -123,7 +123,7 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
   }
 
   /**
-   * 免审批工具检查（DESIGN 7.1 skipsPermission）：跳过规则层/会话缓存/用户审批，
+   * 免审批工具检查（skipsPermission）：跳过规则层/会话缓存/用户审批，
    * 但保留 plan 模式只读约束与 PreToolUse hook 拦截——低影响工具（如 agent 消息投递）
    * 不打扰用户审批，仍可被 plan 模式约束与 hook 观测/拦截。
    * @param request 权限请求（工具名 + 参数）

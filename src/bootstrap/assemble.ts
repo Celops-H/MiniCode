@@ -39,13 +39,13 @@ export const SYSTEM_PROMPT = [
   "9. 破坏性操作（删除/覆盖/强制提交等）先征得用户同意；不外泄密钥/隐私。",
 ].join("\n");
 
-/** 多 agent 协作开启时追加的协调者角色定位（DESIGN 11.1；具体协作引导在 spawn_agent 工具描述里） */
+/** 多 agent 协作开启时追加的协调者角色定位（具体协作引导在 spawn_agent 工具描述里） */
 const COORDINATOR_PROMPT = "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。";
 
 /** 项目版本号（轨迹 header、--version 用；与 package.json version 保持同步） */
 export const MINICODE_VERSION = "0.0.1";
 
-/** 会话扩展生态装配结果（BACKEND §19/§20）：需并入会话的工具与系统提示词段落 */
+/** 会话扩展生态装配结果：需并入会话的工具与系统提示词段落 */
 export interface SessionExtensions {
   /** 追加到内置工具之后的工具（MCP 工具 + skill 工具） */
   tools: Tool[];
@@ -58,12 +58,12 @@ export interface SessionExtensions {
 }
 
 /**
- * 会话扩展生态装配（BACKEND §19/§20）：启动全部已启用 MCP server（失败的跳过
+ * 会话扩展生态装配：启动全部已启用 MCP server（失败的跳过
  * 并记录错误行，不阻断会话）、扫描技能目录；技能非空时产出 skill 工具与「可用技能」提示词段
  * （工具与提示词同进退）。
  * @param config 已加载配置（取 mcpServers 与 skills.disabled）
  * @param opts 技能目录覆盖（测试注入；缺省项目 <cwd>/.minicode/skills、用户 ~/.minicode/skills）；
- *   logger 传入时记录 MCP 启动摘要、连接断开与技能加载（可观测性 B3 埋点）
+ *   logger 传入时记录 MCP 启动摘要、连接断开与技能加载
  */
 export async function assembleSessionExtensions(
   config: Pick<Config, "mcpServers" | "skills">,
@@ -102,7 +102,7 @@ export async function assembleSessionExtensions(
 }
 
 /**
- * 流水日志文件 Logger（OBSERVABILITY §6）：级别走 logLevel 配置
+ * 流水日志文件 Logger：级别走 logLevel 配置
  * （MINICODE_LOG_LEVEL 环境变量经配置加载层可覆盖），写 ~/.minicode/logs/minicode.log，
  * 单文件超限轮转保留 .old 一份。日志无新增配置项。
  * @param config 已加载配置（取 logLevel）
@@ -116,12 +116,12 @@ export function createFileLogger(config: Pick<Config, "logLevel">): Logger {
 }
 
 /**
- * 按 config.hooks 装配 Hook 总线（DESIGN 13）：每条命令包装成对应事件的处理器；
+ * 按 config.hooks 装配 Hook 总线：每条命令包装成对应事件的处理器；
  * 未配置 hooks 时返回 undefined（Hook 系统不启用）。
  * @param hooks hook 配置
- * @param opts.onStderr hook 命令 stderr 的观测输出通道（E95）：TUI 宿主注入界面通道
+ * @param opts.onStderr hook 命令 stderr 的观测输出通道：TUI 宿主注入界面通道
  *   （全屏渲染下直写 stderr 会插花渲染帧）；缺省直写本进程 stderr
- * @param opts.onHandlerError 处理器异常回调（可观测性 B3）：宿主接流水日志
+ * @param opts.onHandlerError 处理器异常回调：宿主接流水日志
  */
 export function buildHookBus(
   hooks?: Config["hooks"],
@@ -164,10 +164,10 @@ export function resolveAgentsEnabled(flag: boolean | undefined, configAgents: bo
 }
 
 /**
- * 按 agents 开关组装会话 agent（DESIGN 11.4，默认开启）：
+ * 按 agents 开关组装会话 agent（默认开启）：
  * 开启时创建 Team 并注册 root、传入 agent（协作工具随 team 注册，模型可自主 spawn）；
  * 显式传 false 时保持单 agent 会话（协作工具对模型不可见）。
- * 子 agent 由模型 spawn_agent 派生，继承运行时；团队不持久化（DESIGN 11），随会话结束消失。
+ * 子 agent 由模型 spawn_agent 派生，继承运行时；团队不持久化，随会话结束消失。
  */
 export function createSessionAgent(options: {
   modelClient: ModelClient;
@@ -176,7 +176,7 @@ export function createSessionAgent(options: {
   tools?: Tool[];
   initialMessages?: Message[];
   agents?: boolean;
-  /** 撞线自动压缩开关（E115，缺省开；透传给 Agent） */
+  /** 撞线自动压缩开关（缺省开；透传给 Agent） */
   autoCompact?: boolean;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
@@ -187,7 +187,7 @@ export function createSessionAgent(options: {
   onRootEvent?: (event: StreamEvent) => void;
   /** 权限管线（TUI 注入用户审批 approver）；缺省不启用 */
   permission?: PermissionPipeline;
-  /** 协作子 agent 的提示词附加段（E12/E14：项目指令段 + 可用技能段，装配时传入；
+  /** 协作子 agent 的提示词附加段（项目指令段 + 可用技能段，装配时传入；
    *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定） */
   subagentPromptSections?: string[];
 }): { agent: Agent; team?: Team } {

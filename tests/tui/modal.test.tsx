@@ -91,7 +91,7 @@ it("connect 供应商列表：只显供应商名、不附默认模型（C-7=62�
   expect(frame).toContain("连接供应商");
   expect(frame).toContain("DeepSeek");
   expect(frame).toContain("OpenAI");
-  // 不附默认模型名（用户定论：供应商列表只需名称）
+  // 不附默认模型名（供应商列表只需名称）
   expect(frame).not.toContain("deepseek-chat");
   expect(frame).not.toContain("gpt-4o");
 });
@@ -124,7 +124,7 @@ it("会话面板（P4-3 全屏页）：新建置顶、每条两行主信息+副�
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("会话列表");
-  expect(frame).toContain("ab3f90"); // id 前 6 位（第三列，-c 短前缀可直接照抄，P2 审查修正）
+  expect(frame).toContain("ab3f90"); // id 前 6 位（第三列，-c 短前缀可直接照抄）
   expect(frame).toContain("重构 partition");
   expect(frame).toContain("deepseek-v4-flash");
   // 副行：相对时间 + 消息文件大小
@@ -162,7 +162,7 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（P6-5
   const modelColA = colWidth(rowA.slice(0, rowA.indexOf("model-alpha")));
   const modelColB = colWidth(rowB.slice(0, rowB.indexOf("model-beta-9")));
   expect(modelColA).toBe(modelColB);
-  // 两行哈希列（第三列）起始显示列一致：模型列 padCols 补齐后不随各模型宽度错位（S-1 审查修正）
+  // 两行哈希列（第三列）起始显示列一致：模型列 padCols 补齐后不随各模型宽度错位
   const hashColA = colWidth(rowA.slice(0, rowA.indexOf("aaaa11")));
   const hashColB = colWidth(rowB.slice(0, rowB.indexOf("bbbb22")));
   expect(hashColA).toBe(hashColB);
@@ -281,7 +281,7 @@ it("/connect 选中供应商：浅蓝背景块黑字（P6 与权限/新建会话
   expect(other[0] && !isAccentBg(other[0].bg)).toBe(true);
 });
 
-it("/model 选中模型：正绿 + ▸、未选中白字、无背景块（E23 配色统一）", async () => {
+it("/model 选中模型：正绿 + ▸、未选中白字、无背景块（配色统一）", async () => {
   const modal: ModalState = {
     kind: "model",
     models: [
@@ -305,7 +305,7 @@ it("/model 选中模型：正绿 + ▸、未选中白字、无背景块（E23 �
   expect(spans.find((s) => isAccentBg(s.bg))).toBeUndefined();
 });
 
-it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致（P6 审查补）", async () => {
+it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一致（）", async () => {
   // 先测 /model：selected 1 时 gpt-4o 未选中、gpt-5-mini 选中，两行 id 起始列相同
   const modelModal: ModalState = {
     kind: "model",
@@ -343,7 +343,7 @@ it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一�
   );
 });
 
-it("/model 选中高亮随导航移动（P6 审查补：createMemo 响应式，非 For 卡死）", async () => {
+it("/model 选中高亮随导航移动（createMemo 响应式，非 For 卡死）", async () => {
   const models = [
     { id: "gpt-4o", providerName: "OpenAI" },
     { id: "gpt-5-mini", providerName: "OpenAI" },
@@ -384,7 +384,7 @@ it("新建会话选中态：浅蓝背景块 + 黑字（P6-4 特殊化，与普�
   expect(isBlackFg(sel!.fg)).toBe(true); // 黑字（background #101013）
 });
 
-it("/mcp 面板：服务行绿对勾/红叉开关（E21）、▸ 选中标记与键位提示（E28 无框线）", async () => {
+it("/mcp 面板：服务行绿对勾/红叉开关、▸ 选中标记与键位提示", async () => {
   const modal: ModalState = {
     kind: "mcp",
     rows: [
@@ -396,18 +396,18 @@ it("/mcp 面板：服务行绿对勾/红叉开关（E21）、▸ 选中标记与
   const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 10 });
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  // E21：开关前置绿对勾/红叉，替代「启用/关闭」文字；E28：去线框无标题
+  // 开关前置绿对勾/红叉，替代「启用/关闭」文字；去线框无标题
   expect(frame).toContain("▸ ✓ fs");
   expect(frame).toContain("✕ git");
   expect(frame).toContain("←→ 启用/关闭 · Enter 应用 · Esc 取消");
-  // 选中行正绿（E23 success #7fd88f）、未选中白字（#ececf0）
+  // 选中行正绿（success #7fd88f）、未选中白字（#ececf0）
   const spans = setup.captureSpans().lines.flatMap((l) => l.spans);
   expect(fgHex(spans.find((s) => s.text.includes("fs"))?.fg)).toBe("#7fd88f");
   expect(fgHex(spans.find((s) => s.text.includes("git"))?.fg)).toBe("#ececf0");
   expect(frame).not.toContain("╭");
 });
 
-it("/skill 面板：技能行描述；空列表显示占位行（E28 去线框无标题）", async () => {
+it("/skill 面板：技能行描述；空列表显示占位行（去线框无标题）", async () => {
   const modal: ModalState = {
     kind: "skill",
     rows: [{ id: "review", label: "review", detail: "审查代码", enabled: true, source: "project" }],

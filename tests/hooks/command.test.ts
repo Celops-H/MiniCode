@@ -17,7 +17,7 @@ function makeHookCommand(dir: string, logic: string): string {
   return `node ${script}`;
 }
 
-describe("命令 hook 适配器（DESIGN 13）", () => {
+describe("命令 hook 适配器", () => {
   let dir: string;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -48,7 +48,7 @@ describe("命令 hook 适配器（DESIGN 13）", () => {
     expect(await ask({ type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: {}, agentPath: "/root" })).toBe("ask");
   });
 
-  it("stderr 观测输出经注入通道转发（E95），不再直写本进程 stderr", async () => {
+  it("stderr 观测输出经注入通道转发，不再直写本进程 stderr", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "hook-test-"));
     const command = makeHookCommand(
       dir,

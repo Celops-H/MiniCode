@@ -152,7 +152,7 @@ it("Stop：子 agent 的 Stop 不把主界面打成空闲（P8）；主 agent（
   expect(rootStop.status).toBe("idle");
 });
 
-it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 hasRunningAgent 判打断（P8 整体审视补）", () => {
+it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 hasRunningAgent 判打断", () => {
   // 复刻 loop esc 分支的组合：running 并入 agent 树运行态
   const withSubRunning: TuiState = {
     ...initState([]),
@@ -193,7 +193,7 @@ it("initState 恢复历史消息：user/assistant 带创建时间戳（P11，rec
   expect(msgs[2]?.time).toBeUndefined();
 });
 
-it("initState：非法时间戳不显示（防 NaN:NaN:NaN，审查补）", () => {
+it("initState：非法时间戳不显示（防 NaN:NaN:NaN）", () => {
   const messages: Message[] = [
     { role: "user", id: "u1", content: "坏时间", timestamp: "garbage" },
     { role: "assistant", id: "a1", content: [{ type: "text", text: "回复" }], timestamp: "not-a-date" },

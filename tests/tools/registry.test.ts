@@ -21,7 +21,7 @@ const globTool: Tool = {
   execute: () => "[]",
 };
 
-/** 带 inputJsonSchema 的外部工具（MCP 形态，BACKEND §19）：zod 侧 z.unknown() 放行 */
+/** 带 inputJsonSchema 的外部工具（MCP 形态）：zod 侧 z.unknown() 放行 */
 const mcpTool: Tool = {
   name: "mcp__fs__read_file",
   description: "读取外部文件",

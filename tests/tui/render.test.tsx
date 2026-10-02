@@ -69,7 +69,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("模式[default]");
   });
 
-  it("窄屏 + 真实长标题：状态行不折行、模型名保留（右侧溢出被截，UI-SPEC 既有行为）", async () => {
+  it("窄屏 + 真实长标题：状态行不折行、模型名保留（右侧溢出被截）", async () => {
     const [state, setState] = createStore<TuiState>(initState([], "重构 partition 并发分区方案"));
     const setup = await testRender(
       () => (
@@ -84,7 +84,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("会话 重构 partition");
   });
 
-  it("状态栏当前模型名蓝色（与圆点同色 modelColor，用户复核：模型名应为蓝）", async () => {
+  it("状态栏当前模型名蓝色（与圆点同色 modelColor）", async () => {
     const channel = createChannel([]);
     const setup = await testRender(
       () => (
@@ -108,7 +108,7 @@ describe("view/App 渲染链", () => {
     expect(textFgContaining(setup.captureSpans(), "运行中（Esc 打断")).toBe("#e5c07b");
   });
 
-  it("状态行显示会话标题，/rename 同步更新（用户复核：会话名应随 /rename 变）", async () => {
+  it("状态行显示会话标题，/rename 同步更新", async () => {
     const [state, setState] = createStore<TuiState>(initState([], "重构 partition"));
     const setup = await testRender(
       () => (
@@ -237,7 +237,7 @@ describe("view/App 渲染链", () => {
     expect(frame).not.toContain("deepseek-v4-flash");
   });
 
-  it("状态行用量三段（可观测性 B4）：有数据显示 ↑↓/缓存/上下文，无数据不渲染", async () => {
+  it("状态行用量三段：有数据显示 ↑↓/缓存/上下文，无数据不渲染", async () => {
     const [state, setState] = createStore<TuiState>(initState([], "", "m"));
     const setup = await testRender(() => <App state={state} onAction={() => {}} />, { width: 110, height: 8 });
     await setup.waitForVisualIdle();
@@ -257,7 +257,7 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("缓存 87%");
     expect(frame).toContain("上下文 62%");
 
-    // 未到压缩线：水位弱灰；到达压缩线（≥ threshold）：警示色=warning 红（UI-SPEC §9，theme.warning 并入红）
+    // 未到压缩线：水位弱灰；到达压缩线（≥ threshold）：警示色=warning 红（theme.warning 并入红）
     setState({ contextTokens: 50000 });
     await setup.waitForVisualIdle();
     expect(textFgContaining(setup.captureSpans(), "上下文 50%")).toBe("#8f9096");

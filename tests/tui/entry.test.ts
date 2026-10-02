@@ -1,5 +1,5 @@
 /**
- * 层 1：TUI 初始会话解析（P6-1/2）——启动不创建会话（内存草稿不落盘）、
+ * 层 1：TUI 初始会话解析——启动不创建会话（内存草稿不落盘）、
  * minicode -c 继续最近活跃会话（listSessions 倒序首个）、无最近回落草稿。
  */
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -62,7 +62,7 @@ it("sessionId 指向不存在的会话：报错（minicode -c <坏 id> 由入口
   await expect(resolveInitialSession({ sessionId: "nope" }, store, "m2")).rejects.toThrow();
 });
 
-it("sessionId 短前缀：命中唯一会话加载（面板显示 id 前 6 位，照抄即可续会话，P2）", async () => {
+it("sessionId 短前缀：命中唯一会话加载（面板显示 id 前 6 位，照抄即可续会话）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "目标会话" });
   // 与 /session 面板展示口径一致：id 前 6 位
@@ -95,7 +95,7 @@ it("sessionId 短前缀无匹配：保持报错（不静默改草稿态）", asy
   ).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-it("sessionId meta 损坏：非 ENOENT 读盘错误原样上抛（不吞数据，P2 审查补）", async () => {
+it("sessionId meta 损坏：非 ENOENT 读盘错误原样上抛（不吞数据）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "损坏" });
   writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
@@ -119,21 +119,21 @@ it("reloadOrDraftSession：草稿未落盘（ENOENT）重建草稿不报错", as
   expect(readdirSync(dir)).toHaveLength(0); // 重建仍是草稿，不落盘
 });
 
-it("reloadOrDraftSession：非 ENOENT 读盘错误上抛（meta 损坏不静默吞数据，S-3）", async () => {
+it("reloadOrDraftSession：非 ENOENT 读盘错误上抛（meta 损坏不静默吞数据）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "损坏" });
   writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
   await expect(reloadOrDraftSession(store, created, "m3")).rejects.toThrow();
 });
 
-it("createStartupModels：零可用厂商返回引导态（空模型集合 + needsConnect，E31）", () => {
+it("createStartupModels：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {
   const startup = createStartupModels(undefined);
   expect(startup.needsConnect).toBe(true);
   expect(startup.modelId).toBe(NO_MODEL_ID);
   expect(startup.models.listModels()).toEqual([]);
 });
 
-it("createStartupModels：落盘 apiKey 的厂商正常装配（E33 同权）", () => {
+it("createStartupModels：落盘 apiKey 的厂商正常装配（与环境变量同权）", () => {
   const config = configSchema.parse({
     providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
   });
@@ -143,7 +143,7 @@ it("createStartupModels：落盘 apiKey 的厂商正常装配（E33 同权）", 
   expect(startup.models.listModels().map((m) => m.id)).toEqual(["m-1"]);
 });
 
-it("createStartupModels：modelChain 死条目收进 warnings 供界面提示（E54）", () => {
+it("createStartupModels：modelChain 死条目收进 warnings 供界面提示", () => {
   const config = configSchema.parse({
     providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
     modelChain: ["m-1", "ghost-1"],

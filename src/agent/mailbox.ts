@@ -1,5 +1,5 @@
 /**
- * agent 邮箱（DESIGN 11.3）：每 agent 一个消息队列。
+ * agent 邮箱：每 agent 一个消息队列。
  * 双语义：MESSAGE 排队不唤醒（send_message）；NEW_TASK / FINAL_ANSWER 投递 + 唤醒
  * （triggerTurn=true，followup_task / spawn 初始任务 / watcher 结论回灌）。
  * 收件箱消息在 turn 组装上下文时被消费注入；调度器唤醒判定看 hasPending。

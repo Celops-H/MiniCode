@@ -6,7 +6,7 @@ const FILE_TOOLS = new Set(["read", "write", "edit"]);
 /** 恢复上下文消息的标记前缀（压缩后由系统注入，source: "system"；增量合并时据此排除在增量之外） */
 export const RECOVERY_MARKER = "【恢复上下文】";
 
-/** 恢复上下文里单条用户请求的最大长度（DESIGN 9.4 紧凑补回：防大输入被完整拷回导致连续压缩自我放大） */
+/** 恢复上下文里单条用户请求的最大长度（防大输入被完整拷回导致连续压缩自我放大） */
 const MAX_REQUEST_CHARS = 200;
 
 /** 恢复上下文提取的截断选项 */
@@ -17,7 +17,7 @@ export interface RecoveryContextOptions {
   maxRequests?: number;
 }
 
-/** 压缩前提取的关键状态，压缩后以紧凑形式补回（DESIGN 9.4） */
+/** 压缩前提取的关键状态，压缩后以紧凑形式补回 */
 export interface RecoveryContext {
   /** 最近操作的文件（按最近使用顺序去重） */
   files: string[];

@@ -3,7 +3,7 @@ import type { McpServerConfig } from "../config/index.js";
 import type { Tool } from "../tools/index.js";
 import { McpClient } from "./client.js";
 
-/** 接入的 MCP 工具结果字符上限（BACKEND §19） */
+/** 接入的 MCP 工具结果字符上限 */
 const MCP_MAX_RESULT_CHARS = 30_000;
 
 /** 单个 server 的装配状态（TUI /mcp 面板与装配错误行共用） */
@@ -31,12 +31,12 @@ export function killAllMcpServers(): void {
 
 /** McpManager 构造选项 */
 export interface McpManagerOptions {
-  /** server 非主动停止的进程退出回调（可观测性 B3：宿主接流水日志记录「连接断开」） */
+  /** server 非主动停止的进程退出回调（宿主接流水日志记录「连接断开」） */
   onDisconnect?: (name: string, reason: string) => void;
 }
 
 /**
- * MCP server 生命周期管理（BACKEND §19）：装配时启动全部已启用 server 并完成握手，
+ * MCP server 生命周期管理：装配时启动全部已启用 server 并完成握手，
  * 失败的跳过并记录错误行（不阻断会话）；会话结束 stopAll 按进程树杀防孤儿。
  */
 export class McpManager {
@@ -140,7 +140,7 @@ export class McpManager {
       description: info.description ?? `MCP 服务 ${client.name} 的 ${info.name} 工具`,
       inputSchema: z.unknown(),
       inputJsonSchema: info.inputSchema,
-      isReadOnly: false, // 外部副作用不可判：走完整审批链（BACKEND §19）
+      isReadOnly: false, // 外部副作用不可判：走完整审批链
       maxResultSizeChars: MCP_MAX_RESULT_CHARS,
       async execute(input, options) {
         const args = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};

@@ -97,7 +97,7 @@ describe("事件收集器", () => {
     expect(msg.meta?.stopReason).toBe("error: 连接失败");
   });
 
-  it("纯空白思考/正文增量不产生内容块（E69：厂商占位内容不再渲染空折叠块）", async () => {
+  it("纯空白思考/正文增量不产生内容块（厂商占位内容不再渲染空折叠块）", async () => {
     // glm-4.5-air 工具循环续轮发 reasoning_content="\n"（厂商模板行为）：
     // 如实组装会产出展开全空白的「思考」折叠块
     const msg = await assembleAssistantMessage(
@@ -122,7 +122,7 @@ describe("事件收集器", () => {
     ]);
   });
 
-  it("done 携带的 usage 回填 meta.usage（E63 真实用量）", async () => {
+  it("done 携带的 usage 回填 meta.usage（真实用量）", async () => {
     const msg = await assembleAssistantMessage(
       events(
         { type: "text_delta", text: "回复" },

@@ -42,7 +42,7 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
     expect(context.sessionStart).toBe("开始");
   });
 
-  it("超长用户请求截断到 200 字符（DESIGN 9.4 紧凑补回，防连续压缩自我放大）", () => {
+  it("超长用户请求截断到 200 字符（紧凑补回，防连续压缩自我放大）", () => {
     const long = "很长的输入".repeat(100); // 500 字符
     const messages: Message[] = [userMessage("开始"), userMessage(long), userMessage("新的请求")];
     const context = extractRecoveryContext(messages);

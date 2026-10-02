@@ -100,7 +100,7 @@ describe("stream", () => {
     expect(lastRequest).toMatchObject({ model: "deepseek-chat" });
   });
 
-  it("debugDroppedChunks 透传协议层（E68 接线）：装配开关打开时零产出 chunk 输出诊断", async () => {
+  it("debugDroppedChunks 透传协议层：装配开关打开时零产出 chunk 输出诊断", async () => {
     const client: ChatCompletionsClient = {
       chat: {
         completions: {
@@ -156,13 +156,13 @@ describe("请求超时", () => {
     expect(client.timeout).toBe(REQUEST_TIMEOUT_MS);
   });
 
-  it("默认 client 关闭 SDK 内置重试（E58：失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
+  it("默认 client 关闭 SDK 内置重试（失败转移由 ModelRouter 独占，不叠加静默重试）", () => {
     const client = defaultCreateClient("sk", "https://api.deepseek.com") as unknown as { maxRetries: number };
     expect(client.maxRetries).toBe(0);
   });
 });
 
-describe("provider 配置能力位与请求头（E60/E64）", () => {
+describe("provider 配置能力位与请求头", () => {
   it("headers 配置经工厂透传（defaultHeaders），缺省不传", async () => {
     const seen: Array<Record<string, string> | undefined> = [];
     const factory = (apiKey: string, baseUrl: string, headers?: Record<string, string>) => {
@@ -196,7 +196,7 @@ describe("provider 配置能力位与请求头（E60/E64）", () => {
     expect(seen[1]).toBeUndefined();
   });
 
-  it("模型能力位随请求传给协议：reasoning_effort 仅对 reasoning 模型下发（E60）", async () => {
+  it("模型能力位随请求传给协议：reasoning_effort 仅对 reasoning 模型下发", async () => {
     let lastRequest: Record<string, unknown> | undefined;
     const client: ChatCompletionsClient = {
       chat: { completions: { async create(request) { lastRequest = request; return chunkGen({ choices: [{ delta: {}, finish_reason: "stop", index: 0 }] }); } } },
@@ -317,7 +317,7 @@ describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
     ]);
   });
 
-  it("finish_reason 后厂商握着连接不发结束帧：宽限窗后正常收尾 done，不再误报超时（E47）", async () => {
+  it("finish_reason 后厂商握着连接不发结束帧：宽限窗后正常收尾 done，不再误报超时", async () => {
     // 响应已逻辑完整（finish_reason 已到），厂商不发 [DONE] 也不关流：
     // 旧实现 30s 空闲超时报错丢整轮，现在宽限窗耗尽按正常收尾关流
     const client: ChatCompletionsClient = {
@@ -362,7 +362,7 @@ describe("流空闲超时（厂商 SSE 中途静默挂起）", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
-  it("finish_reason 后宽限窗内补发的正文不丢（E47）", async () => {
+  it("finish_reason 后宽限窗内补发的正文不丢", async () => {
     async function* tailContentStream(signal?: AbortSignal): AsyncIterable<unknown> {
       yield { choices: [{ delta: { content: "hi" }, index: 0 }] };
       yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };

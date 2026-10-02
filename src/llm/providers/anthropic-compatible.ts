@@ -12,7 +12,7 @@ export interface AnthropicMessagesClient {
   };
 }
 
-/** Anthropic 兼容 client 工厂：headers 为 provider 配置的附加请求头（E64，经 SDK defaultHeaders 透传） */
+/** Anthropic 兼容 client 工厂：headers 为 provider 配置的附加请求头（经 SDK defaultHeaders 透传） */
 export type AnthropicMessagesClientFactory = (
   apiKey: string,
   baseUrl: string,
@@ -25,19 +25,19 @@ export interface AnthropicCompatibleOptions {
   baseUrl: string;
   /** 存放 API key 的环境变量名 */
   apiKeyEnv: string;
-  /** 落盘 API key（配置 provider.apiKey，E33：与环境变量同权、env 优先） */
+  /** 落盘 API key（配置 provider.apiKey，与环境变量同权、env 优先） */
   apiKey?: string;
   models: ModelInfo[];
   env?: NodeJS.ProcessEnv;
-  /** 附加请求头，经 SDK defaultHeaders 透传（anthropic-beta 等场景，E64） */
+  /** 附加请求头，经 SDK defaultHeaders 透传（anthropic-beta 等场景） */
   headers?: Record<string, string>;
-  /** 端点按 Anthropic 官方语义强制校验 thinking 块签名（E61）：为 true 时请求带 tools
+  /** 端点按 Anthropic 官方语义强制校验 thinking 块签名：为 true 时请求带 tools
    *  期间不发 thinking 参数——历史 thinking 块无签名退化文本，真 Anthropic API 二轮 400；
    *  GLM/Kimi/DeepSeek 兼容端点不校验签名，缺省 false 不受影响 */
   requireThinkingSignature?: boolean;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
-  /** 收尾宽限窗（ms，E47）：stop_reason/message_stop 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
+  /** 收尾宽限窗（ms）：stop_reason/message_stop 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
   streamTailGraceMs?: number;
   /** Anthropic 请求默认 max_tokens（请求体必填，模型未定义时兜底） */
   defaultMaxTokens?: number;
@@ -109,11 +109,11 @@ export class AnthropicCompatibleProvider implements Provider {
     // max_tokens 是 Anthropic 请求体必填项：取模型定义值，模型未定义时兜底
     const info = this.modelList.find((m) => m.id === modelId);
     const maxTokens = info?.maxTokens ?? this.defaultMaxTokens;
-    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id（BACKEND §5）
+    // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id
     const vendorModelId = info?.vendorId ?? modelId;
     const request = this.protocol.buildRequest(context);
-    // 思考等级（E17）：anthropic 协议以 thinking 预算表达；maxTokens 决定预算上限。
-    // 签名校验端点的廉价缓解（E61）：请求带 tools 期间不发 thinking 参数——
+    // 思考等级：anthropic 协议以 thinking 预算表达；maxTokens 决定预算上限。
+    // 签名校验端点的廉价缓解：请求带 tools 期间不发 thinking 参数——
     // 历史 thinking 块无签名，真 Anthropic API 会因最后一条 assistant 非带签名
     // thinking 块开头而 400
     const thinking =
@@ -142,7 +142,7 @@ export class AnthropicCompatibleProvider implements Provider {
       );
       // 空闲超时包在原始流外：anthropic 的 ping 等不产出事件的 chunk 也算活跃，
       // 长思考静默期不被误判超时；超时异常经协议层补发 error 事件后原样抛出。
-      // 收尾宽限（E47）：stop_reason / message_stop 已到即响应完整，个别厂商握着连接
+      // 收尾宽限：stop_reason / message_stop 已到即响应完整，个别厂商握着连接
       // 不发结束帧，宽限窗后正常关流（协议以 stop_reason 收 done），不再误报超时丢整轮
       yield* this.protocol.parseStream(
         withIdleTimeout(stream, this.streamIdleTimeoutMs, () => controller.abort(), {
@@ -158,7 +158,7 @@ export class AnthropicCompatibleProvider implements Provider {
   /** 惰性创建 client：首次调用时才实例化，未配置认证直接报错 */
   private getClient(): AnthropicMessagesClient {
     if (!this.apiKey) {
-      // E59：文案带上具体环境变量名，用户可直接定位要配的变量
+      // 文案带上具体环境变量名，用户可直接定位要配的变量
       throw new Error(`Provider ${this.id} 未配置认证：请设置环境变量 ${this.apiKeyEnv}`);
     }
     this.client ??= this.createClient(this.apiKey, this.baseUrl, this.headers);
@@ -170,7 +170,7 @@ export class AnthropicCompatibleProvider implements Provider {
 export const DEFAULT_MAX_TOKENS = 8192;
 
 /**
- * 响应完成事件判定（E47 收尾宽限）：message_delta 带 stop_reason 即响应逻辑完成
+ * 响应完成事件判定（收尾宽限）：message_delta 带 stop_reason 即响应逻辑完成
  * （Anthropic 的停止原因在 message_delta，message_stop 是紧随的结束帧）。
  * @param event 一个流式响应事件
  * @returns 是否为完成信号
@@ -182,7 +182,7 @@ function anthropicEventFinished(event: unknown): boolean {
   return e.type === "message_delta" && Boolean(e.delta?.stop_reason);
 }
 
-/** 思考等级 → thinking 预算（budget_tokens）的基础映射（E17） */
+/** 思考等级 → thinking 预算（budget_tokens）的基础映射 */
 const THINKING_BUDGETS: Record<ThinkingLevel, number> = { low: 2048, medium: 4096, high: 8192 };
 
 /**
@@ -206,11 +206,11 @@ export function anthropicThinkingParam(
 /**
  * 默认用官方 Anthropic SDK 创建 client（x-api-key + anthropic-version 认证头由 SDK
  * 注入；带请求超时，防厂商请求挂起无限等待）。
- * maxRetries 显式为 0（E58）：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
+ * maxRetries 显式为 0：SDK 默认对 429/5xx/网络错误静默重试两次，与 ModelRouter
  * 的冷却/切换叠加会把失败转移拖到最坏约 75s 之后——失败转移由路由层独占。
  * @param apiKey API key
  * @param baseUrl 厂商 API 地址（Anthropic 兼容端点）
- * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传，E64）
+ * @param headers 附加请求头（provider 配置 headers，经 defaultHeaders 随每个请求透传）
  * @returns Anthropic 兼容 client
  */
 export function defaultAnthropicCreateClient(

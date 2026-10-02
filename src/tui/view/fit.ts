@@ -1,4 +1,4 @@
-/** 终端展示列宽：东亚全宽/全角字符与 emoji 计 2 列，其余 1 列（G-7 补 emoji 扩展区；
+/** 终端展示列宽：东亚全宽/全角字符与 emoji 计 2 列，其余 1 列（含 emoji 扩展区；
  *  CJK 按码点截断会溢出折行，见 Modal/StatusBar 使用处） */
 export function colWidth(s: string): number {
   let w = 0;
@@ -22,13 +22,13 @@ export function fitWidth(t: string, maxCols: number): string {
   return `${out}…`;
 }
 
-/** 右侧空格补齐到目标列宽（CJK 计 2 列）：会话列表三列各自对齐（P4-3） */
+/** 右侧空格补齐到目标列宽（CJK 计 2 列）：会话列表三列各自对齐 */
 export function padCols(s: string, cols: number): string {
   const w = colWidth(s);
   return w >= cols ? s : s + " ".repeat(cols - w);
 }
 
-/** 相对时间（P4-3 副行）：xx s/min/hour(s)/day(s) ago（G-7 单复数：1 hour 不加 s） */
+/** 相对时间（副行展示）：xx s/min/hour(s)/day(s) ago（单复数：1 hour 不加 s） */
 export function relativeTime(iso: string, now = Date.now()): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
@@ -42,7 +42,7 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return `${d} ${d === 1 ? "day" : "days"} ago`;
 }
 
-/** 文件大小展示：B/KB/MB 分级（G-2=40，>1KB 显示 KB、>1MB 显示 MB，不再大数字难读） */
+/** 文件大小展示：B/KB/MB 分级（>1KB 显示 KB、>1MB 显示 MB，不再大数字难读） */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const kb = bytes / 1024;

@@ -81,7 +81,7 @@ describe("buildRequest：消息与工具转换", () => {
     expect("system" in noSys).toBe(false);
   });
 
-  it("空 assistant（无文本/无工具/无思考）续跑时从请求体丢弃（E55，与 openai 侧对称）", () => {
+  it("空 assistant（无文本/无工具/无思考）续跑时从请求体丢弃（与 openai 侧对称）", () => {
     // 完整轮无产出落下的空 assistant 跨协议续跑会被严格校验端点 400
     const context = createContext("s", [
       userMessage("hi"),
@@ -204,7 +204,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("error 事件取可读消息（E96）：对象取 message ?? type，字符串直用，不再 [object Object]", async () => {
+  it("error 事件取可读消息：对象取 message ?? type，字符串直用，不再 [object Object]", async () => {
     async function collect(...chunks: unknown[]): Promise<StreamEvent[]> {
       const events: StreamEvent[] = [];
       for await (const e of protocol.parseStream(chunkGen(...chunks))) {
@@ -242,7 +242,7 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(events).toEqual([{ type: "error", message: expect.stringContaining("未收到 message_stop") }]);
   });
 
-  it("流尾已收到 stop_reason 而缺 message_stop：按正常完成收 done（E47 收尾宽限关流）", async () => {
+  it("流尾已收到 stop_reason 而缺 message_stop：按正常完成收 done（收尾宽限关流）", async () => {
     // 厂商发完 message_delta（停止原因已到）后握着连接不发 message_stop，
     // 收尾宽限关流后落到流尾收尾分支——响应逻辑上已完整，不再误报异常轮
     const events: StreamEvent[] = [];
@@ -262,7 +262,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("后续只带 usage 的 message_delta 不清掉已收到的停止原因（审查修正）", async () => {
+  it("后续只带 usage 的 message_delta 不清掉已收到的停止原因", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -275,7 +275,7 @@ describe("parseStream：SSE → 统一事件", () => {
     )) {
       events.push(e);
     }
-    // 只带 usage 的 message_delta：停止原因保留，用量被解析挂 done（E63）
+    // 只带 usage 的 message_delta：停止原因保留，用量被解析挂 done
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
@@ -305,7 +305,7 @@ describe("parseStream：SSE → 统一事件", () => {
   });
 });
 
-describe("parseStream：E16 五类现象", () => {
+describe("parseStream：五类现象", () => {
   it("空 text/thinking delta 不发事件（全空流不产出空内容块）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -427,7 +427,7 @@ describe("parseStream：E16 五类现象", () => {
   });
 });
 
-describe("parseStream：真实用量挂 done（E63）", () => {
+describe("parseStream：真实用量挂 done", () => {
   it("message_start 的 input_tokens 与 message_delta 的累计 output_tokens → done.usage", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -449,7 +449,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     });
   });
 
-  it("缓存读/写 token（cache_read/cache_creation）随 usage 提取挂 done.usage（可观测性 B1）", async () => {
+  it("缓存读/写 token（cache_read/cache_creation）随 usage 提取挂 done.usage", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -472,7 +472,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     });
   });
 
-  it("message_delta 带缓存段累计值时取最后一次（可观测性 B1）", async () => {
+  it("message_delta 带缓存段累计值时取最后一次", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -514,7 +514,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
     });
   });
 
-  it("E47 收尾宽限关流路径（缺 message_stop）同样携带用量", async () => {
+  it("收尾宽限关流路径（缺 message_stop）同样携带用量", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -550,7 +550,7 @@ describe("parseStream：真实用量挂 done（E63）", () => {
   });
 });
 
-describe("parseStream：E16 审查修正", () => {
+describe("parseStream：补充边界情况", () => {
   it("message_stop 前省略 content_block_stop：未闭合标签残料 flush 后再 done", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(

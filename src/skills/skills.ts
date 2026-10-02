@@ -5,7 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { Tool } from "../tools/index.js";
 
-/** 单个技能条目（BACKEND §20） */
+/** 单个技能条目 */
 export interface SkillInfo {
   name: string;
   description: string;
@@ -25,7 +25,7 @@ export interface ScanSkillsOptions {
 }
 
 /**
- * 扫描技能目录（BACKEND §20）：项目 `.minicode/skills/` 与用户 `~/.minicode/skills/` 下
+ * 扫描技能目录：项目 `.minicode/skills/` 与用户 `~/.minicode/skills/` 下
  * 每个子目录一个技能（含 SKILL.md），同名项目覆盖用户，再按 disabled 名单过滤。
  * 目录不存在属正常缺省（返回空）；单个技能读取失败跳过，不阻断其余技能。
  */
@@ -74,12 +74,12 @@ async function scanOneDir(source: SkillInfo["source"], dir: string): Promise<Ski
 
 /**
  * 解析 SKILL.md 的 YAML frontmatter：自实现 `key: value` 两行子集
- * （无嵌套/无列表，够用即可，BACKEND §20）；未知键忽略。
+ * （无嵌套/无列表，够用即可）；未知键忽略。
  * @param text SKILL.md 原文
  * @returns 属性表（CRLF 归一后解析）与正文（frontmatter 之后的全部内容）
  */
 export function parseFrontmatter(text: string): { attrs: Record<string, string>; body: string } {
-  // 前导 BOM 剥离（E87）：Windows 记事本等工具写出的 SKILL.md 常带 BOM，首行变成
+  // 前导 BOM 剥离：Windows 记事本等工具写出的 SKILL.md 常带 BOM，首行变成
   // "\uFEFF---" 判否后 frontmatter 整体落进正文（name 回退目录名、description 回退
   // 字面 "---"，全程无报错）；扫描与工具两条路径都经本函数，一处剥两处修好
   const lines = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n");
@@ -105,7 +105,7 @@ function firstLine(body: string): string {
 }
 
 /**
- * 「可用技能」系统提示词段（BACKEND §20）：逐条 name — description + 取用方式一句话。
+ * 「可用技能」系统提示词段：逐条 name — description + 取用方式一句话。
  * 与主系统提示词同风格（纯文本、【】分节）。
  */
 export function buildSkillsPromptSection(skills: SkillInfo[]): string {
@@ -117,7 +117,7 @@ export function buildSkillsPromptSection(skills: SkillInfo[]): string {
 }
 
 /**
- * 内置 skill 工具（BACKEND §20）：入参 { name }，执行返回该技能 SKILL.md 正文（模型照做）。
+ * 内置 skill 工具：入参 { name }，执行返回该技能 SKILL.md 正文（模型照做）。
  * 只读纯读文件，权限快速放行；正文超限由执行层按 maxResultSizeChars 统一截断。
  */
 export function createSkillTool(skills: SkillInfo[]): Tool {
@@ -142,7 +142,7 @@ export function createSkillTool(skills: SkillInfo[]): Tool {
       }
       try {
         const text = await readFile(skill.filePath, "utf8");
-        // 只回正文：frontmatter 是元数据，模型照做的是正文（BACKEND §20）
+        // 只回正文：frontmatter 是元数据，模型照做的是正文
         const { body } = parseFrontmatter(text);
         return body.trim() ? body : "（技能正文为空）";
       } catch (err) {

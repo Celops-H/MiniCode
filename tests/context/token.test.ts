@@ -7,7 +7,7 @@ describe("estimateTokens（token 估算）", () => {
     expect(estimateTokens([])).toBe(0);
   });
 
-  it("中文按 CJK 系数计价（1 token/字符，E79）", () => {
+  it("中文按 CJK 系数计价（1 token/字符）", () => {
     const messages: Message[] = [{ role: "user", id: "u1", content: "你好世界" }];
     // 4 个 CJK 字符 × 1 = 4（旧单一系数 0.3 只算 1.2，对中文低估 3 倍）
     expect(estimateTokens(messages)).toBe(4);
@@ -45,7 +45,7 @@ describe("estimateTokens（token 估算）", () => {
   });
 });
 
-describe("estimateTextTokens（文本 token 估算，E15/E79）", () => {
+describe("estimateTextTokens（文本 token 估算）", () => {
   it("与消息同口径：CJK 记 1、其余记 0.25，向上取整", () => {
     expect(estimateTextTokens("")).toBe(0);
     expect(estimateTextTokens("a".repeat(100))).toBe(25);

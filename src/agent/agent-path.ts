@@ -1,5 +1,5 @@
 /**
- * Agent 层级路径（DESIGN 11.1）：`/root` 固定根，子 agent 形如 `/root/task_1`。
+ * Agent 层级路径：`/root` 固定根，子 agent 形如 `/root/task_1`。
  * 段名限小写字母/数字/下划线，`root`/`.`/`..` 为保留名。
  * 校验失败返回可读错误文本，由工具回灌给模型（不抛原始堆栈）。
  */
@@ -10,7 +10,7 @@ const RESERVED_NAMES = new Set(["root", ".", ".."]);
 export class AgentPath {
   private constructor(private readonly value: string) {}
 
-  /** 根路径 `/root`（协调者 = root 系统提示角色，DESIGN 11.1） */
+  /** 根路径 `/root`（协调者 = root 系统提示角色） */
   static root(): AgentPath {
     return new AgentPath(ROOT);
   }

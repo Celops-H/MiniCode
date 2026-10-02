@@ -1,7 +1,7 @@
 /**
  * opentui 键盘事件 → MiniCode 结构键（Key）适配层。
  * opentui useKeyboard 的 KeyEvent 结构已实测：{ name, ctrl, shift, ... }。
- * 注意三点（opentui 解析行为，review 实测 + 源码核对 chunk-node-mfda59vq.js parseKeypress）：
+ * 注意三点（opentui 解析行为）：
  * - 空格解析为 name:"space"（不是 " "）；Enter 键（CR \r）解析为 "return"、Ctrl+J（LF \n）解析为
  *   "linefeed"（无 ctrl 标志）；终端忽略 kitty disambiguate 时还可能是裸码点 "\n"/"\r"（见 switch 分支）
  * - A-Z 字母统一转小写、用 shift 标志还原大小写（name:"h"+shift → "H"）
@@ -27,7 +27,7 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
     case "linefeed":
     case "\n":
       // LF = Ctrl+J：无 kitty 协议时 opentui 把 0x0A 解析为 name:"linefeed"（无 ctrl 标志，
-      //   parseKeypress 源码 CR→return、LF→linefeed，见 chunk-node-mfda59vq.js）——此前把 linefeed
+      //   parseKeypress 源码 CR→return、LF→linefeed）——此前把 linefeed
       //   归入发送组导致真机 Ctrl+J 仍发送（层1测试用 {name:"j",ctrl} 全绿但真机不生效）；
       //   统一按软换行。裸 \n 码点（忽略 kitty 的终端上报）同样软换行，Enter 走 return/\r 不受影响。
       return { kind: "shift-enter" };
@@ -53,7 +53,7 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
       if (ctrl) return { kind: "ctrl-w" };
       return shift ? { kind: "char", char: "W" } : { kind: "char", char: "w" };
     case "p":
-      // Ctrl+P 取消排队项（E72）；无 ctrl 时按普通字符处理
+      // Ctrl+P 取消排队项；无 ctrl 时按普通字符处理
       if (ctrl) return { kind: "ctrl-p" };
       return shift ? { kind: "char", char: "P" } : { kind: "char", char: "p" };
     case "tab":
@@ -70,7 +70,7 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
     case "down":
     case "left":
     case "right":
-      // Shift+方向键保留修饰：输入框扩展选区（B-2）；kitty 协议下 shift 标志可靠到达
+      // Shift+方向键保留修饰：输入框扩展选区；kitty 协议下 shift 标志可靠到达
       if (shift) return { kind: `shift-${name}` as "shift-left" | "shift-right" | "shift-up" | "shift-down" };
       return { kind: name };
     case "pageup":

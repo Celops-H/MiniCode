@@ -18,7 +18,7 @@ export async function assembleAssistantMessage(
   const toolCalls = new Map<number, { id?: string; name?: string; json: string[] }>();
   let stopReason: string | undefined;
   let error: string | undefined;
-  // 真实用量（E63）：随 done 事件到达，回填 meta.usage 供观测与压缩阈值校准
+  // 真实用量：随 done 事件到达，回填 meta.usage 供观测与压缩阈值校准
   let usage: ModelUsage | undefined;
 
   for await (const event of stream) {
@@ -57,7 +57,7 @@ export async function assembleAssistantMessage(
   }
 
   // 按固定顺序组装内容块：文本 → 思考 → 工具调用（按 index 升序）。
-  // 拼接后 trim 为空的不产生内容块（E69）：部分厂商对无思考的轮发占位思考增量
+  // 拼接后 trim 为空的不产生内容块：部分厂商对无思考的轮发占位思考增量
   // （glm-4.5-air 工具循环续轮发 reasoning_content="\n"），如实组装会渲染出展开
   // 全空白的「思考」折叠块；正文纯空白同理处理
   const content: ContentBlock[] = [];
@@ -79,7 +79,7 @@ export async function assembleAssistantMessage(
     });
   }
 
-  // 有停因或错误时记入 meta，供后续观测与续跑；真实用量一并回填（E63）
+  // 有停因或错误时记入 meta，供后续观测与续跑；真实用量一并回填
   const meta = stopReason ?? error;
   return {
     role: "assistant",

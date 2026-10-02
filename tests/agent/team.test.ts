@@ -60,7 +60,7 @@ describe("Team（注册表与并发限制）", () => {
     expect(typeof team.reserveSpawn(child as AgentPath, "task_2")).toBe("string");
   });
 
-  it("默认深度 2：允许树形派生孙 agent，深度 3 超限（P4-4 树形协作）", () => {
+  it("默认深度 2：允许树形派生孙 agent，深度 3 超限（树形协作）", () => {
     const team = new Team(); // 默认 maxDepth=2（main→子→孙）
     team.registerRoot(makeAgent());
     const child = team.reserveSpawn(AgentPath.root(), "task_1");
@@ -70,7 +70,7 @@ describe("Team（注册表与并发限制）", () => {
     expect(typeof team.reserveSpawn(grand as AgentPath, "task_3")).toBe("string"); // 深度 3 超限
   });
 
-  it("默认派生总数 15：第 16 个超限（P4-4）", () => {
+  it("默认派生总数 15：第 16 个超限", () => {
     const team = new Team(); // 默认 maxAgents=15（root 不计）
     team.registerRoot(makeAgent());
     for (let i = 0; i < 15; i++) {
@@ -134,7 +134,7 @@ describe("Team（注册表与并发限制）", () => {
     expect(team.resolveAgent(AgentPath.root())).toBeUndefined();
   });
 
-  it("clear 清空成员收件箱：排队消息不再让中断 agent 复活续跑（M1 整体审视）", () => {
+  it("clear 清空成员收件箱：排队消息不再让中断 agent 复活续跑", () => {
     const team = new Team();
     team.registerRoot(makeAgent());
     const child = makeAgent();

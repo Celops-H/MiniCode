@@ -144,7 +144,7 @@ describe("多 Agent 组装", () => {
     expect(toolsSeen).toContain("spawn_agent");
   });
 
-  it("subagentPromptSections 随装配传入（E12/E14）：派生子 agent 的提示词含注入段", async () => {
+  it("subagentPromptSections 随装配传入：派生子 agent 的提示词含注入段", async () => {
     const childPrompts: string[] = [];
     const { agent, team } = createSessionAgent({
       modelClient: {
@@ -192,7 +192,7 @@ describe("interact Hook 接入", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it("interact 每次输入后触发 UserPromptSubmit（宿主职责，DESIGN 13.3）", async () => {
+  it("interact 每次输入后触发 UserPromptSubmit（宿主职责）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -225,7 +225,7 @@ describe("interact Hook 接入", () => {
     expect(seen).toEqual(["第一问", "第二问"]);
   });
 
-  it("onEvent 回调接管流式事件渲染（此前确认：渲染归属调用方，TUI 结构化消费）", async () => {
+  it("onEvent 回调接管流式事件渲染（渲染归属调用方，TUI 结构化消费）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -418,7 +418,7 @@ describe("interact /compact 命令", () => {
     expect(outputs.join("")).toContain("[未压缩]");
   });
 
-  it("工具调用前 checkpoint：模型消息落盘后才执行工具（DESIGN 14）", async () => {
+  it("工具调用前 checkpoint：模型消息落盘后才执行工具", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -459,7 +459,7 @@ describe("interact /compact 命令", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [readTool],
-      // 模拟 app 的 checkpoint 装配（DESIGN 14）：工具执行前把已产生消息落盘
+      // 模拟 app 的 checkpoint 装配：工具执行前把已产生消息落盘
       checkpoint: async (messages) => {
         const newOnes = messages.slice(session.getMessages().length);
         for (const message of newOnes) {
@@ -721,7 +721,7 @@ describe("交互循环", () => {
     });
   });
 
-  it("api error 当轮也落盘用户消息（E48）：模型流抛错时本轮用户输入不丢", async () => {
+  it("api error 当轮也落盘用户消息：模型流抛错时本轮用户输入不丢", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -752,7 +752,7 @@ describe("交互循环", () => {
     expect(loaded.getMessages()[0]).toMatchObject({ role: "user", content: "这轮会出错的消息" });
   });
 
-  it("api error 多轮中途抛错（E48）：checkpoint 已落盘部分不重复，出错轮只补增量", async () => {
+  it("api error 多轮中途抛错：checkpoint 已落盘部分不重复，出错轮只补增量", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -928,7 +928,7 @@ describe("交互循环", () => {
   });
 });
 
-describe("N3 环境信息进系统提示词", () => {
+describe("环境信息进系统提示词", () => {
   it("environmentPrompt 含 OS/架构/Shell/工作目录四项", () => {
     const p = environmentPrompt();
     expect(p).toContain("操作系统");
@@ -939,7 +939,7 @@ describe("N3 环境信息进系统提示词", () => {
   });
 });
 
-describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", () => {
+describe("/init 命令（生成/改进项目根 AGENTS.md）", () => {
   let dir: string;
 
   function makeCapturingAgent(): { agent: Agent; prompts: string[] } {
@@ -980,7 +980,7 @@ describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", ()
     expect(prompts[0]).not.toContain("已存在的 AGENTS.md 内容");
   });
 
-  it("读 AGENTS.md 失败时报错且不把字面 /init 提交给模型（E76）", async () => {
+  it("读 AGENTS.md 失败时报错且不把字面 /init 提交给模型", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -1010,7 +1010,7 @@ describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", ()
     expect(agent.getMessages().some((m) => m.role === "user" && m.content === "/init")).toBe(false);
   });
 
-  it("/compact 成功落命令痕迹（E98，与 TUI 同口径）", async () => {
+  it("/compact 成功落命令痕迹（与 TUI 同口径）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -1053,7 +1053,7 @@ describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", ()
     expect((commandMessage as { content: string }).content).toBe("【命令】/compact");
   });
 
-  it("/init 与 /compact 落命令痕迹（E98，与 TUI 同口径）", async () => {
+  it("/init 与 /compact 落命令痕迹（与 TUI 同口径）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });
@@ -1075,11 +1075,11 @@ describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", ()
     });
     const commandMessage = agent.getMessages().find((m) => m.role === "user" && m.source === "command");
     expect(commandMessage).toBeDefined();
-    // appendCommand 落「【命令】」前缀的消息（E24 命令消息化），重演时还原为命令块
+    // appendCommand 落「【命令】」前缀的消息（命令消息化），重演时还原为命令块
     expect((commandMessage as { content: string }).content).toBe("【命令】/init");
   });
 
-  it("会话期模型流抛错渲染后继续输入循环，不终止会话（E82）", async () => {
+  it("会话期模型流抛错渲染后继续输入循环，不终止会话", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
     const session = await store.createSession({ model: "mock" });

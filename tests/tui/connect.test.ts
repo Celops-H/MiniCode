@@ -1,6 +1,6 @@
 /**
  * /connect 写配置逻辑测试：全局 config 合并 provider（不写 modelChain——模型归 /model 管）
- * + key 落 provider 的 apiKey 字段（E27：项目目录不落 .env）。
+ * + key 落 provider 的 apiKey 字段（项目目录不落 .env）。
  */
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -22,7 +22,7 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
     };
     expect(parsed.providers).toHaveLength(1);
     expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", apiKey: "sk-123" });
-    // 能力开关随预设落盘（E60）：推理厂商标记 + 预设内模型标 reasoning
+    // 能力开关随预设落盘：推理厂商标记 + 预设内模型标 reasoning
     expect(parsed.providers[0]?.reasoningContent).toBe(true);
     expect(parsed.providers[0]?.models).toEqual([
       { id: "deepseek-v4-pro", reasoning: true },
@@ -126,7 +126,7 @@ it("connectProvider：key 写全局 config 的 apiKey 字段，项目目录不�
   }
 });
 
-it("connectProvider 拉全量模型：/models 返回的列表替换预设占位写入配置（N1）", async () => {
+it("connectProvider 拉全量模型：/models 返回的列表替换预设占位写入配置", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const globalFile = path.join(dir, "config.json");
   try {

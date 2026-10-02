@@ -2,7 +2,7 @@ import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-/** 攒批条数阈值：缓冲达到即触发一次异步落盘（OBSERVABILITY §4.4） */
+/** 攒批条数阈值：缓冲达到即触发一次异步落盘 */
 const DEFAULT_BATCH_SIZE = 32;
 
 /**
@@ -46,7 +46,7 @@ function installProcessFlushHooks(): void {
 }
 
 /**
- * 轨迹文件追加写（OBSERVABILITY §4.4）：只追加、永不改写；写入攒批（条数阈值），
+ * 轨迹文件追加写：只追加、永不改写；写入攒批（条数阈值），
  * SessionEnd / 进程正常退出 / SIGINT、SIGTERM 信号时冲刷。append-only 使崩溃
  * 最多丢最后一批，不会损坏已有内容。文件权限 0600（会话轨迹含正文，属用户隐私）。
  */
@@ -83,7 +83,7 @@ export class TraceWriter {
    */
   appendLine(line: string): void {
     if (!this.headerQueued) {
-      // 续跑的会话轨迹文件已存在（首行已有 header）：只追加、不重复插 header（OBSERVABILITY §4.2）
+      // 续跑的会话轨迹文件已存在（首行已有 header）：只追加、不重复插 header
       if (!existsSync(this.filePath)) this.buffer.push(this.headerLine);
       this.headerQueued = true;
     }

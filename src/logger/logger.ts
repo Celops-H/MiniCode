@@ -11,10 +11,10 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
   error: 40,
 };
 
-/** 单文件字节数上限缺省值：超过轮转为 .old（OBSERVABILITY §6，保留一份） */
+/** 单文件字节数上限缺省值：超过轮转为 .old（保留一份） */
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
-/** 流水日志文件选项（OBSERVABILITY §6） */
+/** 流水日志文件选项 */
 export interface LoggerFileOptions {
   /** 日志文件路径（~/.minicode/logs/minicode.log） */
   path: string;

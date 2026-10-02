@@ -1,5 +1,5 @@
 /**
- * 底栏 agent 树（P1-5 定稿 + 用户复核）：`● main` 仅多 agent 启用（存在子 agent）时显示；
+ * 底栏 agent 树：`● main` 仅多 agent 启用（存在子 agent）时显示；
  * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`（中断 `(×)`），完成/中断 10s 后从树消失；
  * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)` 括号中心列；
  * main 首行、子 agent 次行紧凑。
@@ -72,7 +72,7 @@ function renderTree(nodes: AgentNode[]): string[] {
   }
   for (const list of childrenOf.values()) list.sort();
 
-  /** 展示名：默认末段；全树可见条目中末段撞名时（P4-4 树形深度放开后的嵌套派生，
+  /** 展示名：默认末段；全树可见条目中末段撞名时（树形深度放开后的嵌套派生，
    *  如 /root/a/sub 与 /root/b/sub 在不同父下同名）带父叶名前缀区分。
    *  按全树计而非同父兄弟——歧义是视觉上的（树上两行都叫 sub），与是否同父无关。
    *  局限：父链完全同名时仍可能同显，纯展示歧义不影响操作（切换功能未做）。 */
@@ -148,8 +148,8 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
   );
 }
 
-/** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致——App 计算光标绝对位置用（D-1）。
- *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行，审查 D-1 偏行修正）。
+/** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致——App 计算光标绝对位置用。
+ *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行）。
  *  now 取调用时刻，与组件每秒刷新近似（1s 内完成条目消失的定位偏差可忽略）。 */
 export function agentRowCount(agents: AgentNode[], now = Date.now()): number {
   const visible = agents.filter(

@@ -1,5 +1,5 @@
 /**
- * Team 与线程树（DESIGN 11.1）：注册表持有命名 agent（`path → TeamMember`），
+ * Team 与线程树：注册表持有命名 agent（`path → TeamMember`），
  * root 预注册为协调者（不计数）；spawn 槽位预留/提交/释放防计数泄漏；
  * 并发执行限制器限制同时推进的 agent 数（默认 4）。
  */
@@ -20,24 +20,24 @@ export interface TeamMember {
   agent: Agent | undefined;
   path: AgentPath;
   parentPath?: AgentPath;
-  /** spawn 深度（root=0），递归防护用（DESIGN 11.4 深度默认 2） */
+  /** spawn 深度（root=0），递归防护用（深度默认 2） */
   depth: number;
-  /** Git Worktree 信息（worktrees 开启且为 git 仓库时）：并行隔离的工作区与分支（DESIGN 4.2） */
+  /** Git Worktree 信息（worktrees 开启且为 git 仓库时）：并行隔离的工作区与分支 */
   worktree?: WorktreeInfo;
 }
 
 export interface TeamOptions {
-  /** spawn 派生总数上限（root 不计）；缺省 15（用户对齐 2026-08-27：限制派生的 agent 总数） */
+  /** spawn 派生总数上限（root 不计）；缺省 15 */
   maxAgents?: number;
-  /** spawn 深度上限（root=0，递归防护）；缺省 2（main→子→孙，用户对齐 2026-08-27：树形协作） */
+  /** spawn 深度上限（root=0，递归防护）；缺省 2（main→子→孙） */
   maxDepth?: number;
-  /** 同时推进的 agent 数上限；缺省 4（DESIGN 11.2 并发调度） */
+  /** 同时推进的 agent 数上限；缺省 4 */
   maxConcurrent?: number;
-  /** 启用 Git Worktree 隔离：子 agent 各自独立工作区（DESIGN 4.2）；非 git 仓库时自动忽略 */
+  /** 启用 Git Worktree 隔离：子 agent 各自独立工作区；非 git 仓库时自动忽略 */
   worktrees?: boolean;
-  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（TUI 渲染 root 迟到结论用，review 修复） */
+  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（TUI 渲染 root 迟到结论用） */
   onRootEvent?: (event: StreamEvent) => void;
-  /** Hook 总线（子 agent 生命周期事件触发通道，此前确认）；缺省不触发 */
+  /** Hook 总线（子 agent 生命周期事件触发通道）；缺省不触发 */
   hooks?: HookBus;
 }
 
@@ -51,7 +51,7 @@ export class Team {
   private readonly hooks: HookBus | undefined;
   private spawnCount = 0;
   private activeExecutions = 0;
-  /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒，DESIGN 11.2） */
+  /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒） */
   private readonly pendingDrives = new Set<Agent>();
 
   constructor(options: TeamOptions = {}) {
@@ -65,7 +65,7 @@ export class Team {
 
   /**
    * 为子 agent 创建 Git Worktree（worktrees 开启且父在 git 仓库内时）：
-   * 子 agent 独立工作区 + 独立分支，文件写物理隔离（DESIGN 4.2）。
+   * 子 agent 独立工作区 + 独立分支，文件写物理隔离。
    * 创建成功后记录到对应 member（commitSpawn 后即可用，release 时自动清理）。
    * @param parentPath 父 agent 路径
    * @param agentName 子 agent 名
@@ -90,7 +90,7 @@ export class Team {
   /**
    * 子 agent 终态（自然完成）时合并其 worktree 分支。
    * 合并成功/无改动才清空 member.worktree（终态）；冲突/失败保留（kept）——
-   * 子 agent 解决冲突后再完成时，本函数再次执行即重试合并（review 修复：原实现无条件清空，
+   * 子 agent 解决冲突后再完成时，本函数再次执行即重试合并（原实现无条件清空，
    * 使「冲突 agent 自解」闭环不可达，保留的 worktree 成孤儿）
    */
   completeChildWorktree(path: AgentPath): string | undefined {
@@ -148,7 +148,7 @@ export class Team {
 
   /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）。
    *  派生观测事件（AgentSpawned）由驱动层（consumeDriving）发射——初次派生与 followup 唤醒
-   *  都经后台驱动续跑，统一在驱动起点发，避免 commitSpawn 发一次、唤醒又发一次的重复（P9）。 */
+   *  都经后台驱动续跑，统一在驱动起点发，避免 commitSpawn 发一次、唤醒又发一次的重复。 */
   commitSpawn(path: AgentPath, agent: Agent): void {
     const member = this.members.get(path.toString());
     if (!member) return;
@@ -189,14 +189,14 @@ export class Team {
 
   /**
    * 会话收尾清理（SessionEnd 后调用）：中断全部活跃 agent、清空注册表/派生计数/待驱动队列。
-   * 防后台 resume 循环吊住进程不退（问题 37 退出残留），成员记录也不泄漏到下一生命周期。
+   * 防后台 resume 循环吊住进程不退，成员记录也不泄漏到下一生命周期。
    */
   clear(): void {
     this.interruptAll();
     // 先按 releaseSpawn 同款清理各成员挂的 worktree（避免 clear 绕过清理变孤儿目录），再清注册表
     for (const member of [...this.members.values()]) {
       if (member.worktree) this.abortChildWorktree(member.path);
-      // 清收件箱：排队消息会让中断的 agent 在 resume 里复活续跑（M1 整体审视，退出残留）
+      // 清收件箱：排队消息会让中断的 agent 在 resume 里复活续跑，退出时进程不被吊住
       member.agent?.clearMailbox();
     }
     this.members.clear();
@@ -207,7 +207,7 @@ export class Team {
   }
 
   /**
-   * 投递消息到目标 agent 邮箱（DESIGN 11.3）。
+   * 投递消息到目标 agent 邮箱。
    * 唤醒型消息（triggerTurn）投递后立即后台驱动目标续跑，不阻塞投递方
    * （对齐投递 → 通知 → 目标续跑语义；并发满时留待下次投递驱动）。
    * @param target 目标 agent 路径
@@ -224,7 +224,7 @@ export class Team {
     return undefined;
   }
 
-  /** 后台驱动单个 agent 续跑：并发槽位内消费其 resume()（DESIGN 11.2 唤醒已结束 agent） */
+  /** 后台驱动单个 agent 续跑：并发槽位内消费其 resume()（唤醒已结束 agent） */
   private async driveAgent(agent: Agent): Promise<void> {
     // 忙（已有活跃续跑循环）：不重复驱动，活跃循环会在每轮结束自行消费收件箱消息
     if (agent.isActive()) return;
@@ -239,11 +239,11 @@ export class Team {
 
   /** 消费单个 agent 的续跑循环；结束后释放槽位、重试待驱动队列并回灌结论（watcher） */
   private async consumeDriving(agent: Agent, release: () => void): Promise<void> {
-    // 驱动失败捕获（E81）：模型流失败等错误不再吞掉——带失败语义回灌，父 agent 拿到
+    // 驱动失败捕获：模型流失败等错误不再吞掉——带失败语义回灌，父 agent 拿到
     // 明确失败文本而不是半截文本/「未产出结论」当结论
     let failure: unknown;
     try {
-      // 后台驱动起点发派生观测事件（P9）：初次派生与 followup 唤醒都经这里——
+      // 后台驱动起点发派生观测事件：初次派生与 followup 唤醒都经这里——
       // TUI 树靠该事件把条目置为运行态（唤醒一个已完成/中断的 agent 时树重新亮起）；
       // root 恒常驻不发（否则每次子完成回灌唤醒 root 都会误发一次「派生」）
       const path = agent.agentPath;
@@ -256,14 +256,14 @@ export class Team {
         });
       }
       // root 被后台驱动（如子 agent 完成唤醒续跑）时事件无人渲染——
-      // 转发给 onRootEvent（宿主渲染 root 迟到结论），否则汇总结论被消费丢弃（review 修复）
+      // 转发给 onRootEvent（宿主渲染 root 迟到结论），否则汇总结论被消费丢弃
       const isRoot = agent.agentPath?.isRoot() ?? false;
       for await (const event of agent.resume()) {
         if (isRoot) {
           try {
             this.onRootEvent?.(event);
           } catch {
-            // 渲染回调抛错不中止驱动推进（review 修复：原实现回调抛错中止事件流、结论截断）
+            // 渲染回调抛错不中止驱动推进（原实现回调抛错中止事件流、结论截断）
           }
         }
       }
@@ -279,11 +279,11 @@ export class Team {
   }
 
   /**
-   * completion watcher（DESIGN 11.5）：子 agent 达到终态（resume 结束）时，
+   * completion watcher：子 agent 达到终态（resume 结束）时，
    * 把其结论以 FINAL_ANSWER 回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源。
    * wait_agent 只挂起不消费结论，避免重复投递。
    * @param agent 完成的子 agent
-   * @param failure 驱动失败（E81）：非 undefined 时走失败终态——不合并 worktree、
+   * @param failure 驱动失败：非 undefined 时走失败终态——不合并 worktree、
    *   回灌明确失败文本（半截文本/「未产出结论」不再被当结论误导父 agent）
    */
   private async notifyCompletion(agent: Agent, failure?: unknown): Promise<void> {
@@ -295,7 +295,7 @@ export class Team {
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
     if (agent.isInterrupted()) {
       // 被中断：显式动作，调用方已知，不投中途文本当结论。
-      // 不清理 worktree——后续 followup 可复活续用（DESIGN 11.2），目录/分支/注册均保留
+      // 不清理 worktree——后续 followup 可复活续用，目录/分支/注册均保留
       await this.safeEmit({
         type: "AgentInterrupted",
         path: path.toString(),
@@ -305,7 +305,7 @@ export class Team {
     }
     const name = agentNameOf(path);
     if (failure !== undefined) {
-      // 失败终态（E81）：模型链耗尽等驱动失败——不合并 worktree（产出不完整），
+      // 失败终态：模型链耗尽等驱动失败——不合并 worktree（产出不完整），
       // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本当结论
       const message = failure instanceof Error ? failure.message : String(failure);
       await this.safeEmit({
@@ -323,7 +323,7 @@ export class Team {
       });
       return;
     }
-    // 自然完成：合并 worktree 分支进主分支（DESIGN 4.2），合并结果附在结论前提示父
+    // 自然完成：合并 worktree 分支进主分支，合并结果附在结论前提示父
     const mergeMessage = this.completeChildWorktree(path);
     const content = mergeMessage
       ? `${mergeMessage}。\n${agent.conclusionText()}`
@@ -343,7 +343,7 @@ export class Team {
     });
   }
 
-  /** 观测事件安全触发：handler 抛错不影响结论回灌与驱动流程（review 修复：未处理 rejection 会崩进程） */
+  /** 观测事件安全触发：handler 抛错不影响结论回灌与驱动流程（未处理 rejection 会崩进程） */
   private async safeEmit(event: Parameters<HookBus["emit"]>[0]): Promise<void> {
     try {
       await this.hooks?.emit(event);
@@ -368,7 +368,7 @@ export class Team {
   }
 
   /**
-   * 获取并发执行槽位（开 turn 才占容量，DESIGN 11.2）。
+   * 获取并发执行槽位（开 turn 才占容量）。
    * @returns 释放函数（RAII 语义，调用一次即释放）；超出上限返回错误文本
    */
   acquireExecution(): (() => void) | string {

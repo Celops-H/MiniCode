@@ -1,5 +1,5 @@
 /**
- * 输入框选区渲染边界（审查 M-2）：lineSelRange 纯函数——单行/跨行/反向/空选区/行边界。
+ * 输入框选区渲染边界：lineSelRange 纯函数——单行/跨行/反向/空选区/行边界。
  */
 import { describe, expect, it } from "vitest";
 import { lineSelRange } from "../../src/tui/view/Prompt.js";

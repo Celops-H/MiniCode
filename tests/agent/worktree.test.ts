@@ -86,7 +86,7 @@ function sequenceClient(tasks: Array<{ file: string; content: string }>): ModelC
   };
 }
 
-describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
+describe("Git Worktree 隔离", () => {
   let dir: string;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -217,7 +217,7 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     expect(second!.dir).not.toBe(first!.dir);
   });
 
-  it("Team 集成：冲突后 member.worktree 保留，子 agent 解决冲突再完成即合并成功（review 修复：原实现无条件清空断送重试）", async () => {
+  it("Team 集成：冲突后 member.worktree 保留，子 agent 解决冲突再完成即合并成功（原实现无条件清空断送重试）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
     initGitRepo(dir);
     writeFileSync(path.join(dir, "a.txt"), "第一行\n第二行\n第三行\n");
@@ -279,7 +279,7 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     expect(await readFile(path.join(dir, "from-b.txt"), "utf8")).toBe("B 后续数据");
     expect(existsSync(b.worktree.dir)).toBe(false);
     expect(team.resolveAgent(b.childPath)?.worktree).toBeUndefined();
-    // 全量并发负载下真实 git 合并链条偶发超 5s 默认超时（E11）：单独跑稳定 ~1s，放宽到 20s
+    // 全量并发负载下真实 git 合并链条偶发超 5s 默认超时：单独跑稳定 ~1s，放宽到 20s
   }, 20_000);
 
   it("子 agent 无改动：判空分支直接清理（不误报合并）", async () => {
@@ -293,7 +293,7 @@ describe("Git Worktree 隔离（DESIGN 4.2/11.7）", () => {
     expect(existsSync(info.dir)).toBe(false);
   });
 
-  it("commit 真实失败（pre-commit hook 拒绝）时产出保留：不误判「无改动」销毁（review 阻断修复）", async () => {
+  it("commit 真实失败（pre-commit hook 拒绝）时产出保留：不误判「无改动」销毁", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "wt-"));
     initGitRepo(dir);
     // 仓库 pre-commit hook 拒绝提交（模拟 commit 真实失败）

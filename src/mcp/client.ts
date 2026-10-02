@@ -3,7 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { McpServerConfig } from "../config/index.js";
 import { killProcessTree } from "../tools/index.js";
 
-/** MCP 传输协议版本（initialize 握手声明，BACKEND §19） */
+/** MCP 传输协议版本（initialize 握手声明） */
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 /** 握手超时：initialize 与 tools/list 各自的等待上限 */
 const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -37,7 +37,7 @@ interface PendingEntry {
 }
 
 /**
- * 单个 MCP server 的 stdio 连接（BACKEND §19）：启动子进程、换行分帧 JSON-RPC 2.0 通信。
+ * 单个 MCP server 的 stdio 连接：启动子进程、换行分帧 JSON-RPC 2.0 通信。
  * 握手（initialize → notifications/initialized → tools/list）后即可列出工具与调用；
  * 进程退出后拒绝后续调用（不自动重启，重开会话重拉）。
  */
@@ -45,7 +45,7 @@ export class McpClient {
   /** 服务名（配置键，用于错误信息与工具命名） */
   readonly name: string;
   private readonly config: McpServerConfig;
-  /** 非主动停止的进程退出回调（可观测性 B3：宿主接流水日志记录「连接断开」） */
+  /** 非主动停止的进程退出回调（宿主接流水日志记录「连接断开」） */
   private readonly onUnexpectedExit?: (reason: string) => void;
   private child: ChildProcess | null = null;
   private nextId = 1;
@@ -264,7 +264,7 @@ export class McpClient {
       } catch {
         continue;
       }
-      // 带 method 字段的一律跳过（E85）：JSON-RPC 响应必无 method——server→client 请求
+      // 带 method 字段的一律跳过：JSON-RPC 响应必无 method——server→client 请求
       // （带 id 无 result）撞上在途请求 id 时此前会以 undefined resolve，tools/call 抛
       // TypeError、握手期误判启动失败；此判断同时滤掉通知与请求
       if (typeof msg.method === "string") continue; // JSON-RPC 请求/通知的 method 为字符串；响应必无 method

@@ -26,9 +26,9 @@ export const readTool: Tool = {
       offset?: number;
       limit?: number;
     }>(readTool, input);
-    const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd（DESIGN 7.6 配套）
+    const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd
     const content = await readFile(file, "utf8");
-    // 记录版本令牌（DESIGN 7.6）：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
+    // 记录版本令牌：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
     const fileState = currentFileState();
     if (fileState) {
       const disk = await stat(file);
@@ -42,7 +42,7 @@ export const readTool: Tool = {
     const end = limit !== undefined ? offset + limit : lines.length;
     const selected = lines.slice(offset, end);
     if (selected.length === 0) {
-      // 越界反馈（E93）：offset 超出行数时返回空串与「读到空文件」不可区分，
+      // 越界反馈：offset 超出行数时返回空串与「读到空文件」不可区分，
       // 模型得不到反馈可能反复调 offset 空转
       return `起始行超出文件行数（共 ${lines.length} 行，offset 从 0 起）`;
     }

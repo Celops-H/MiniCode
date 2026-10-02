@@ -30,11 +30,11 @@ export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
   /**
-   * 缓存读命中 token（可观测性 B1）：anthropic 取 cache_read_input_tokens；
-   * openai 取 prompt_tokens_details.cached_tokens（cached ⊆ prompt_tokens，归一口径见 OBSERVABILITY §5.1）
+   * 缓存读命中 token：anthropic 取 cache_read_input_tokens；
+   * openai 取 prompt_tokens_details.cached_tokens（cached ⊆ prompt_tokens）
    */
   cacheReadTokens?: number;
-  /** 缓存写入 token（可观测性 B1）：anthropic 取 cache_creation_input_tokens；openai 无写缓存概念不携带 */
+  /** 缓存写入 token：anthropic 取 cache_creation_input_tokens；openai 无写缓存概念不携带 */
   cacheWriteTokens?: number;
 }
 
@@ -47,7 +47,7 @@ export interface AssistantMeta {
   stopReason?: string;
 }
 
-/** 消息来源：human 真实用户输入；system 系统注入（摘要/恢复上下文等合成消息）；command 用户命令痕迹（/init /compact 等命令消息，E24） */
+/** 消息来源：human 真实用户输入；system 系统注入（摘要/恢复上下文等合成消息）；command 用户命令痕迹（/init /compact 等命令消息） */
 export type MessageSource = "human" | "system" | "command";
 
 /** 命令消息的文本前缀（持久化与重演时识别命令痕迹） */

@@ -1,7 +1,7 @@
 /**
- * 多 Agent 协作工具（DESIGN 11.4）：spawn_agent / send_message / followup_task / list_agents。
+ * 多 Agent 协作工具：spawn_agent / send_message / followup_task / list_agents。
  * 只在多 agent 环境注册（AgentOptions.team 传入时由 Agent 构造注册），普通单 agent 会话不可见。
- * 权限（DESIGN 11.4）：send_message / list_agents 免审批（skipsPermission）；
+ * 权限：send_message / list_agents 免审批（skipsPermission）；
  * spawn_agent / followup_task 走正常审批链。
  */
 import { z } from "zod";
@@ -21,7 +21,7 @@ export const COLLAB_TOOL_NAMES = new Set([
   "interrupt_agent",
 ]);
 
-/** 团队工作 agent 系统提示词（DESIGN 11.6 fork_turns=none：全新上下文，无父历史） */
+/** 团队工作 agent 系统提示词（fork_turns=none：全新上下文，无父历史） */
 export const COLLAB_SUBAGENT_PROMPT =
   "你是团队工作 agent，由协调者派生执行分派的任务。你看不到协调者的完整历史，只收到任务消息。" +
   "完成任务后用简洁文字说明结论。";
@@ -177,7 +177,7 @@ function resolveTarget(deps: CollabDeps, target: string): AgentPath | string {
   return current.resolve(target);
 }
 
-/** 挂起等待目标 agent 完成当前任务（空闲），只返回摘要不消费结论；结论由 watcher 回灌（DESIGN 11.5） */
+/** 挂起等待目标 agent 完成当前任务（空闲），只返回摘要不消费结论；结论由 watcher 回灌 */
 function waitAgentTool(deps: CollabDeps): Tool {
   return {
     name: "wait_agent",

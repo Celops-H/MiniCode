@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveAuth } from "../../src/llm/auth.js";
 
-describe("resolveAuth（环境变量与落盘 key 同权，E33）", () => {
+describe("resolveAuth（环境变量与落盘 key 同权）", () => {
   it("环境变量命中：source=env，优先于落盘 key（显式注入的临时 key 覆盖落盘值）", () => {
     const result = resolveAuth({ apiKeyEnv: "A", storedKey: "stored-key", env: { A: "env-key" } });
     expect(result).toEqual({ auth: { configured: true, source: "env" }, apiKey: "env-key" });

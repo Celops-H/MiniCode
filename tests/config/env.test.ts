@@ -30,7 +30,7 @@ describe("parseEnvFile（.env 解析）", () => {
     });
   });
 
-  it("未加引号值的行内注释剥 \" #\" 后缀（E88，标准 dotenv 语义）", () => {
+  it("未加引号值的行内注释剥 \" #\" 后缀（标准 dotenv 语义）", () => {
     const vars = parseEnvFile('KEY=value # prod\nOTHER="a # b"\nQUOTED="x" # tail\n');
     expect(vars.KEY).toBe("value");
     // 引号内的 # 是内容，不剥
@@ -39,7 +39,7 @@ describe("parseEnvFile（.env 解析）", () => {
     expect(vars.QUOTED).toBe("x");
   });
 
-  it("引号与注释组合形态不产出损坏值（E88 审查补充）", () => {
+  it("引号与注释组合形态不产出损坏值", () => {
     const vars = parseEnvFile('K1="a # b" # tail' + String.fromCharCode(10) + "K2='ab # cd' # note" + String.fromCharCode(10) + 'K3="a" # "b"' + String.fromCharCode(10) + 'K4= # c' + String.fromCharCode(10) + 'K5=v#x' + String.fromCharCode(10));
     // 引号值内含 # 且后跟注释：不截断引号内内容、不残留引号
     expect(vars.K1).toBe("a # b");

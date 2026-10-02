@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { editTool, FileState, readTool, withFileState, writeTool } from "../../src/tools/index.js";
 
-describe("文件写冲突防护（DESIGN 7.6 per-agent 快照）", () => {
+describe("文件写冲突防护（per-agent 快照）", () => {
   let tmpDir: string;
 
   afterEach(() => {
@@ -51,7 +51,7 @@ describe("文件写冲突防护（DESIGN 7.6 per-agent 快照）", () => {
     expect(await readFile(file, "utf8")).toBe("v2");
   });
 
-  describe.skipIf(process.platform !== "win32")("Windows 路径大小写统一（DESIGN 7.6）", () => {
+  describe.skipIf(process.platform !== "win32")("Windows 路径大小写统一", () => {
     it("read 小写路径后，大写路径的外部修改命中同一快照（write 拒绝）", async () => {
       const dir = setup();
       const file = path.join(dir, "a.txt");

@@ -27,7 +27,7 @@ interface TaskEntry {
   child: ChildProcess | null;
 }
 
-/** 模块级后台任务注册表（DESIGN 7.5）：任务随进程存活，宿主进程退出时统一清理 */
+/** 模块级后台任务注册表：任务随进程存活，宿主进程退出时统一清理 */
 const tasks = new Map<string, TaskEntry>();
 let nextId = 1;
 
@@ -52,13 +52,13 @@ export function startBackgroundTask(command: string): BackgroundTask {
     detached: process.platform !== "win32",
     cwd: currentCwd(), // 绑定工具执行上下文 cwd（后台命令与前台一致，Worktree 隔离不绕过）
   });
-  // 输出解码（E91）：stdout/stderr 各用 StringDecoder 按流累积解码，chunk 边界劈开的
+  // 输出解码：stdout/stderr 各用 StringDecoder 按流累积解码，chunk 边界劈开的
   // 多字节字符不再解成 U+FFFD；与前台 bash 同口径
   const stdoutDecoder = new StringDecoder("utf8");
   const stderrDecoder = new StringDecoder("utf8");
   child.stdout?.on("data", (chunk: Buffer) => appendOutput(task, stdoutDecoder.write(chunk)));
   child.stderr?.on("data", (chunk: Buffer) => appendOutput(task, stderrDecoder.write(chunk)));
-  // 立即关闭 stdin（E92）：与前台 bash 对称——非交互语义下裸 cat 类命令读到 EOF 即退出，
+  // 立即关闭 stdin：与前台 bash 对称——非交互语义下裸 cat 类命令读到 EOF 即退出，
   // 不再挂着直到占用任务位
   child.stdin?.on("error", () => {});
   child.stdin?.end();
@@ -67,7 +67,7 @@ export function startBackgroundTask(command: string): BackgroundTask {
     task.error = err.message;
   });
   child.on("close", (code) => {
-    // 流关闭 flush 解码器残料（E91）
+    // 流关闭 flush 解码器残料
     appendOutput(task, stdoutDecoder.end());
     appendOutput(task, stderrDecoder.end());
     // killed 已由 killBackgroundTask 标记，这里不再覆盖
@@ -97,7 +97,7 @@ export function getBackgroundTask(id: string): BackgroundTask | undefined {
 export function killBackgroundTask(id: string): BackgroundTask | undefined {
   const entry = tasks.get(id);
   if (!entry) return undefined;
-  // 仅运行中可终止（E92）：对已 completed/failed 的任务覆盖成 killed 会丢真实退出码，
+  // 仅运行中可终止：对已 completed/failed 的任务覆盖成 killed 会丢真实退出码，
   // 后续查询误报「已终止」；与 killAllBackgroundTasks 的 running 守卫对齐
   if (entry.task.status !== "running") return entry.task;
   entry.task.status = "killed";

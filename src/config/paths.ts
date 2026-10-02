@@ -32,7 +32,7 @@ export function resolveConfigPaths(opts: ResolvePathsOptions = {}): ConfigPaths 
 }
 
 /**
- * 解析会话存储根目录（不分工作目录子层）：config.sessionsDir 的语义为根目录（DESIGN 14），
+ * 解析会话存储根目录（不分工作目录子层）：config.sessionsDir 的语义为根目录，
  * 缺省用户级 `~/.minicode/sessions/`。
  * @param opts 路径选项（homedir / xdgConfigHome / root 可注入，测试用）
  * @returns 会话存储根目录
@@ -45,7 +45,7 @@ export function resolveSessionsRoot(opts: ResolvePathsOptions & { root?: string 
 }
 
 /**
- * 解析会话存储目录：按启动工作目录分子目录（E46，DESIGN 14）——
+ * 解析会话存储目录：按启动工作目录分子目录——
  * `<root>/<sanitizePath(cwd)>`，各工作目录只看自己的会话。
  * @param opts 路径选项（homedir / xdgConfigHome / root / cwd 可注入，测试用）
  * @returns 会话存储目录
@@ -64,13 +64,13 @@ const MAX_SANITIZED_LENGTH = 200;
 /**
  * 启动目录 → 会话子目录名：非字母数字字符一律替换为「-」（跨平台安全——Windows
  * 盘符冒号与路径分隔符一并替换），并统一追加原串哈希后缀——有损编码对非 ASCII 路径
- * （中文目录名整段坍缩为「-」）与 `_`/`.` 类差异撞名，会话隔离对这类路径失效
- * （批次 5~8 审查建议）；超长再截断（哈希已在后缀，无需二次防撞）。
+ * （中文目录名整段坍缩为「-」）与 `_`/`.` 类差异撞名，会话隔离对这类路径失效；
+ * 超长再截断（哈希已在后缀，无需二次防撞）。
  * @param name 待编码的路径
  * @returns 编码后的子目录名
  */
 export function sanitizePath(name: string): string {
-  // Windows 文件系统大小写不敏感：编码前统一小写（E89）——C:\Work\proj 与 c:\work\proj
+  // Windows 文件系统大小写不敏感：编码前统一小写——C:\Work\proj 与 c:\work\proj
   // 否则分裂两个会话存储、互不可见。归一改变子目录名，既有会话一次性失效（需重新指向，
   // 与配置文档同步说明）
   const normalized = process.platform === "win32" ? name.toLowerCase() : name;
@@ -92,7 +92,7 @@ function fnv1aBase36(text: string): string {
 
 /**
  * 解析工具输出落盘目录：默认用户级 `~/.minicode/outputs/`（与全局配置同目录族），
- * 大工具输出超限时完整内容写到这里，消息里留路径供 Read 读回（DESIGN 9.1 ①）。
+ * 大工具输出超限时完整内容写到这里，消息里留路径供 Read 读回。
  * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
  * @returns 输出落盘目录
  */
@@ -104,8 +104,7 @@ export function resolveOutputsDir(opts: ResolvePathsOptions = {}): string {
 }
 
 /**
- * 解析运行轨迹目录：默认用户级 `~/.minicode/traces/`（OBSERVABILITY §4.1，
- * config.observability.dir 可覆盖）。轨迹与会话存储独立目录、独立生命周期。
+ * 解析运行轨迹目录：默认用户级 `~/.minicode/traces/`（config.observability.dir 可覆盖）。轨迹与会话存储独立目录、独立生命周期。
  * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
  * @returns 轨迹目录
  */
@@ -117,7 +116,7 @@ export function resolveTracesDir(opts: ResolvePathsOptions = {}): string {
 }
 
 /**
- * 解析流水日志目录：默认用户级 `~/.minicode/logs/`（OBSERVABILITY §6，无配置项）。
+ * 解析流水日志目录：默认用户级 `~/.minicode/logs/`（无配置项）。
  * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
  * @returns 日志目录
  */

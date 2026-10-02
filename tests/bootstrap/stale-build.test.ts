@@ -1,5 +1,5 @@
 /**
- * dist 过期检测与自动重建（E5）测试：纯函数（findDistRoot / isStaleBuild）与文件系统
+ * dist 过期检测与自动重建测试：纯函数（findDistRoot / isStaleBuild）与文件系统
  * 部分（newestBuildTime）；git 命令包装与 pnpm build 执行是薄 IO 层，随真机验证。
  */
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";

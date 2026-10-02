@@ -35,14 +35,14 @@ export interface Tool {
   /** 参数 schema（zod），Executor 校验输入 */
   readonly inputSchema: z.ZodTypeAny;
   /**
-   * 直接透传给模型的 JSON Schema（MCP 外部工具用，BACKEND §19）：server 提供的入参 schema，
+   * 直接透传给模型的 JSON Schema（MCP 外部工具用）：server 提供的入参 schema，
    * registry 序列化时原样透传、不经 zod 转换；此时 inputSchema 应配 z.unknown() 放行，
    * 入参正确性交给 server 自校验。
    */
   readonly inputJsonSchema?: Record<string, unknown>;
   /** 只读工具：权限快速放行 */
   readonly isReadOnly: boolean;
-  /** 免审批放行：低影响工具（如 agent 消息投递）不进入权限审批链（DESIGN 7.1） */
+  /** 免审批放行：低影响工具（如 agent 消息投递）不进入权限审批链 */
   readonly skipsPermission?: boolean;
   /** 最大结果字符数：超出截断 */
   readonly maxResultSizeChars: number;

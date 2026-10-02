@@ -10,7 +10,7 @@ function isMemoryRequest(context: { messages: { role: string; content: unknown }
   );
 }
 
-describe("会话记忆（DESIGN 9.7）", () => {
+describe("会话记忆", () => {
   it("每轮结束后增量维护记忆：模型收到当前记忆 + 最近对话", async () => {
     const memoryCalls: { hasCurrent: boolean; roles: string }[] = [];
     const client: ModelClient = {
@@ -96,7 +96,7 @@ describe("会话记忆（DESIGN 9.7）", () => {
       memory: true,
       compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
     });
-    // 第一轮：正常对话，Stop 后后台建立记忆（E40 异步：收尾后等待更新完成）
+    // 第一轮：正常对话，Stop 后后台建立记忆（异步：收尾后等待更新完成）
     agent.start("搭建脚手架");
     for await (const _ of agent.run()) {
       // 消费
@@ -144,7 +144,7 @@ describe("buildMemoryUpdateRequest", () => {
     expect(text).toMatch(/…$/);
   });
 });
-describe("记忆更新后台化（E40）", () => {
+describe("记忆更新后台化", () => {
   it("回合收尾不再被记忆更新阻塞：run() 先于记忆请求完成返回", async () => {
     let releaseMemory: (() => void) | undefined;
     let turnDone = false;
@@ -217,7 +217,7 @@ describe("记忆更新后台化（E40）", () => {
 });
 
 
-describe("覆盖窗口与在途保留（批次 5~8 审查必须项）", () => {
+describe("覆盖窗口与在途保留", () => {
   it("超过单批的消息分批覆盖：未覆盖尾部在记忆替代压缩时保留原文，已覆盖头部被摘要吸收", async () => {
     // 预置 20 条历史 + 触发轮 2 条 = 22 条未覆盖；单批 16 条 → 覆盖点推进到 16，
     // 尾部 6 条未覆盖——记忆替代压缩时必须作为在途保留（旧实现覆盖点记全量长度会静默丢弃）

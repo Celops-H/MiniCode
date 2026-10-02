@@ -38,7 +38,7 @@ describe("bash 工具：进程退出但管道被持有 / stdin 关闭（问题�
     expect(String(out)).toContain("39");
   }, 15000);
 
-  // P1 回归钉：Unix 超时走 SIGKILL，exit 事件 code 为 null——结算判定不能用 exitCode 判退出，
+  // 回归钉：Unix 超时走 SIGKILL，exit 事件 code 为 null——结算判定不能用 exitCode 判退出，
   // 否则超时/打断路径永不结算。Windows taskkill 产生退出码 1 无此形态，用例仅在 Unix 跑。
   it.skipIf(process.platform === "win32")("信号杀（SIGKILL，exit code 为 null）后超时路径正常结算", async () => {
     const out = await bashTool.execute({ command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 300 });

@@ -1,6 +1,6 @@
 /**
- * 层 1：状态行用量与工具耗时（可观测性 B4）——纯函数与恢复重建。
- * 归一口径、水位刷新、耗时回填、轨迹降级重建（OBSERVABILITY §5.1）。
+ * 层 1：状态行用量与工具耗时——纯函数与恢复重建。
+ * 归一口径、水位刷新、耗时回填、轨迹降级重建。
  */
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -17,7 +17,7 @@ import {
 import { rebuildUsageFromTrace, usageFromMessages } from "../../src/tui/usage.js";
 import type { Message } from "../../src/core/index.js";
 
-describe("accumulateUsage：归一口径（OBSERVABILITY §5.1）", () => {
+describe("accumulateUsage：归一口径", () => {
   it("anthropic 协议：输入 = input + 缓存读 + 缓存写（input_tokens 不含缓存段）", () => {
     const sum = accumulateUsage(undefined, {
       modelApi: "anthropic-messages",
@@ -182,7 +182,7 @@ describe("initState：工具耗时恢复回填", () => {
   });
 });
 
-describe("恢复重建降级（OBSERVABILITY §5.1）", () => {
+describe("恢复重建降级", () => {
   async function tmpDir(): Promise<string> {
     return mkdtemp(path.join(os.tmpdir(), "minicode-usage-"));
   }
@@ -202,7 +202,7 @@ describe("恢复重建降级（OBSERVABILITY §5.1）", () => {
         JSON.stringify({ kind: "event", event: "PostToolUse", agentPath: "/root", timestamp: "t", data: { toolCallId: "c1", toolName: "read", durationMs: 1500 } }),
         // 被中断的调用无 durationMs：不进耗时表
         JSON.stringify({ kind: "event", event: "PostToolUseFailure", agentPath: "/root", timestamp: "t", data: { toolCallId: "c2", toolName: "bash", error: "中断" } }),
-        // 执行中失败的调用带执行窗口耗时（B1）：同样回填
+        // 执行中失败的调用带执行窗口耗时：同样回填
         JSON.stringify({ kind: "event", event: "PostToolUseFailure", agentPath: "/root", timestamp: "t", data: { toolCallId: "c3", toolName: "bash", error: "超时", durationMs: 700 } }),
       ].join("\n");
       await writeFile(file, `${header}\n${events}\n`, "utf8");

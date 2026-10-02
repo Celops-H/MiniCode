@@ -1,11 +1,11 @@
 /**
  * 层 1：fit.ts 列宽/截断纯函数单测——CJK 全宽字符占 2 列、截断留省略号（按列宽非码点，
- * 按码点截中文会溢出折行，见 P1-3 修过的折行缺陷）。
+ * 按码点截中文会溢出折行）。
  */
 import { it, expect } from "vitest";
 import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "../../src/tui/view/fit.js";
 
-it("colWidth：ASCII 1 列、CJK 全宽 2 列、emoji 2 列（G-7）、混合", () => {
+it("colWidth：ASCII 1 列、CJK 全宽 2 列、emoji 2 列、混合", () => {
   expect(colWidth("ab")).toBe(2);
   expect(colWidth("中文")).toBe(4);
   expect(colWidth("a中b")).toBe(4);
@@ -35,7 +35,7 @@ it("padCols：右补空格到目标列宽（CJK 计 2 列），超宽原样返�
   expect(padCols("abcdef", 3)).toBe("abcdef");
 });
 
-it("relativeTime：s/min/hour(s)/day(s) ago 四档（G-7 单复数：1 不加 s）", () => {
+it("relativeTime：s/min/hour(s)/day(s) ago 四档（单复数：1 不加 s）", () => {
   const now = Date.parse("2026-08-27T12:00:00.000Z");
   expect(relativeTime("2026-08-27T11:59:40.000Z", now)).toBe("20s ago");
   expect(relativeTime("2026-08-27T11:30:00.000Z", now)).toBe("30min ago");
@@ -46,7 +46,7 @@ it("relativeTime：s/min/hour(s)/day(s) ago 四档（G-7 单复数：1 不加 s�
   expect(relativeTime("not-a-date", now)).toBe("—");
 });
 
-it("formatBytes：B/KB/MB 分级（G-2，>1MB 显示 MB 不再大数字难读）", () => {
+it("formatBytes：B/KB/MB 分级（>1MB 显示 MB 不再大数字难读）", () => {
   expect(formatBytes(0)).toBe("0 B");
   expect(formatBytes(512)).toBe("512 B");
   expect(formatBytes(4096)).toBe("4.0 KB");

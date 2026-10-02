@@ -44,7 +44,7 @@ export const grepTool: Tool = {
       if (fileGlob && !matchesGlob(path.basename(file), fileGlob)) continue;
       let content: string;
       try {
-        // 二进制文件嗅探跳过（E90）：readFile("utf8") 对二进制不抛错，整读大体积二进制
+        // 二进制文件嗅探跳过：readFile("utf8") 对二进制不抛错，整读大体积二进制
         // 进内存且乱码行会命中正则给模型喂假匹配——前段含 NUL 即视为二进制（git 同款做法）
         if (await isBinaryFile(file)) continue;
         content = await readFile(file, "utf8");
@@ -71,7 +71,7 @@ export const grepTool: Tool = {
 };
 
 /**
- * NUL 字节二进制嗅探（E90）：只读文件前段（BINARY_SNIFF_BYTES）判 NUL，不整读大文件。
+ * NUL 字节二进制嗅探：只读文件前段（BINARY_SNIFF_BYTES）判 NUL，不整读大文件。
  * @param file 文件路径
  * @returns 是否判定为二进制
  */

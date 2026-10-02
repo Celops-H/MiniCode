@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Agent, type ModelClient } from "../../src/agent/index.js";
 import { COMMAND_MARKER, userMessage } from "../../src/core/index.js";
 
-describe("appendCommand（命令痕迹，E24）", () => {
+describe("appendCommand（命令痕迹）", () => {
   it("追加 source=command 的用户消息，带命令标记前缀", () => {
     const agent = new Agent({
       modelClient: { async *stream() {} } as unknown as ModelClient,

@@ -15,7 +15,7 @@ export type TuiAction =
   | { type: "clear-input" }
   | { type: "newline" }
   | { type: "cursor"; dir: "left" | "right" | "up" | "down" | "start" | "end" }
-  /** Shift+方向键：扩展输入框选区（B-2；无选区时从当前位置起选，编辑操作清选区） */
+  /** Shift+方向键：扩展输入框选区（无选区时从当前位置起选，编辑操作清选区） */
   | { type: "select"; dir: "left" | "right" | "up" | "down" }
   | { type: "delete-line" }
   | { type: "delete-to-end" }
@@ -26,11 +26,11 @@ export type TuiAction =
   | { type: "complete" }
   | { type: "modal-nav"; dir: 1 | -1 }
   | { type: "modal-confirm" }
-  /** /session 面板切换当前行的操作态：进入 ↔ 删除（←→ 触发，P4-2） */
+  /** /session 面板切换当前行的操作态：进入 ↔ 删除（←→ 触发） */
   | { type: "session-action-toggle" }
   /** /model 弹窗左右调整思考等级 */
   | { type: "thinking-adjust"; dir: 1 | -1 }
-  /** /mcp 与 /skill 面板切换当前行启用/关闭（←→ 触发，UI-SPEC §8b） */
+  /** /mcp 与 /skill 面板切换当前行启用/关闭（←→ 触发） */
   | { type: "extensions-toggle" }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
   | { type: "cancel" }
@@ -43,7 +43,7 @@ export type TuiAction =
   | { type: "esc" }
   /** Shift+Tab 切换权限模式（default/plan/bypassPermissions，显示名见 permissionModeLabel） */
   | { type: "mode-cycle" }
-  /** Ctrl+P 取消最后一个排队项（消息/命令恢复到输入框，E72；loop 层同步移除传输队列） */
+  /** Ctrl+P 取消最后一个排队项（消息/命令恢复到输入框；loop 层同步移除传输队列） */
   | { type: "queue-cancel" }
   | { type: "noop" };
 
@@ -98,7 +98,7 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
       return { type: "select", dir: key.kind === "shift-left" ? "left" : "right" };
     case "shift-up":
     case "shift-down":
-      // 历史浏览态 Shift+↑↓ 仍导航历史（与普通 ↑↓ 一致，审查 L-5）；输入态才扩展选区
+      // 历史浏览态 Shift+↑↓ 仍导航历史（与普通 ↑↓ 一致）；输入态才扩展选区
       return ctx.inputEmpty || ctx.browsingHistory
         ? { type: "history", dir: key.kind === "shift-up" ? -1 : 1 }
         : { type: "select", dir: key.kind === "shift-up" ? "up" : "down" };
@@ -128,14 +128,14 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
     case "ctrl-u":
       return { type: "delete-line" };
     case "ctrl-shift-u":
-      // 一键清空输入框全部内容（D-3=49）
+      // 一键清空输入框全部内容
       return { type: "clear-input" };
     case "ctrl-k":
       return { type: "delete-to-end" };
     case "ctrl-w":
       return { type: "delete-word" };
     case "ctrl-p":
-      // 取消最后一个排队项（E72）：reducer 从展示队列弹出并恢复到输入框，loop 层同步移除传输队列
+      // 取消最后一个排队项：reducer 从展示队列弹出并恢复到输入框，loop 层同步移除传输队列
       return { type: "queue-cancel" };
     case "esc":
       // 运行中打断；空闲时连按两次退出（loop 层处理状态与计时）
@@ -202,7 +202,7 @@ function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiActio
         return { type: "modal-nav", dir: key.kind === "up" ? -1 : 1 };
       case "left":
       case "right":
-        // 左右切当前行操作态：进入 ↔ 删除（P4-2；模型弹窗 ←→ 是思考等级，这里不冲突）
+        // 左右切当前行操作态：进入 ↔ 删除（模型弹窗 ←→ 是思考等级，这里不冲突）
         return { type: "session-action-toggle" };
       case "enter":
         return { type: "modal-confirm" };

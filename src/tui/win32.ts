@@ -1,7 +1,7 @@
 /**
- * Windows 终端输入初始化（opencode 的 terminal-win32 对应）。
+ * Windows 终端输入初始化。
  * opentui 原生层在 Windows 下读控制台输入时，控制台的 PROCESSED_INPUT 标志未清除会导致
- * Ctrl+C 等按键被终端处理、原始字节不完整进应用（opencode 官方也在启动时调用这些）。
+ * Ctrl+C 等按键被终端处理、原始字节不完整进应用。
  *
  * 全程用 process.getBuiltinModule("node:ffi") 而非静态 import：node:ffi 是 Node 26 实验内建，
  * vite-node/vite 8 的解析器不识别它（resolved id 变 ffi 而加载失败），运行时获取绕过打包器解析。

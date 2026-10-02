@@ -1,5 +1,5 @@
 /**
- * 状态行用量的恢复重建（可观测性 B4，OBSERVABILITY §5.1 降级顺序）：
+ * 状态行用量的恢复重建（降级顺序）：
  * 优先扫轨迹（全量含子 agent，LlmCallEnd 逐条归一累计）→ 轨迹不存在回落会话文件
  * meta.usage（仅主 agent、无缓存段）→ 仍无则不显示。工具耗时回填同源：轨迹的
  * PostToolUse 事件按 toolCallId 提取耗时（被中断的调用无 PostToolUse，不显示）。
@@ -39,7 +39,7 @@ export async function rebuildUsageFromTrace(
           toolDurations.set(toolCallId, durationMs);
         }
       } else if (line.event === "PostToolUseFailure") {
-        // 执行中失败的调用也带执行窗口耗时（B1）；执行前被拒的事件无 durationMs，天然不进表
+        // 执行中失败的调用也带执行窗口耗时；执行前被拒的事件无 durationMs，天然不进表
         const toolCallId = line.data.toolCallId;
         const durationMs = line.data.durationMs;
         if (typeof toolCallId === "string" && typeof durationMs === "number") {
@@ -77,7 +77,7 @@ function accumulateTraceUsage(
 
 /**
  * 回落口径：扫会话消息的 assistant meta.usage 累计（仅主 agent——子 agent 消息不在
- * 会话文件里；无缓存段——缓存命中率不显示，OBSERVABILITY §5.1）。任何用量都没有时
+ * 会话文件里；无缓存段——缓存命中率不显示）。任何用量都没有时
  * 返回 undefined（状态行不显示用量区）。
  * @param messages 会话消息
  */

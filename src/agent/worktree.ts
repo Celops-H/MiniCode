@@ -1,5 +1,5 @@
 /**
- * Git Worktree 隔离（DESIGN 4.2/11.7）：并行 agent 各自独立工作区，
+ * Git Worktree 隔离：并行 agent 各自独立工作区，
  * 文件写冲突从「提示重读重试」升级为物理隔离。
  * 仅 git 仓库场景有效（非 git 仓库退化为共享目录 + CAS 冲突防护）。
  */
@@ -126,7 +126,7 @@ export function completeWorktree(rootDir: string, info: WorktreeInfo): WorktreeR
  */
 export function abortWorktree(rootDir: string, info: WorktreeInfo): void {
   // 冲突中（MERGE_HEAD 存在）先放弃合并：冲突标记是合并中间态，不该提交进分支
-  // （review 修复：kept 保留 mid-merge worktree 后，中断/释放路径会走到这里）
+  // （kept 保留 mid-merge worktree 后，中断/释放路径会走到这里）
   if (git(info.dir, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== undefined) {
     git(info.dir, ["merge", "--abort"]);
   }

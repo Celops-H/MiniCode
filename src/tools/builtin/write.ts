@@ -25,7 +25,7 @@ export const writeTool: Tool = {
     const file = resolvePath(filePath); // 相对路径基于工具执行上下文 cwd
     const fileState = currentFileState();
     const write = async () => {
-      // CAS 校验：磁盘 vs 本 agent 快照，冲突拒绝（DESIGN 7.6）
+      // CAS 校验：磁盘 vs 本 agent 快照，冲突拒绝
       const stale = fileState ? await fileState.assertWritable(file) : null;
       if (stale) return stale;
       await mkdir(path.dirname(file), { recursive: true });

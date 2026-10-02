@@ -1,5 +1,5 @@
 /**
- * 消息流：按 opencode 观感渲染 state.blocks 与流式尾（M4.4 收尾打磨批 + 新任务 5）。
+ * 消息流：渲染 state.blocks 与流式尾。
  * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你/模型=浅蓝、工具/思考/子agent=灰、
  * 通知=红警示），后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
  * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
@@ -12,7 +12,7 @@ import type { JSX } from "@opentui/solid";
 import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { theme } from "./theme.js";
 
-/** 状态图标/颜色：进行中 spinner（黄=进行中，E-2/3 语义统一）、成功绿、失败红、待执行暗 */
+/** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗 */
 function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   switch (b.status) {
     case "running":
@@ -66,7 +66,7 @@ function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX
   );
 }
 
-/** 可折叠区悬停临时态（E-1=35）：onMouseOver/onMouseOut 切换折叠摘要行灰文字变白（theme.text），
+/** 可折叠区悬停临时态：onMouseOver/onMouseOut 切换折叠摘要行灰文字变白（theme.text），
  *  移开恢复灰（不再整块背景抬高）；仅折叠摘要行生效，展开内容保持灰、正文/状态行不受影响 */
 function useHoverFg(): {
   fg: () => string;
@@ -110,7 +110,7 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
         </text>
       </box>
       <Show when={!props.collapsed}>
-        {/* 展开内容保持灰色调（与折叠提示同灰，用户复核：展开后也应灰色显示） */}
+        {/* 展开内容保持灰色调（与折叠提示同灰，展开后也应灰色显示） */}
         <text fg={theme.textMuted}>{props.text}</text>
       </Show>
     </box>
@@ -118,7 +118,7 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
 }
 
 /** 单条消息块：用户/助手，含点击可切换的思考折叠与错误标记。
- *  助手署名跟随消息的实际产出模型（E18：路由切到备选后归属正确），缺省回落会话当前模型 */
+ *  助手署名跟随消息的实际产出模型（路由切到备选后归属正确），缺省回落会话当前模型 */
 function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () => void }): JSX.Element {
   const label = props.b.role === "user" ? "你" : (props.b.model ?? props.modelLabel);
   return (
@@ -130,7 +130,7 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
         </span>{" "}
         {props.b.time ?? ""}
       </text>
-      {/* 思考在前、结论文本在后（用户复核：先看到思考，再看到结论） */}
+      {/* 思考在前、结论文本在后（先看到思考，再看到结论） */}
       <Show when={props.b.thinking}>
         <ThinkingFold text={props.b.thinking!} collapsed={props.b.thinkingCollapsed} onFold={props.onFold} />
       </Show>
@@ -141,7 +141,7 @@ function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () =>
   );
 }
 
-/** 工具调用卡片（③工具浓缩，opencode 风格，用户确认 4 点）：
+/** 工具调用卡片（工具浓缩）：
  *  - compact（glob/read/grep/ls 只读快工具）：完成收敛单行摘要「✱ Read 参数摘要 · 输出 N 行」，鼠标点击展开参数与输出全文
  *  - bash：去框线紧凑块——首行状态 + 命令摘要，超长输出折叠为行数提示，鼠标点击切换
  *  - generic（未特判工具）：默认单行「⚙ 名 参数」，输出隐藏，鼠标点击展开
@@ -155,7 +155,7 @@ function toolDisplayMode(name: string | undefined): "compact" | "bash" | "generi
   return "generic";
 }
 
-/** 参数摘要（G-4=42）：优先取 path/file/command/pattern 等已知键名（content 排在前面也不误导），
+/** 参数摘要：优先取 path/file/command/pattern 等已知键名（content 排在前面也不误导），
  *  无已知键再取任意首字符串；长则截断；非 JSON 用原文截断 */
 const ARGS_PREFERRED_KEYS = ["path", "file", "command", "pattern", "query", "message", "target"];
 function argsDigest(args: string, max = 40): string {
@@ -169,11 +169,11 @@ function argsDigest(args: string, max = 40): string {
   } catch {
     // 非 JSON 参数用原文
   }
-  // 按码点截断（emoji 代理对不切成乱码，轻微 5 审查）
+  // 按码点截断（emoji 代理对不切成乱码）
   return Array.from(s).length > max ? `${Array.from(s).slice(0, max).join("")}…` : s;
 }
 
-/** 执行耗时文案（可观测性 B4）：完成/失败卡显示「· 耗时 1.2s」，不足 1 秒记 ms；
+/** 执行耗时文案：完成/失败卡显示「· 耗时 1.2s」，不足 1 秒记 ms；
  *  执行前被拒（无 durationMs 事件）与被中断（无 PostToolUse）无耗时不显示 */
 function durationText(b: ToolBlock): string {
   if (b.durationMs === undefined) return "";
@@ -249,7 +249,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
         <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
         {durationText(b)}
-        {/* D-5=70：generic（含协作工具 send_message 等）摘要行补「输出 N 行」；只有错误无输出时显「错误详情」（审查 D-3） */}
+        {/* generic（含协作工具 send_message 等）摘要行补「输出 N 行」；只有错误无输出时显「错误详情」 */}
         {hasOutput(b) && b.collapsedOutput
           ? b.output
             ? ` · 输出 ${b.output.trimEnd().split("\n").length} 行 · 点击展开`
@@ -271,7 +271,7 @@ function hasOutput(b: ToolBlock): boolean {
 }
 
 /** 子 agent 活动行：派生/完成（结论+合并可折叠）/中断——结论/合并长内容平时收敛单行，
- *  点击展开（用户复核：子 agent 结果应像工具一样支持展开/关闭） */
+ *  点击展开（子 agent 结果应像工具一样支持展开/关闭） */
 function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: () => void }): JSX.Element {
   const b = props.b;
   const foldable = b.event === "completed" && Boolean(b.conclusion || b.mergeResult);
@@ -308,7 +308,7 @@ function NoticeView(props: { b: NoticeBlock }): JSX.Element {
   return <text fg={theme.warning}>{props.b.text}</text>;
 }
 
-/** 命令块（E24）：一条命令一行，弱化展示——执行过程不铺屏，命令本身有痕迹可循 */
+/** 命令块：一条命令一行，弱化展示——执行过程不铺屏，命令本身有痕迹可循 */
 function CommandView(props: { b: CommandBlock }): JSX.Element {
   return (
     <text fg={theme.textMuted}>
@@ -346,11 +346,11 @@ export function Messages(props: {
   streaming?: Streaming;
   onFoldAt?: (index: number) => void;
 }): JSX.Element {
-  // E43=57 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
-  // 直接 spread 覆盖会遮蔽原生滚动（S2 审查确认）。改用 ref 包装：先放大 delta 再调原生实现，
-  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。放大按倍数作用——上下方向速度一致（E43）；
+  // 滚轮加速：opentui 原生每次滚 1 行太慢。scrollbox 的 onMouseEvent 是原型方法——
+  // 直接 spread 覆盖会遮蔽原生滚动。改用 ref 包装：先放大 delta 再调原生实现，
+  // 不遮蔽。WeakSet 防 ref 重复调用时叠加包装。放大按倍数作用——上下方向速度一致；
   // 滚轮事件统一落在消息区 scrollbox 上，长消息等子元素不拦截（事件冒泡到滚动容器）。
-  // ×5（E43 整体速度调大）。
+  // 整体速度 ×5。
   const boostedScrollboxes = new WeakSet<object>();
   const boostWheel = (el: unknown): void => {
     if (!el || boostedScrollboxes.has(el)) return;

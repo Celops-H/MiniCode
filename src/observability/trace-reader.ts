@@ -6,11 +6,11 @@ import { resolveSessionsDir } from "../config/paths.js";
 import { TRACE_FORMAT, type TraceEventLine, type TraceHeader, type TraceMessageLine } from "./format.js";
 
 /**
- * 轨迹读取的通用原语（OBSERVABILITY §3.1）：流式逐行扫描、按 kind/event/agentPath
+ * 轨迹读取的通用原语：流式逐行扫描、按 kind/event/agentPath
  * 过滤、容错反序列化。TUI 的累计重建与工具耗时回填是它的两个内置消费方（B4）；
  * 指标聚合口径不进本模块，留在消费侧（评测）。
  *
- * 容错规则（OBSERVABILITY §4.4）：未知 kind / event 跳过不报错——事件类型是开放
+ * 容错规则：未知 kind / event 跳过不报错——事件类型是开放
  * 清单，前向兼容靠这条，新增事件类型老读者零改动；损坏行同样跳过（宁丢一行
  * 不拖垮整体，与会话 JSONL 坏行处理一致）。
  */
@@ -100,7 +100,7 @@ export class TraceReader {
 }
 
 /**
- * 删除会话对应的轨迹文件（会话删除联动，OBSERVABILITY §4.1 唯一联动点）。
+ * 删除会话对应的轨迹文件（会话删除联动的唯一联动点）。
  * 调用方约定先轨迹后会话：即使两步之间崩溃，残留只会是「有会话无轨迹」的无害方向，
  * 不会留下含正文的孤儿轨迹。文件不存在时静默通过（force）。
  * @param tracesDir 轨迹目录
@@ -111,7 +111,7 @@ export async function deleteTrace(tracesDir: string, sessionId: string): Promise
 }
 
 /**
- * 惰性清理（OBSERVABILITY §4.1 兜底）：按各轨迹 header 的 cwd 定位对应会话目录，
+ * 惰性清理（兜底）：按各轨迹 header 的 cwd 定位对应会话目录，
  * 会话文件已不存在的轨迹直接删除——防历史版本（轨迹目录早于按 cwd 隔离的会话
  * 存储使用）或意外路径残留。读取失败/头损坏的轨迹保守跳过，宁可残留不误删。
  * 该 cwd 的会话子目录本身不存在时整体跳过（如 sessionsDir 换根后新根尚未建）——

@@ -29,7 +29,7 @@ async function readLines(file: string): Promise<string[]> {
   return content.split("\n").filter((l) => l.trim());
 }
 
-describe("Logger 文件输出（OBSERVABILITY §6）", () => {
+describe("Logger 文件输出", () => {
   it("写文件恒带时间戳、不走控制台 write；级别过滤对文件同样生效", async () => {
     const dir = await tmpDir();
     try {
@@ -103,7 +103,7 @@ describe("Logger 文件输出（OBSERVABILITY §6）", () => {
   });
 });
 
-describe("attachHookLogging：事件流水埋点（OBSERVABILITY §6）", () => {
+describe("attachHookLogging：事件流水埋点", () => {
   /** 捕获 write 的文件模式 Logger（直接断言写入行） */
   function captureLogger(): { logger: Logger; lines: Array<{ level: LogLevel; message: string }> } {
     const lines: Array<{ level: LogLevel; message: string }> = [];
@@ -208,7 +208,7 @@ describe("attachHookLogging：事件流水埋点（OBSERVABILITY §6）", () => 
   });
 });
 
-describe("HookBus.onHandlerError：处理器异常可见（E104）", () => {
+describe("HookBus.onHandlerError：处理器异常可见", () => {
   it("单个 handler 抛错时回调收到错误与事件，同事件其余 handler 与业务不受影响", async () => {
     const errors: Array<{ error: unknown; event: HookEvent }> = [];
     const bus = new HookBus({ onHandlerError: (error, event) => errors.push({ error, event }) });

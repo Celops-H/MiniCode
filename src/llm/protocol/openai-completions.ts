@@ -4,9 +4,9 @@ import type { ModelUsage } from "../../core/index.js";
 import type { ModelInfo, Protocol } from "../types.js";
 import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
 
-/** delta 的字段形状（E62 兜底 b：choice.message 同形，delta 缺失时回落读它） */
+/** delta 的字段形状（兜底 b：choice.message 同形，delta 缺失时回落读它） */
 interface ChoiceDelta {
-  /** 正文文本：OpenAI 标准为字符串；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接（P10） */
+  /** 正文文本：OpenAI 标准为字符串；部分兼容厂商（glm 等）发 content 块数组，取文本块拼接 */
   content?: string | Array<ContentArrayBlock>;
   /** 推理模型思考增量（DeepSeek 等）→ 统一成 thinking_delta */
   reasoning_content?: string;
@@ -21,7 +21,7 @@ interface ChoiceDelta {
 
 interface Choice {
   delta?: ChoiceDelta;
-  /** 非真流式厂商把完整 message 字段单 chunk 下发（E62 兜底 b）：字段形状与 delta 一致 */
+  /** 非真流式厂商把完整 message 字段单 chunk 下发（兜底 b）：字段形状与 delta 一致 */
   message?: ChoiceDelta;
   finish_reason?: string;
 }
@@ -35,10 +35,10 @@ interface ContentArrayBlock {
   reasoning?: string;
 }
 
-/** E68 诊断样本条数上限：只求可辨识，不求全覆盖 */
+/** 诊断样本条数上限：只求可辨识，不求全覆盖 */
 const DROPPED_SAMPLE_LIMIT = 5;
 
-/** E68 诊断样本单条长度上限（字符） */
+/** 诊断样本单条长度上限（字符） */
 const DROPPED_SAMPLE_MAX_LENGTH = 200;
 
 /** openai-chat-completions 协议：统一格式 ↔ OpenAI 请求体 / 流式响应 */
@@ -51,10 +51,10 @@ export class OpenAICompletionsProtocol implements Protocol {
   private readonly emitReasoningEffort: boolean;
   /** 需显式 enable_thinking 参数才开启思考的厂商（DashScope）：不发送则思考等级静默无效 */
   private readonly enableThinking: boolean;
-  /** 请求流式真实用量（stream_options.include_usage，E63）：严格网关对未知参数 400
+  /** 请求流式真实用量（stream_options.include_usage）：严格网关对未知参数 400
    *  且不可切换，按厂商能力位开关而非无条件发送 */
   private readonly includeUsage: boolean;
-  /** E68 诊断开关（调试排查用）：记录流解析中未产出任何事件的被丢弃 chunk 样本 */
+  /** 诊断开关（调试排查用）：记录流解析中未产出任何事件的被丢弃 chunk 样本 */
   private readonly debugDroppedChunks: boolean;
 
   constructor(
@@ -76,14 +76,14 @@ export class OpenAICompletionsProtocol implements Protocol {
   /**
    * 统一 Context → OpenAI 请求体；model 与 stream 参数由 Provider 组装。
    * 思考类请求参数（reasoning_effort/enable_thinking）仅对推理系列模型（model.reasoning）
-   * 随思考等级下发：同一厂商混排思考/非思考模型，对不支持该参数的模型照发会 400（E60）。
+   * 随思考等级下发：同一厂商混排思考/非思考模型，对不支持该参数的模型照发会 400。
    * @param context 一次模型调用的完整输入
    * @param model 本次请求的模型定义（能力位来源），可省略（等价于非推理模型）
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
   buildRequest(context: Context, model?: ModelInfo): unknown {
     // 跳过既无 content 也无 tool_calls 的 assistant：完整轮无任何产出时 runTurn 会落 content:[] 的
-    // 空 assistant，续跑把它带给厂商会 400（与 A400 同类残留面）——无信息的消息直接不发更安全
+    // 空 assistant，续跑把它带给厂商会 400——无信息的消息直接不发更安全
     const converted = context.messages
       .map((message) => toOpenAIMessage(message, this.reasoningContent))
       .filter((m) => !(m.role === "assistant" && m.content == null && m.tool_calls == null));
@@ -100,7 +100,7 @@ export class OpenAICompletionsProtocol implements Protocol {
         : {}),
       // DashScope 等厂商需显式开启思考：仅推理系列模型随思考等级发送
       ...(this.enableThinking && reasoning && context.thinkingLevel ? { enable_thinking: true } : {}),
-      // 真实用量（E63）：能力位开启才带 stream_options.include_usage，流尾 usage chunk
+      // 真实用量：能力位开启才带 stream_options.include_usage，流尾 usage chunk
       // 解析挂 done.usage（严格网关对未知参数 400，不可无条件发送）
       ...(this.includeUsage ? { stream_options: { include_usage: true } } : {}),
     };
@@ -112,8 +112,8 @@ export class OpenAICompletionsProtocol implements Protocol {
    * 工具调用没有独立的结束标记，收 finish_reason 或流尾时统一补发结束事件。
    * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件）与
    * 前缀剥离器（累积全文下发的厂商防滚雪球重复），见 tag-stream.ts。
-   * 逐 chunk 收集事件再统一产出（产出顺序不变）：零产出的 chunk 是 E68 诊断的记录对象，
-   * 也是 E56 error 载荷 chunk、E62 message 兜底 chunk 的统一处理位。
+   * 逐 chunk 收集事件再统一产出（产出顺序不变）：零产出的 chunk 是诊断的记录对象，
+   * 也是 error 载荷 chunk、message 兜底 chunk 的统一处理位。
    * @param stream OpenAI 原始流式 chunk（SSE data 解析后的对象）
    * @returns 统一事件流
    */
@@ -126,7 +126,7 @@ export class OpenAICompletionsProtocol implements Protocol {
     // 已开始且未补发结束的工具调用（finish_reason 与流尾各 flush 一次）
     const openTools = new Set<number>();
     let nextToolIndex = 0;
-    // E62 兜底 a)：厂商省略 index 时「有 id 即新调用」用的负数虚拟 index
+    // 兜底 a)：厂商省略 index 时「有 id 即新调用」用的负数虚拟 index
     // （厂商正常 index 从 0 起，负数空间不撞）；无 id 的续片归并最近打开的调用
     let nextSyntheticVendorIndex = -1;
     let lastOpenedVendorIndex: number | undefined;
@@ -134,12 +134,12 @@ export class OpenAICompletionsProtocol implements Protocol {
     const thinkingGuard = new PrefixDeltaGuard();
     const tagFilter = new InlineTagFilter(() => nextToolIndex++);
     let finishReason: string | undefined;
-    // 真实用量（E63）：流尾 usage chunk（include_usage）的 prompt/completion tokens，
+    // 真实用量：流尾 usage chunk（include_usage）的 prompt/completion tokens，
     // 最后一次取值，随 done 事件挂出
     let usage: ModelUsage | undefined;
-    // E56：已上报的厂商真实错误（error 载荷），流尾不再补「流意外结束」把真实原因顶掉
+    // 已上报的厂商真实错误（error 载荷），流尾不再补「流意外结束」把真实原因顶掉
     let reportedError: string | undefined;
-    // E68 诊断（仅调试开关开启时收集）：被消费却未产出任何事件的 chunk 计数与样本，
+    // 诊断（仅调试开关开启时收集）：被消费却未产出任何事件的 chunk 计数与样本，
     // 流结束（含异常/中断结束）时输出——「流活跃但零输出」的静默卡死复现时有据可查。
     // 无行为改变：不拦截、不报错、不影响任何事件
     const dropped = this.debugDroppedChunks
@@ -149,11 +149,11 @@ export class OpenAICompletionsProtocol implements Protocol {
       for await (const chunk of stream) {
         if (dropped) dropped.total++;
         const events: StreamEvent[] = [];
-        // E56：网关型厂商（one-api 系）在 HTTP 200 的 SSE 里发无 choices、带 error 载荷的
+        // 网关型厂商（one-api 系）在 HTTP 200 的 SSE 里发无 choices、带 error 载荷的
         // chunk——解析出真实错误原因转成统一 error 事件，此前经 firstChoice 直接 continue，
         // 原因丢失、最终只报「流意外结束」
         const chunkError = chunkErrorMessage(chunk);
-        // usage chunk（E63）：流尾仅带用量的 chunk，取值后不算「零产出」诊断；
+        // usage chunk：流尾仅带用量的 chunk，取值后不算「零产出」诊断；
         // 用量与 choices 独立处理（个别厂商同 chunk 携带时不丢内容）
         const chunkUsage = readOpenAIUsage(chunk);
         if (chunkUsage) usage = chunkUsage;
@@ -163,7 +163,7 @@ export class OpenAICompletionsProtocol implements Protocol {
         } else {
           const choice = firstChoice(chunk);
           if (choice) {
-            // E62 兜底 b)：厂商不支持真流式、把完整 message 字段单 chunk 下发时 delta
+            // 兜底 b)：厂商不支持真流式、把完整 message 字段单 chunk 下发时 delta
             // 缺失，回落读 message（字段形状与 delta 一致），内容不再全丢
             const delta = choice.delta ?? choice.message;
             // 思考增量：多家厂商字段别名（reasoning_content / reasoning / reasoning_text），
@@ -174,7 +174,7 @@ export class OpenAICompletionsProtocol implements Protocol {
               if (thinking) events.push({ type: "thinking_delta", thinking });
             }
             if (delta?.content != null) {
-              // 正文：字符串当单个文本块；兼容厂商（glm 等）发 content 块数组（P10）——
+              // 正文：字符串当单个文本块；兼容厂商（glm 等）发 content 块数组——
               // text 块进正文管道，思考块（thinking/reasoning_content/reasoning 字段）进思考
               // 管道（此前被静默丢弃，glm 思考+正文异常的根因之一）
               const blocks =
@@ -201,8 +201,8 @@ export class OpenAICompletionsProtocol implements Protocol {
             // id/name 后补时重复发 start（assemble 增量更新，接口约定见 core/events.ts）
             if (Array.isArray(delta?.tool_calls)) {
               for (const tc of delta.tool_calls) {
-                // E62 兜底 a)：兼容厂商省略 index 的分组——有 id 优先复用已见过的同 id
-                // 调用（厂商省略 index 且每片重发 id 的形态，review 补：否则一条调用被裂成
+                // 兜底 a)：兼容厂商省略 index 的分组——有 id 优先复用已见过的同 id
+                // 调用（厂商省略 index 且每片重发 id 的形态，否则一条调用被裂成
                 // N 条、每条带着截断参数会被真实执行），未见过才开新调用（分配负数虚拟
                 // index）；无 id 归并最近打开的调用（流式参数续片）；无 id 且没有已打开的
                 // 调用时无处归属，跳过。此前 index 缺失整条调用被直接丢弃，工具调用静默消失
@@ -303,7 +303,7 @@ export class OpenAICompletionsProtocol implements Protocol {
       yield { type: "done", stopReason: finishReason, ...(usage ? { usage } : {}) };
       return;
     }
-    // 已上报过厂商真实错误（E56）：不再补「流意外结束」，真实原因不被通用文案顶掉
+    // 已上报过厂商真实错误：不再补「流意外结束」，真实原因不被通用文案顶掉
     if (reportedError) return;
     // 流尾无 finish_reason（如厂商提前断流）：已按异常轮收尾，报 error
     yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
@@ -325,10 +325,10 @@ function firstChoice(chunk: unknown): Choice | null {
 }
 
 /**
- * 取 chunk 携带的 error 载荷消息（E56）：网关型厂商在 HTTP 200 的 SSE 里发
+ * 取 chunk 携带的 error 载荷消息：网关型厂商在 HTTP 200 的 SSE 里发
  * {"error":{...}} 或 {"error":"..."} 形态的 chunk，error 可能是对象（取 message）
  * 也可能是字符串本身。null/false/0/空串等退化形态视为占位噪声不当真实错误
- * （维持旧的静默跳过，review 补：报「false」「{}」这类错误事件只会误导）。
+ * （维持旧的静默跳过：报「false」「{}」这类错误事件只会误导）。
  * @param chunk 一个流式响应片段
  * @returns 错误消息；无 error 载荷返回 undefined
  */
@@ -347,10 +347,10 @@ function chunkErrorMessage(chunk: unknown): string | undefined {
 }
 
 /**
- * 取 chunk 携带的 usage（E63 真实用量）：include_usage 开启后流尾会有仅含 usage 的
+ * 取 chunk 携带的 usage（真实用量）：include_usage 开启后流尾会有仅含 usage 的
  * chunk（choices 为空），prompt_tokens/completion_tokens 转统一 ModelUsage。
- * 缓存读命中（可观测性 B1）：prompt_tokens_details.cached_tokens → cacheReadTokens；
- * openai 无写缓存概念不产出 cacheWriteTokens（归一口径见 OBSERVABILITY §5.1）。
+ * 缓存读命中：prompt_tokens_details.cached_tokens → cacheReadTokens；
+ * openai 无写缓存概念不产出 cacheWriteTokens。
  * @param chunk 一个流式响应片段
  * @returns 统一用量；无 usage 载荷返回 undefined
  */
@@ -378,7 +378,7 @@ function readOpenAIUsage(chunk: unknown): ModelUsage | undefined {
 }
 
 /**
- * E68 诊断样本：被丢弃 chunk 的 JSON 原文，超长截断（样本只求可辨识，不求完整）。
+ * 诊断样本：被丢弃 chunk 的 JSON 原文，超长截断（样本只求可辨识，不求完整）。
  * @param chunk 一个流式响应片段
  * @returns 截断后的 JSON 文本
  */

@@ -1,6 +1,6 @@
 /**
- * TUI 驱动循环（R1b）：完整交互闭环——store 状态通道 + interact 接入 + 渲染挂载。
- * 交互经验继承 M4.3（tui-m43-ansi 的 loop.ts）：approver 待批队列一次放行全部、/compact 运行守卫、
+ * TUI 驱动循环：完整交互闭环——store 状态通道 + interact 接入 + 渲染挂载。
+ * 交互行为：approver 待批队列一次放行全部、/compact 运行守卫、
  * 错误渲染进消息区不退出、turn 内打断（Esc）、modal 态保留 Ctrl+D 退出、双渲染流（onEvent/onRootEvent）都接。
  * 渲染：runTui 挂载 <App/>（opentui renderer），键盘经 App useKeyboard → mapKey → handleAction。
  */
@@ -42,7 +42,7 @@ export interface TuiChannel {
   onAction: (action: TuiAction) => void;
 }
 
-/** 复制文本到系统剪贴板（Windows PowerShell，显式 UTF8 解码 stdin——默认 OEM 代码页会把中文/emoji 变乱码，问题 38；方案对齐 opencode） */
+/** 复制文本到系统剪贴板（Windows PowerShell，显式 UTF8 解码 stdin——默认 OEM 代码页会把中文/emoji 变乱码） */
 export function copyToClipboard(text: string): void {
   const child = spawn(
     "powershell",
@@ -58,7 +58,7 @@ export function copyToClipboard(text: string): void {
   child.stdin.end(text);
 }
 
-/** 建立纯 reducer 通道（R1a；R1b 的 runTui 内部使用带副作用的完整处理） */
+/** 建立纯 reducer 通道（runTui 内部使用带副作用的完整处理） */
 export function createChannel(initialMessages: Message[]): TuiChannel {
   const [state, setState] = createStore<TuiState>(initState(initialMessages));
   return {
@@ -74,7 +74,7 @@ const TOAST_MS = 5000;
 
 export interface TuiLoopOptions {
   /** 装配回调：通道就绪后由入口层用 approver/feedRoot/hooks 构造 agent（多 agent 时带 team，供级联中断/收尾清理）；
-   *  返回的 initPolicyBox 供 /init 过程免审批置位（E24，装配层据此活读 autoApprove） */
+   *  返回的 initPolicyBox 供 /init 过程免审批置位（装配层据此活读 autoApprove） */
   assemble: (channel: {
     approver: PermissionApprover;
     feedRoot: (event: StreamEvent) => void;
@@ -91,45 +91,45 @@ export interface TuiLoopOptions {
   thinkingLevel?: { value: ThinkingLevel | undefined };
   /** 全部配置模型列表（/model 弹窗数据源） */
   modelList?: Array<{ id: string }>;
-  /** 已配置 MCP 服务（/mcp 面板数据源，BACKEND §19） */
+  /** 已配置 MCP 服务（/mcp 面板数据源） */
   mcpServers?: Record<string, McpServerConfig>;
   /** MCP 装配状态活读取（/mcp 面板连接状态列；随会话装配注入） */
   getMcpStatuses?: () => McpServerStatus[];
   /** 技能关闭名单（config.skills.disabled 全局/项目并集，/skill 面板行启用态用） */
   skillsDisabled?: string[];
-  /** 合并后配置（/settings 面板数据源，E115）：行启用态按生效值展示，应用后重装配重读 */
+  /** 合并后配置（/settings 面板数据源）：行启用态按生效值展示，应用后重装配重读 */
   config?: Config;
   /** 会话启动通知（MCP 启动失败错误行等）：挂载后 toast 一次，完整状态在 /mcp 面板 */
   startupNotices?: string[];
-  /** 零可用厂商启动引导（E31）：打开供应商选择弹窗 + toast 提示，连接成功经 reconfigure 重建 */
+  /** 零可用厂商启动引导：打开供应商选择弹窗 + toast 提示，连接成功经 reconfigure 重建 */
   startupConnect?: boolean;
-  /** 共享终端（E19）：入口层创建一次跨会话复用；缺省自建并在退出时销毁（测试/单会话） */
+  /** 共享终端：入口层创建一次跨会话复用；缺省自建并在退出时销毁（测试/单会话） */
   terminal?: TuiTerminal;
-  /** 共享挂载（E19 修正，批次 9~14 审查必须项）：渲染器复用时 Solid 根只挂一次——同一渲染器上
+  /** 共享挂载：渲染器复用时 Solid 根只挂一次——同一渲染器上
    *  重复 render 会并排叠加旧根（旧根不卸载、按键被新旧两套处理器各处理一次）。共享模式下
    *  会话轮换只重置 store 内容并切换动作分发。缺省自建（每会话建毁渲染器，destroy 触发根卸载） */
   shared?: TuiSharedMount;
-  /** 共享模式下本轮是否按当前会话重建视图内容（false = carry 续接保留现有内容，E34） */
+  /** 共享模式下本轮是否按当前会话重建视图内容（false = carry 续接保留现有内容） */
   resetView?: boolean;
-  /** 上一轮带回的 UI 状态（E34）：仅自建路径使用；共享路径靠 store 天然续接 */
+  /** 上一轮带回的 UI 状态：仅自建路径使用；共享路径靠 store 天然续接 */
   carryState?: TuiState;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
-  /** 轨迹目录（/session 删除联动用，OBSERVABILITY §4.1 先轨迹后会话）；缺省 ~/.minicode/traces */
+  /** 轨迹目录（/session 删除联动用，先删轨迹后删会话）；缺省 ~/.minicode/traces */
   tracesDir?: string;
-  /** 模型 id → 协议（可观测性 B4：用量累计的归一口径按协议区分，装配层传 models.resolve） */
+  /** 模型 id → 协议（用量累计的归一口径按协议区分，装配层传 models.resolve） */
   modelApi?: (modelId: string) => string | undefined;
-  /** 模型上下文窗口（状态行上下文水位的分母，可观测性 B4） */
+  /** 模型上下文窗口（状态行上下文水位的分母） */
   contextWindow?: number;
   /** 自动压缩触发线（contextWindow - maxOutputTokens - safetyMargin）：水位到达即警示色 */
   compactThreshold?: number;
   /**
-   * 恢复重建（可观测性 B4，重建视图时调用一次）：状态行用量按降级顺序重建
-   * （轨迹 → 会话 meta.usage，OBSERVABILITY §5.1）+ 工具耗时按 toolCallId 从轨迹回填；
+   * 恢复重建（重建视图时调用一次）：状态行用量按降级顺序重建
+   * （轨迹 → 会话 meta.usage）+ 工具耗时按 toolCallId 从轨迹回填；
    * carry 续接（reconfigure）不调用，用量随界面状态原样续接
    */
   rebuildExtras?: () => Promise<{ usage?: UsageSummary; toolDurations?: Map<string, number> }>;
-  /** hook 命令 stderr 输出通道（E95）：入口层创建的可变盒子，runTui 挂载后指向 toast；
+  /** hook 命令 stderr 输出通道：入口层创建的可变盒子，runTui 挂载后指向 toast；
    *  全屏渲染下 hook stderr 直写会插花渲染帧，TUI 形态落 toast */
   hookStderr?: { value?: (text: string) => void };
 }
@@ -137,7 +137,7 @@ export interface TuiLoopOptions {
 /** 共享 store 的 setter 类型：取 createStore 派生签名，保证 reconcile 等既有用法类型不变 */
 type TuiSetState = ReturnType<typeof createStore<TuiState>>[1];
 
-/** 共享挂载上下文：入口层创建一次，跨会话持有同一 store 代理（E19 修正） */
+/** 共享挂载上下文：入口层创建一次，跨会话持有同一 store 代理 */
 export interface TuiSharedMount {
   /** 共享 solid store 代理（跨会话身份不变） */
   state: TuiState;
@@ -149,7 +149,7 @@ export interface TuiSharedMount {
   mounted: boolean;
 }
 
-/** TUI 终端句柄：渲染器 + 光标闪烁定时器等终端级资源（E19/E34：跨会话复用，
+/** TUI 终端句柄：渲染器 + 光标闪烁定时器等终端级资源（跨会话复用，
  *  reconfigure 不再销毁重建渲染器——重建是「多操作闪屏」的根源） */
 export interface TuiTerminal {
   renderer: Awaited<ReturnType<typeof createCliRenderer>>;
@@ -159,7 +159,7 @@ export interface TuiTerminal {
 
 /** 创建共享终端：清输入缓冲 → 渲染器 → 光标定位 postProcess 与闪烁定时器（一次装配） */
 export async function createTuiTerminal(): Promise<TuiTerminal> {
-  // Windows 终端输入初始化（对齐 opencode）：清输入缓冲在进 TUI 前，PROCESSED_INPUT
+  // Windows 终端输入初始化：清输入缓冲在进 TUI 前，PROCESSED_INPUT
   // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
   win32FlushInputBuffer();
   const renderer = await createCliRenderer({
@@ -178,17 +178,17 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
   });
   win32DisableProcessedInput();
 
-  // 焦点上报（E73）：DECSET ?1004h 开启后，终端在窗口失焦/回焦时发 ESC[O / ESC[I 序列。
+  // 焦点上报：DECSET ?1004h 开启后，终端在窗口失焦/回焦时发 ESC[O / ESC[I 序列。
   // opentui 已消化这两个序列（不落输入框、不发键）并 emit focus/blur 事件，只差开启上报；
   // 终端不支持该模式时不回复序列，静默退化为现状（光标照常闪烁）
   process.stdout.write("\x1b[?1004h");
 
-  // D-1=36 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
+  // 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
   // 闪烁由定时器翻 tuiCursor.visible 并触发重渲（postProcessFn 随帧执行 setCursorPosition）
   renderer.addPostProcessFn(() => {
     renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
   });
-  // 失焦暂停闪烁（E73）：失焦时光标常亮停驻、不翻相；回焦恢复正常闪烁。
+  // 失焦暂停闪烁：失焦时光标常亮停驻、不翻相；回焦恢复正常闪烁。
   // 序列未开启（终端不支持）时收不到 blur/focus，行为与现状一致
   renderer.on("blur", () => {
     tuiCursor.terminalFocused = false;
@@ -199,7 +199,7 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
   });
   const blinkTimer = setInterval(() => {
     if (!tuiCursor.enabled) return;
-    // E73：终端失焦期间不翻相，光标保持常亮
+    // 终端失焦期间不翻相，光标保持常亮
     if (!tuiCursor.terminalFocused) {
       if (!tuiCursor.visible) {
         tuiCursor.visible = true;
@@ -207,7 +207,7 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
       }
       return;
     }
-    // E39：光标移动后宽限窗内保持常亮（移动过程持续可见），停驻后恢复正常闪烁
+    // 光标移动后宽限窗内保持常亮（移动过程持续可见），停驻后恢复正常闪烁
     if (Date.now() - tuiCursor.lastMoveAt < CURSOR_STEADY_MS) {
       if (!tuiCursor.visible) {
         tuiCursor.visible = true;
@@ -222,7 +222,7 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
     renderer,
     dispose: () => {
       clearInterval(blinkTimer);
-      // 关闭焦点上报（E73）：还原终端模式，防退出后终端继续发焦点序列
+      // 关闭焦点上报：还原终端模式，防退出后终端继续发焦点序列
       try {
         process.stdout.write("\x1b[?1004l");
       } catch {
@@ -239,7 +239,7 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
 }
 
 /** TUI 会话循环：挂载渲染 + interact 主循环；返回 /session 切换或 /connect 重建信号，
- *  并带回最终 UI 状态——reconfigure 时入口层把状态原样带回（E34：会话不退出期间
+ *  并带回最终 UI 状态——reconfigure 时入口层把状态原样带回（会话不退出期间
  *  TUI 历史固定不变，不按盘上消息重建视图） */
 export async function runTui(options: TuiLoopOptions): Promise<{
   switchTo?: string;
@@ -249,11 +249,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
 }> {
   const { store, session, modelLabel } = options;
   const hooks: HookBusType = options.hooks ?? new HookBus();
-  // UI 状态：共享挂载（E19 修正）时用入口层创建的 store（跨会话身份不变，Solid 根只挂一次，
+  // UI 状态：共享挂载时用入口层创建的 store（跨会话身份不变，Solid 根只挂一次，
   // 每轮按 resetView 决定重置内容还是原样续接）；否则按会话自建（自建渲染器随 destroy 卸载根）
   let state: TuiState;
   let setState: TuiSetState;
-  // 恢复重建（可观测性 B4）：重建视图时按降级顺序取状态行用量与工具耗时回填表；
+  // 恢复重建：重建视图时按降级顺序取状态行用量与工具耗时回填表；
   // carry 续接（reconfigure）不重建，用量随界面状态原样续接
   const needRebuild = options.rebuildExtras !== undefined && (!options.shared || options.resetView !== false);
   const extras = needRebuild ? await options.rebuildExtras!() : undefined;
@@ -265,10 +265,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         reconcile({
           ...(options.carryState ?? initState(session.getMessages(), session.meta.title, undefined, extras?.toolDurations)),
           modelLabel,
-          // 权限模式跨会话持久（modeBox 活读）：状态行显示与实际裁决一致（E78）——
+          // 权限模式跨会话持久（modeBox 活读）：状态行显示与实际裁决一致——
           // 此前 resetView 重建 state 硬编码 default，plan/auto 下切会话显示失真
           permissionMode: options.permissionMode?.value ?? "default",
-          // 状态行用量与水位参数（可观测性 B4）；用量无数据时为 undefined（状态行不显示用量区）
+          // 状态行用量与水位参数；用量无数据时为 undefined（状态行不显示用量区）
           usage: extras?.usage,
           contextWindow: options.contextWindow,
           compactThreshold: options.compactThreshold,
@@ -287,10 +287,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     state = ownedState;
     setState = ownedSetState;
     if (!options.carryState) {
-      // 状态行用量与水位参数（可观测性 B4）
+      // 状态行用量与水位参数
       ownedSetState({ usage: extras?.usage, contextWindow: options.contextWindow, compactThreshold: options.compactThreshold });
     }
-    // 自建路径同样同步权限模式（E78）：initState 缺省 default，modeBox 已是 plan/auto 时
+    // 自建路径同样同步权限模式：initState 缺省 default，modeBox 已是 plan/auto 时
     // 状态行与实际裁决一致
     if (!options.carryState && options.permissionMode && options.permissionMode.value !== "default") {
       setState({ permissionMode: options.permissionMode.value });
@@ -302,7 +302,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let team: Team | undefined;
   let runningLoop = true;
   let wake: (() => void) | undefined;
-  /** 统一传输队列（E109）：在途期间入队的消息与命令按入队顺序混存，消费时永远取队首、
+  /** 统一传输队列：在途期间入队的消息与命令按入队顺序混存，消费时永远取队首、
    *  按类型路由——跨类型保序，排队条（state.queue）展示顺序即实际执行顺序 */
   const pendingQueue: QueuedItem[] = [];
   // carry 续接（reconfigure 重建）时回种传输队列：上一轮的传输队列随闭包丢弃，排队条里的
@@ -320,27 +320,27 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   let extensionsBaseline: Partial<Record<"mcp" | "skill" | "settings", Array<{ id: string; enabled: boolean }>>> = {};
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
-  /** 命令过程免铺屏（E24）：/init 等命令执行期间置位，内容增量不进消息区；
+  /** 命令过程免铺屏：/init 等命令执行期间置位，内容增量不进消息区；
    *  错误仍经 interact catch 直显，收尾（Stop/打断/出错）复位 */
   let suppressStream = false;
-  /** 免铺屏装弹（E35 修正）：/init 排队时置位，其提示词被 interact 消费到（UserPromptSubmit
+  /** 免铺屏装弹：/init 排队时置位，其提示词被 interact 消费到（UserPromptSubmit
    *  带 INIT_PROMPT_PREFIX）才真正置位 suppressStream——排队在其前的用户消息不受影响 */
   let suppressPending = false;
   /** /init 提示词装弹中（读 AGENTS.md 到生成的提示词插回队首之间）：此窗口内输入泵暂停
-   *  取项，防先入队的消息被取走跑轮次、插队到提示词之前（E109） */
+   *  取项，防先入队的消息被取走跑轮次、插队到提示词之前 */
   let initPreparing = false;
-  /** 压缩执行中（E38）：期间 Esc 打断压缩而非退出/打断回合 */
+  /** 压缩执行中：期间 Esc 打断压缩而非退出/打断回合 */
   let compacting = false;
   /** 压缩被用户打断（Esc 置位，compactAsync 据此区分「未配置」与「已打断」） */
   let compactInterrupted = false;
-  /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位；E24） */
+  /** /init 过程免审批盒子（装配层返回，/init 置位、收尾复位） */
   let initPolicyBox: { value: boolean } | undefined;
   /** 排队项序号：Date.now() 同毫秒会撞 id，用递增序号 */
   let queueSeq = 0;
-  /** 统一在途判定（E52）：root 回合运行中、子 agent 后台运行中、压缩执行中、/init 装弹中
+  /** 统一在途判定：root 回合运行中、子 agent 后台运行中、压缩执行中、/init 装弹中
    *  任一即「在途」——新消息与命令统一排队等在途全部结束后消费，不再拦截+toast */
   const inFlight = (): boolean => compacting || initPreparing || reassemblyBlocked(state);
-  /** 排队命令入队（E52）：命令进输入框上方排队条（不再上屏「（已排队）」命令块），执行时产生正常痕迹 */
+  /** 排队命令入队：命令进输入框上方排队条（不再上屏「（已排队）」命令块），执行时产生正常痕迹 */
   const queueRunningCommand = (command: string): void => {
     const item: QueuedItem = { id: `queue_${++queueSeq}`, kind: "command", text: command };
     pendingQueue.push(item);
@@ -370,7 +370,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   };
 
   /**
-   * 输入源 = 统一排队泵的唯一消费者（E109）：interact 逐行取用，每次轮询按 pumpQueue 决策——
+   * 输入源 = 统一排队泵的唯一消费者：interact 逐行取用，每次轮询按 pumpQueue 决策——
    * 取队首消息跑轮次，或取队首命令走 handleCommand。命令可能启动异步过程（/compact 置
    * compacting、/init 置 initPreparing），此时停在泵里等收尾唤醒再继续；同步完成的命令
    * 立即取下一项。轮次收尾（落盘完成后）interact 自然回来取项，root Stop 无需再触发出队；
@@ -379,7 +379,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
    */
   async function* inputSource(): AsyncIterable<string> {
     while (runningLoop) {
-      // 消息门：压缩中（防新发消息的轮次与压缩的历史重写并发，批次 35 整体审视补）、
+      // 消息门：压缩中（防新发消息的轮次与压缩的历史重写并发）、
       // /init 装弹中、弹窗打开中（防在弹窗后面隐身跑轮次）；命令门：任一在途或弹窗打开中
       const decision = pumpQueue(pendingQueue[0], {
         messageWait: compacting || initPreparing || state.modal !== undefined,
@@ -411,7 +411,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }, TOAST_MS);
     }
   };
-  // hook stderr 通道指向 toast（E95）：命令 hook 的观测输出不再直写 stderr（全屏渲染
+  // hook stderr 通道指向 toast：命令 hook 的观测输出不再直写 stderr（全屏渲染
   // 下以裸文本插进渲染帧），改落界面 toast
   if (options.hookStderr) options.hookStderr.value = showToast;
   // 新轮接管上一轮遗留 toast（carry 续接保留界面内容）：旧轮退出已取消其 5 秒过期定时器，
@@ -450,7 +450,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           : { action: "deny", reason: denyReason };
     commit({ ...state, modal: undefined });
     for (const perm of perms) perm.resolve(resolved);
-    // 弹窗关闭唤醒输入泵（批次 35 整体审视补）：弹窗打开期间泵暂停取项，关闭后继续
+    // 弹窗关闭唤醒输入泵：弹窗打开期间泵暂停取项，关闭后继续
     wake?.();
   };
 
@@ -482,7 +482,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
     if (command === "/compact" || command.startsWith("/compact ")) {
       if (inFlight()) {
-        // 在途排队（E52）：等全部在途操作结束后按序执行，不打断不丢弃
+        // 在途排队：等全部在途操作结束后按序执行，不打断不丢弃
         queueRunningCommand(command);
         return;
       }
@@ -492,19 +492,19 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/init" || command.startsWith("/init ")) {
-      // 分析代码库生成/改进项目根 AGENTS.md（BACKEND §21）：读现有文件生成 init 提示词，
+      // 分析代码库生成/改进项目根 AGENTS.md：读现有文件生成 init 提示词，
       // 走正常回合让模型用 write 工具落盘；已存在时提示词要求不覆盖、先建议改进。
-      // E24/E42：命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
+      // 命令本身落一条命令块（历史留痕，过程免铺屏）；带参为追加压缩指导；
       // 过程中只读工具与写项目根 AGENTS.md 免审批（initPolicyBox 置位，收尾复位）
       if (inFlight()) {
-        // 在途排队（E52）：当前轮/子 agent/压缩结束后按序执行；免铺屏装弹待提示词被消费到才置位
+        // 在途排队：当前轮/子 agent/压缩结束后按序执行；免铺屏装弹待提示词被消费到才置位
         suppressPending = true;
         queueRunningCommand(command);
         return;
       }
       const guidance = command.slice("/init".length).trim();
       const agentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
-      // 装弹开始（E109）：读文件到提示词插回队首之间在途，输入泵此窗口不取项，
+      // 装弹开始：读文件到提示词插回队首之间在途，输入泵此窗口不取项，
       // 防先入队的消息被取走跑轮次、插队到提示词之前
       initPreparing = true;
       void (async () => {
@@ -514,7 +514,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           const full = guidance ? `${prompt}\n\n用户附加指导：\n${guidance}` : prompt;
           agent.appendCommand(command);
           initPolicyBox && (initPolicyBox.value = true);
-          // 免铺屏装弹（E35 审查修正）：置位推迟到提示词被消费到（UserPromptSubmit 识别前缀）——
+          // 免铺屏装弹：置位推迟到提示词被消费到（UserPromptSubmit 识别前缀）——
           // 排队在其前的用户消息不被误伤
           suppressPending = true;
           commit({
@@ -523,12 +523,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
             candidate: undefined,
           });
-          // 生成的提示词是 /init 的展开，插回队首：装弹期间入队的项保持在其后（E109）
+          // 生成的提示词是 /init 的展开，插回队首：装弹期间入队的项保持在其后
           pendingQueue.unshift({ id: `queue_${++queueSeq}`, kind: "message", text: full });
           showToast(existing ? "已存在 AGENTS.md：开始分析并建议改进（不覆盖）" : "开始分析代码库，生成项目根 AGENTS.md（过程不铺屏）");
         } catch (err) {
           showToast(`读取 AGENTS.md 失败：${err instanceof Error ? err.message : String(err)}`);
-          // 装弹失败：复位免铺屏装弹标记（与成功路径的置位对称，批次 35 整体审视补）
+          // 装弹失败：复位免铺屏装弹标记（与成功路径的置位对称）
           suppressPending = false;
         } finally {
           initPreparing = false;
@@ -543,20 +543,20 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/session") {
-      // 在途排队（E52，替代 E13 拦截）：切会话的重建链会作废在途 agent 工作，
+      // 在途排队：切会话的重建链会作废在途 agent 工作，
       // 排队到全部在途操作结束后再弹会话面板
       if (inFlight()) {
         queueRunningCommand(command);
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      // 面板数据读取失败（如 sessionsDir 不可读）给提示而非静默无反应（审查补充：
+      // 面板数据读取失败（如 sessionsDir 不可读）给提示而非静默无反应（
       // listSessions 非 ENOENT 上抛后吞错会让权限问题更难排查）
       void openSessionModal().catch((err) => showToast(`打开会话面板失败：${err instanceof Error ? err.message : String(err)}`));
       return;
     }
     if (command === "/connect") {
-      // 重装配族在途排队（E52，替代 E13 拦截）：重建链会把全部 agent 的当前工作作废，
+      // 重装配族在途排队：重建链会把全部 agent 的当前工作作废，
       // 排队到全部在途操作结束后再弹供应商选择弹窗
       if (inFlight()) {
         queueRunningCommand(command);
@@ -575,7 +575,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/model") {
-      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族，在途排队 E52 同 /connect）
+      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族，在途排队同 /connect）
       if (inFlight()) {
         queueRunningCommand(command);
         return;
@@ -594,9 +594,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/mcp" || command === "/skills" || command === "/skill") {
-      // 扩展面板（UI-SPEC §8b）：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配
-      // （BACKEND §19/§20）；重装配会重建 agent，重装配族在途排队（E52，同 /model）。
-      // E22：命令改名为 /skills（/skill 保留兼容别名）
+      // 扩展面板：查看 MCP 服务/技能并切换启用/关闭，Enter 写回定义层并重装配；
+      // 重装配会重建 agent，重装配族在途排队（同 /model）。
+      // 命令改名为 /skills（/skill 保留兼容别名）
       if (inFlight()) {
         queueRunningCommand(command);
         return;
@@ -606,8 +606,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/settings" || command === "/setting") {
-      // 设置面板（E115）：集中查看/切换功能开关，Enter 按写回定义层规则落配置并走重装配链生效
-      // （同 /model）；重装配族在途排队（E52，同 /mcp /skills）。/setting 保留兼容别名
+      // 设置面板：集中查看/切换功能开关，Enter 按写回定义层规则落配置并走重装配链生效
+      // （同 /model）；重装配族在途排队（同 /mcp /skills）。/setting 保留兼容别名
       if (inFlight()) {
         queueRunningCommand(command);
         return;
@@ -619,7 +619,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     if (command === "/rename" || command.startsWith("/rename ")) {
       // /rename 会话名：改会话标题并落盘（复用现有 API：meta 可变 + rewriteMessages 持久化），
       // 同时同步 UI store 的 title（状态行会话名随 /rename 更新）。
-      // 在途排队（E52）：rewriteMessages 与轮末落盘并发会交错，排队到在途结束后执行
+      // 在途排队：rewriteMessages 与轮末落盘并发会交错，排队到在途结束后执行
       const renameTitle = command.slice("/rename".length).trim();
       if (!renameTitle) {
         showToast("用法：/rename 会话名");
@@ -637,14 +637,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/clear") {
-      // 在途排队（E86/E52）：清空会与在途 agent 的 mailbox 回灌、轮末落盘竞态（子 agent
+      // 在途排队：清空会与在途 agent 的 mailbox 回灌、轮末落盘竞态（子 agent
       // 后台运行、root 空闲时尤其隐蔽），统一排队到全部在途操作结束后执行
       if (inFlight()) {
         queueRunningCommand(command);
         return;
       }
       // 回会话新建态：agent 上下文清空（防下一轮 start() 把旧历史回灌模型并重写回文件）
-      //  + 会话消息清盘 + UI 重置；会话条目与标题保留（用户复核：/clear 只清消息，会话名不变）
+      //  + 会话消息清盘 + UI 重置；会话条目与标题保留（/clear 只清消息，会话名不变）
       agent.resetHistory();
       commit(resetToNewState(state));
       void store
@@ -660,7 +660,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 连接写盘是否进行中（防重入：连按 Enter 并发写全局 config 会 read-modify-write 互相覆盖，丢其它配置） */
   let connecting = false;
 
-  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config（E27：key 落用户级配置的 provider apiKey 字段）。 */
+  /** /connect key 输入态确认：从弹窗内 key 缓冲取 API Key → 写全局 config（key 落用户级配置的 provider apiKey 字段）。 */
   const submitConnectKey = async (): Promise<void> => {
     const conn = state.modal;
     if (!conn || conn.kind !== "connect-key") return;
@@ -678,7 +678,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       if (result.ok) {
-        // 拉全量模型成功带数量提示（N1）；未拉到静默（回落预设占位，/model 仍可用预设模型）
+        // 拉全量模型成功带数量提示；未拉到静默（回落预设占位，/model 仍可用预设模型）
         const fetched = result.fetchedModels != null ? `，已拉取 ${result.fetchedModels} 个模型` : "";
         showToast(`${conn.providerName} 已连接${fetched}，正在重建会话…`);
         pendingReconfigure = true;
@@ -692,8 +692,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
   };
 
-  /** /compact：强制压缩 + 历史重写落盘（F-1=56 toast 带压缩后条数，压缩有痕迹）；
-   *  带指导时按指导侧重视现场场摘要（DESIGN 9.8），无指导保留记忆替代省调用路径 */
+  /** /compact：强制压缩 + 历史重写落盘（toast 带压缩后条数，压缩有痕迹）；
+   *  带指导时按指导侧重视现场场摘要，无指导保留记忆替代省调用路径 */
   const compactAsync = async (guidance?: string): Promise<void> => {
     if (compacting) return;
     compacting = true;
@@ -706,7 +706,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
       if (ok) {
         compactInterrupted = false; // 成功路径清掉打断标记（nit：防泄漏误判后续「未配置」提示）
-        // 命令痕迹（E24）：压缩成功后落一条命令消息——退出/切换后再回来显示「/compact + 其后对话」；
+        // 命令痕迹：压缩成功后落一条命令消息——退出/切换后再回来显示「/compact + 其后对话」；
         // 摘要在前命令在后（追加语义），持久化随 rewriteMessages 一并落盘
         const command = guidance ? `/compact ${guidance}` : "/compact";
         agent.appendCommand(command);
@@ -723,7 +723,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
     } finally {
       compacting = false;
-      // /compact 收尾唤醒输入泵（E35：命令链不断流）——队首命令继续执行、队首消息跑轮次
+      // /compact 收尾唤醒输入泵（命令链不断流）——队首命令继续执行、队首消息跑轮次
       wake?.();
     }
   };
@@ -735,18 +735,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       ...state,
       modal: {
         kind: "session",
-        // 当前活跃会话不展示（列表=切换其它会话用，P4-2：删除只作用于其它会话，避免误删本会话）
+        // 当前活跃会话不展示（列表=切换其它会话用：删除只作用于其它会话，避免误删本会话）
         sessions: sessions
           .filter((s) => s.id !== session.meta.id)
           .map((s) => ({ id: s.id, title: s.title ?? "", model: s.model, updatedAt: s.updatedAt, sizeBytes: s.sizeBytes })),
-        // selected 0=新建会话（置顶默认选中，P6-4）；1..n=会话
+        // selected 0=新建会话（置顶默认选中）；1..n=会话
         selected: 0,
         action: "enter",
       },
     });
   };
 
-  /** 打开 /mcp 或 /skill 扩展面板（UI-SPEC §8b）：mcp 行来自配置+manager 装配状态，
+  /** 打开 /mcp 或 /skill 扩展面板：mcp 行来自配置+manager 装配状态，
    *  skill 行现扫技能目录（打开时新鲜扫描，改技能目录无需重开会话即可见） */
   const openExtensionsModal = async (kind: "mcp" | "skill"): Promise<void> => {
     let rows: ExtensionRow[];
@@ -763,7 +763,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     commit({ ...state, modal: { kind, rows, selected: 0 } });
   };
 
-  /** 打开 /settings 设置面板（E115）：行 = 六项功能开关，启用态按合并配置的生效值展示 */
+  /** 打开 /settings 设置面板：行 = 六项功能开关，启用态按合并配置的生效值展示 */
   const openSettingsModal = (): void => {
     const rows = buildSettingsRows(options.config);
     extensionsBaseline.settings = rows.map((r) => ({ id: r.id, enabled: r.enabled }));
@@ -773,7 +773,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 扩展面板写盘进行中（防重入：连按 Enter 并发写同一配置文件会 read-modify-write 互相覆盖，同 /connect 的 connecting） */
   let applyingExtensions = false;
 
-  /** 扩展面板 Enter 应用：改动行按「写回定义层」规则落配置（BACKEND §19/§20 回写规则），
+  /** 扩展面板 Enter 应用：改动行按「写回定义层」规则落配置，
    *  成功即重装配（当前会话立即生效）；无改动仅关闭 */
   const applyExtensions = (kind: "mcp" | "skill", rows: ExtensionRow[]): void => {
     const changed = diffExtensionRows(extensionsBaseline[kind] ?? [], rows);
@@ -800,7 +800,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     })();
   };
 
-  /** 设置面板 Enter 应用（E115）：改动项按「写回定义层」规则落配置，成功即走重装配链生效
+  /** 设置面板 Enter 应用：改动项按「写回定义层」规则落配置，成功即走重装配链生效
    *  （全部开关为装配期读取，同 /model）；无改动仅关闭 */
   const applySettings = (rows: ExtensionRow[]): void => {
     const changed = diffExtensionRows(extensionsBaseline.settings ?? [], rows);
@@ -838,7 +838,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     else agent.interrupt();
     resolvePermission("deny", "用户打断");
     ignoreStream = true;
-    // /init 打断收尾（E24）：复位免铺屏与装弹、免审批
+    // /init 打断收尾：复位免铺屏与装弹、免审批
     suppressStream = false;
     suppressPending = false;
     if (initPolicyBox) initPolicyBox.value = false;
@@ -856,7 +856,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         if (!text.trim()) return;
         if (text.startsWith("/")) handleCommand(text);
         else {
-          // 传输队列与排队条存同一份裁剪后文本（E107②）：取消恢复按文本匹配移除，
+          // 传输队列与排队条存同一份裁剪后文本：取消恢复按文本匹配移除，
           // 两边文本不一致会让取消静默失效；interact 本就对输入行 trim，行为不变
           pendingQueue.push({ id: `queue_${++queueSeq}`, kind: "message", text: text.trim() });
           wake?.();
@@ -870,7 +870,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "copy": {
-        // Ctrl+C 复制：优先输入框选区（Shift 选择，B-2），其次消息区 opentui 拖选选区；
+        // Ctrl+C 复制：优先输入框选区（Shift 选择），其次消息区 opentui 拖选选区；
         // 有输入框选区（含空选区）先清 sel，空选区不复制回落消息区；复制后清对应选区 + toast
         const r = renderer as
           | { getSelection?: () => { getSelectedText?: () => string } | null; clearSelection?: () => void }
@@ -884,7 +884,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             r?.clearSelection?.();
             return;
           }
-          // 输入框选区为空（Shift 选过但无文本）：清选区后回落消息区拖选复制（审查 M2 行为与注释一致）
+          // 输入框选区为空（Shift 选过但无文本）：清选区后回落消息区拖选复制
           commit({ ...state, prompt: { ...state.prompt, sel: null } });
         }
         const sel = r?.getSelection?.();
@@ -929,7 +929,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）
             wake?.();
             if (picked && picked.id !== session.meta.model) {
-              // 切模型先落盘再生效（E97）：写盘失败时回滚内存 meta——先改内存后写盘的
+              // 切模型先落盘再生效：写盘失败时回滚内存 meta——先改内存后写盘的
               // 旧实现失败只 toast，下一次轮末 flush 把错值落盘，重启续跑与「切换失败」提示矛盾
               const previousModel = session.meta.model;
               session.meta.model = picked.id;
@@ -938,8 +938,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
                 .then(() => {
                   showToast(`模型已切换：${picked.id}`);
                   pendingReconfigure = true;
-                  // 只发 reconfigure 不带 switchTo（批次 9~14 审查问题 2）：reconfigure 无
-                  // switchTo 走 carry 续接——视图与模型上下文不被盘上消息重建（E34）；
+                  // 只发 reconfigure 不带 switchTo：reconfigure 无
+                  // switchTo 走 carry 续接——视图与模型上下文不被盘上消息重建；
                   // 此前带 switchTo 会让装配层清 carry 并按盘重建，出错轮的消息丢失
                   exitLoop();
                 })
@@ -953,7 +953,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           } else if (state.modal.kind === "mcp") {
             // 应用扩展面板：写回定义层配置并重装配（无改动仅关闭）。
             // 先取 rows 再 commit：solid reconcile 会把 undefined 键从 store 清掉，
-            // commit 之后再读 state.modal 是 undefined（P0 教训，同 Modal.tsx 文件头陷阱注记）
+            // commit 之后再读 state.modal 是 undefined（同 Modal.tsx 文件头陷阱注记）
             const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
             // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）；写盘失败时面板已关，
@@ -967,9 +967,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             wake?.();
             applyExtensions("skill", rows);
           } else if (state.modal.kind === "settings") {
-            // 应用设置面板（E115）：写回定义层并重装配（无改动仅关闭）。
+            // 应用设置面板：写回定义层并重装配（无改动仅关闭）。
             // 先取 rows 再 commit：solid reconcile 会把 undefined 键从 store 清掉，
-            // commit 之后再读 state.modal 是 undefined（P0 教训，同 Modal.tsx 文件头陷阱注记）
+            // commit 之后再读 state.modal 是 undefined（同 Modal.tsx 文件头陷阱注记）
             const rows = state.modal.rows;
             commit({ ...state, modal: undefined });
             // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）
@@ -977,7 +977,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             applySettings(rows);
           } else {
             // /session 会话面板：进入 = 切换目标（退出循环由装配层重建）；删除 = 一步删除并刷新列表。
-            // selected 0=新建会话、1..n=会话（P6-4 新建置顶，索引映射见 sessionModalTarget）
+            // selected 0=新建会话、1..n=会话（新建置顶，索引映射见 sessionModalTarget）
             const target = sessionModalTarget(state.modal.selected, state.modal.sessions);
             if (state.modal.action === "delete" && target.kind === "session") {
               const targetId = target.id;
@@ -985,7 +985,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
               const delSelected = state.modal.selected;
               void (async () => {
                 try {
-                  // 删除联动（OBSERVABILITY §4.1）：先删轨迹后删会话——即使两步之间崩溃，
+                  // 删除联动：先删轨迹后删会话——即使两步之间崩溃，
                   // 残留只会是「有会话无轨迹」的无害方向，不会留下含正文的孤儿轨迹
                   await deleteTrace(options.tracesDir ?? resolveTracesDir(), targetId);
                   await store.deleteSession(targetId);
@@ -1014,7 +1014,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           }
           return;
         }
-        // slash 候选态 Enter = 执行选中的命令（M4.3 语义，UI-SPEC §6「Enter 用选中的命令」）
+        // slash 候选态 Enter = 执行选中的命令
         const candidate = state.candidate;
         if (candidate) {
           const item = candidate.items[candidate.selected];
@@ -1065,7 +1065,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       case "session-action-toggle": {
         // /session 面板 ←→：切换当前行操作态（进入 ↔ 删除）
         if (state.modal?.kind === "session") {
-          // 新建行（selected 0）无删除操作态（P6-4）：恒为进入，←→ 不切删除避免「新建行显示删除」歧义（N-1）
+          // 新建行（selected 0）无删除操作态：恒为进入，←→ 不切删除避免「新建行显示删除」歧义
           const action = state.modal.selected === 0 ? "enter" : state.modal.action === "enter" ? "delete" : "enter";
           commit({
             ...state,
@@ -1088,7 +1088,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "esc": {
-        // 压缩中 Esc：打断压缩本身（E38 支持打断），不走回合打断/双击退出判定
+        // 压缩中 Esc：打断压缩本身，不走回合打断/双击退出判定
         if (compacting) {
           agent.interrupt();
           compactInterrupted = true;
@@ -1097,7 +1097,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         }
         // Esc：运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
         // 子 agent 活跃时主状态可能非 running（主 agent 在等结论）——判定并入 agent 树运行态，
-        // 否则 Esc 会被 arm 成双击退出、按两次才打断（P8）
+        // 否则 Esc 会被 arm 成双击退出、按两次才打断
         const verdict = decideEsc({
           running: state.status === "running" || hasRunningAgent(state.agents),
           lastEscAt,
@@ -1139,9 +1139,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "queue-cancel": {
-        // Ctrl+P 取消最后一个排队项（E72）：reducer 从排队条弹出并恢复到输入框；
-        // 统一传输队列同步移除同类型同文本末项（E109），两边一致。
-        // 传输队列找不到（审查修正：消息已被输入泵取走、UserPromptSubmit 尚未消费的
+        // Ctrl+P 取消最后一个排队项：reducer 从排队条弹出并恢复到输入框；
+        // 统一传输队列同步移除同类型同文本末项，两边一致。
+        // 传输队列找不到（消息已被输入泵取走、UserPromptSubmit 尚未消费的
         // 毫秒级窗口）不动——「取消」只对尚未消费的项生效，防已发出的消息被恢复进输入框
         const item = state.queue.at(-1);
         if (!item) return;
@@ -1167,8 +1167,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "fold-at": {
-        // 折叠点击（鼠标 onMouseUp 触发）：同时清除应用内选区——点击在可选中文本上会留单点/拖选高亮
-        //（问题 34），折叠交互不需要选区，清掉避免误以为选中文字
+        // 折叠点击（鼠标 onMouseUp 触发）：同时清除应用内选区——点击在可选中文本上会留单点/拖选高亮，
+        // 折叠交互不需要选区，清掉避免误以为选中文字
         (renderer as { clearSelection?: () => void } | undefined)?.clearSelection?.();
         commit(reduceAction(state, action));
         return;
@@ -1178,14 +1178,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
   };
 
-  // 终端：入口层传入共享终端则复用（跨会话不销毁，E19），否则自建并在退出时销毁
+  // 终端：入口层传入共享终端则复用（跨会话不销毁），否则自建并在退出时销毁
   const ownTerminal = options.terminal ? undefined : await createTuiTerminal();
   const renderer = options.terminal?.renderer ?? ownTerminal!.renderer;
 
   // 装配通知（MCP 启动失败错误行等）：toast 一次提示去向（/mcp 面板有完整连接状态），不打断进入
   if (options.startupNotices?.length) showToast(options.startupNotices.join("；"));
 
-  // 零可用厂商启动引导（E31）：正常进入界面但直接打开供应商选择弹窗，连接成功后
+  // 零可用厂商启动引导：正常进入界面但直接打开供应商选择弹窗，连接成功后
   // 经 reconfigure 重建配置链即用；Esc 关掉弹窗也可随后用 /connect 再开
   if (options.startupConnect) {
     showToast("未配置任何可用厂商，请先连接供应商");
@@ -1200,7 +1200,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   }
 
   if (options.shared) {
-    // 共享挂载（E19 修正）：Solid 根只挂一次，会话轮换仅更新动作分发与数据——
+    // 共享挂载：Solid 根只挂一次，会话轮换仅更新动作分发与数据——
     // 同一渲染器重复 render 会并排叠加旧根（旧树 useKeyboard 不卸载，按键双份处理）
     options.shared.onAction = handleAction;
     if (!options.shared.mounted) {
@@ -1221,7 +1221,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   // 通道就绪：入口层装配 agent（approver/feedRoot/hooks 注入权限管线与双渲染流）
   ({ agent, team, initPolicyBox } = options.assemble({ approver, feedRoot, hooks }));
 
-  // 初始水位（可观测性 B4）：装配后按当前上下文估一次（恢复的会话历史即水位起点；
+  // 初始水位：装配后按当前上下文估一次（恢复的会话历史即水位起点；
   // 窗口与压缩线为会话常量，随此一并写入）
   commit({
     ...state,
@@ -1234,7 +1234,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   const unsubscribeHooks = [
     hooks.on("UserPromptSubmit", (e) => {
       ignoreStream = false;
-      // 免铺屏装弹（E35 修正）：/init 提示词被消费到才置位 suppressStream（识别前缀标记），
+      // 免铺屏装弹：/init 提示词被消费到才置位 suppressStream（识别前缀标记），
       // 排队在其前的用户消息不受影响；init 提示词本身不上屏（命令块已代为留痕）
       if (suppressPending && e.input.startsWith(INIT_PROMPT_PREFIX)) {
         suppressPending = false;
@@ -1251,11 +1251,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     hooks.on("PostToolUseFailure", (e) => {
       if (!suppressStream) commit(reduceHook(state, e));
     }),
-    // 用量累计（可观测性 B4）：归一口径按实际产出模型的协议区分（装配层注入解析函数）
+    // 用量累计：归一口径按实际产出模型的协议区分（装配层注入解析函数）
     hooks.on("LlmCallEnd", (e) => {
       commit(reduceHook(state, { ...e, modelApi: options.modelApi?.(e.model) }));
     }),
-    // root 上下文水位（可观测性 B4）：随 /root 消息追加与压缩刷新，agent.estimateContextTokens
+    // root 上下文水位：随 /root 消息追加与压缩刷新，agent.estimateContextTokens
     // 就地计算（与压缩触发同口径）；子 agent 消息不影响 root 水位
     hooks.on("MessageAppended", (e) => {
       if (e.agentPath !== "/root") return;
@@ -1268,7 +1268,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
     hooks.on("AgentCompleted", (e) => {
       commit(reduceHook(state, { ...e, completedAt: Date.now() }));
-      // 子 agent 收尾可能正是最后一个在途操作（E52）：root 本就空闲时不会再有轮次收尾
+      // 子 agent 收尾可能正是最后一个在途操作：root 本就空闲时不会再有轮次收尾
       // 让 interact 回泵取项，这里补一次唤醒，输入泵重新决策（在途未清时决策仍是等待）
       wake?.();
     }),
@@ -1278,7 +1278,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }),
     hooks.on("Stop", (e) => {
       const isRoot = e.agentPath === undefined || e.agentPath === "/root";
-      // /init 收尾（E24）：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。
+      // /init 收尾：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。
       // 只认 root 的 Stop——子 agent 回合收尾不应提前结束命令过程
       if (suppressStream && isRoot) {
         suppressStream = false;
@@ -1293,7 +1293,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         });
       }
       commit(reduceHook(state, e));
-      // 排队消费（E52/E109）：轮次收尾后 interact 自然回到输入泵取下一项（落盘已完成，
+      // 排队消费：轮次收尾后 interact 自然回到输入泵取下一项（落盘已完成，
       // 命令在落盘后执行，不再有此前 Stop 时点出队与轮末落盘的交错）；无需在此触发出队
     }),
   ];
@@ -1310,7 +1310,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         ignoreStream = false;
-        // 命令过程出错同样收尾（E24）：复位免铺屏/装弹与免审批，错误块直显可见
+        // 命令过程出错同样收尾：复位免铺屏/装弹与免审批，错误块直显可见
         suppressStream = false;
         suppressPending = false;
         if (initPolicyBox) initPolicyBox.value = false;
@@ -1352,6 +1352,6 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   }
   // /session 切换到其它会话 / /connect 重建链：只有改会话或请求重建任一发生才返回信号；
   // 仅 reconfigure（connect 保持同会话）时 switchTo 留空，由装配层加载同一会话。
-  // UI 最终状态随信号带回：reconfigure 由入口层原样续接（E34 历史固定）
+  // UI 最终状态随信号带回：reconfigure 由入口层原样续接（TUI 历史固定）
   return { switchTo: pendingSwitch, reconfigure: pendingReconfigure, state };
 }

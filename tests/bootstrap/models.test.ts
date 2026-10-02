@@ -137,7 +137,7 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(models.resolve("deepseek-chat@deepseek-anthropic")?.provider.id).toBe("deepseek-anthropic");
   });
 
-  it("限定名条目的 vendorId 保持原始模型 id（E71）：厂商侧请求发原始 id 而非限定名", () => {
+  it("限定名条目的 vendorId 保持原始模型 id：厂商侧请求发原始 id 而非限定名", () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -180,7 +180,7 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(models.resolve("a-2")).toBeDefined();
   });
 
-  it("modelChain 不可解析条目装配期告警不阻断（E54）", () => {
+  it("modelChain 不可解析条目装配期告警不阻断", () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -196,7 +196,7 @@ describe("resolveMainModel（主模型解析）", () => {
     ]);
   });
 
-  it("主模型不可解析仍硬报错（E54：告警只覆盖主模型之外的条目）", () => {
+  it("主模型不可解析仍硬报错（告警只覆盖主模型之外的条目）", () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -212,7 +212,7 @@ describe("resolveMainModel（主模型解析）", () => {
   });
 });
 
-describe("落盘 apiKey 与环境变量同权（E33）", () => {
+describe("落盘 apiKey 与环境变量同权", () => {
   const storedConfig: Config = {
     logLevel: "info",
     providers: [
@@ -255,7 +255,7 @@ describe("落盘 apiKey 与环境变量同权（E33）", () => {
   });
 });
 
-describe("厂商能力位与请求头接线（E60/E64）", () => {
+describe("厂商能力位与请求头接线", () => {
   /** 记录请求的 mock client 工厂：请求体收进 requests，返回单 chunk 正常收尾流 */
   function capturingFactory(requests: Record<string, unknown>[]): ChatCompletionsClientFactory {
     return () => ({
@@ -272,7 +272,7 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     }) satisfies ChatCompletionsClient;
   }
 
-  it("能力开关来自配置字段而非 provider.id（E60）：思考参数仅对 reasoning 模型下发", async () => {
+  it("能力开关来自配置字段而非 provider.id：思考参数仅对 reasoning 模型下发", async () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -306,7 +306,7 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     expect(requests[1]!.reasoning_effort).toBe("medium");
   });
 
-  it("enableThinking 配置对 reasoning 模型随思考等级发送 enable_thinking（E60）", async () => {
+  it("enableThinking 配置对 reasoning 模型随思考等级发送 enable_thinking", async () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -331,7 +331,7 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     expect(requests[0]!.enable_thinking).toBe(true);
   });
 
-  it("存量配置回填：能力位未写的预设厂商按预设默认值生效（审查补充）", async () => {
+  it("存量配置回填：能力位未写的预设厂商按预设默认值生效", async () => {
     // 能力位进配置前播种的老 config 没有 reasoningContent 字段：按 undefined 一律当
     // false 会让 DeepSeek 工具轮思考回传缺失 400 复发——缺省按同 id 预设回填
     const config: Config = {
@@ -362,11 +362,11 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     }
     const assistant = (requests[0]!.messages as Array<Record<string, unknown>>)[1]!;
     expect(assistant.reasoning_content).toBe("先读文件");
-    // includeUsage 同走预设回填（E63 能力位）
+    // includeUsage 同走预设回填（能力位）
     expect(requests[0]!.stream_options).toEqual({ include_usage: true });
   });
 
-  it("存量配置回填：用户显式写的值（含 false）优先于预设默认（审查补充）", async () => {
+  it("存量配置回填：用户显式写的值（含 false）优先于预设默认", async () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -400,7 +400,7 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     expect(JSON.stringify(assistant[1])).toContain("<thinking>");
   });
 
-  it("存量配置回填：模型 reasoning 标记按预设推理系列名单补齐（审查补充）", async () => {
+  it("存量配置回填：模型 reasoning 标记按预设推理系列名单补齐", async () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -425,7 +425,7 @@ describe("厂商能力位与请求头接线（E60/E64）", () => {
     expect(requests[0]!.enable_thinking).toBe(true);
   });
 
-  it("headers 配置经 Provider 传给 client 工厂（E64）", async () => {
+  it("headers 配置经 Provider 传给 client 工厂", async () => {
     const config: Config = {
       logLevel: "info",
       providers: [

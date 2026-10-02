@@ -18,7 +18,7 @@ const STATUS_TEXT: Record<BackgroundTaskStatus, string> = {
 };
 
 /**
- * 后台 bash 任务管理工具（DESIGN 7.5）：模型拿 bash background 返回的任务 id，
+ * 后台 bash 任务管理工具：模型拿 bash background 返回的任务 id，
  * 用本工具查询状态与累积输出、终止进程。
  */
 export const bashTaskTool: Tool = {
@@ -38,7 +38,7 @@ export const bashTaskTool: Tool = {
     }
     if (action === "kill") {
       const killed = killBackgroundTask(task_id)!;
-      // 守卫后对已完成/失败任务是无操作（审查修正）：按实际终态反馈，不再无条件宣称
+      // 守卫后对已完成/失败任务是无操作：按实际终态反馈，不再无条件宣称
       // 「已终止」与后续 status 查询自相矛盾（上方 getBackgroundTask 已确认任务存在）
       if (killed.status !== "killed") {
         const exitText = killed.exitCode !== undefined ? `（退出码 ${killed.exitCode}）` : "";

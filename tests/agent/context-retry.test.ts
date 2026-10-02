@@ -17,7 +17,7 @@ function contextTooLongThenTextClient(): ModelClient {
   };
 }
 
-describe("应急剥组重发（DESIGN 9.6）", () => {
+describe("应急剥组重发", () => {
   it("超窗错误：剥掉最近工具回合后重发当前轮，模型拿到剥后上下文", async () => {
     // 历史里有一组工具回合：assistant(toolcall) + tool_result
     const initial: Message[] = [

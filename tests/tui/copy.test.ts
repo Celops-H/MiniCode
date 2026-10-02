@@ -27,7 +27,7 @@ describe("copyToClipboard（B-4 非 ASCII 不乱码）", () => {
     copyToClipboard("中文 emoji 🎉 内容");
     const [, args] = spawnMock.spawn.mock.calls[0] as [string, string[]];
     const command = args.join(" ");
-    // B-4 根因：旧实现直接 Set-Clipboard 经 stdin（OEM 代码页解码）→ 非 ASCII 乱码；
+    // 根因：旧实现直接 Set-Clipboard 经 stdin（OEM 代码页解码）→ 非 ASCII 乱码；
     // 新实现先设 [Console]::InputEncoding = UTF8 再读 stdin
     expect(command).toContain("[Console]::InputEncoding = [System.Text.Encoding]::UTF8");
     expect(command).toContain("Set-Clipboard -Value ([Console]::In.ReadToEnd())");

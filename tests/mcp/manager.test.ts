@@ -151,7 +151,7 @@ describe("McpManager（生命周期与工具接入）", () => {
     expect(tool?.inputSchema.safeParse({ whatever: [1, 2, 3] }).success).toBe(true);
   });
 
-  it("连接断开回调：server 非主动停止退出时触发，stopAll 主动停止不触发（可观测性 B3）", async () => {
+  it("连接断开回调：server 非主动停止退出时触发，stopAll 主动停止不触发", async () => {
     // crash-after-list：握手成功后 50ms 自杀
     const onDisconnect = vi.fn();
     const manager = new McpManager({ crash: fakeConfig("crash-after-list") }, { onDisconnect });

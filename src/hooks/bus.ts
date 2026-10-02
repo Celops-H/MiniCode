@@ -6,15 +6,15 @@ type AnyHandler = (event: HookEvent) => HookVerdict | void | Promise<HookVerdict
 /** HookBus 构造选项 */
 export interface HookBusOptions {
   /**
-   * 处理器异常回调（可观测性 B3）：单个 handler 抛错时调用（异常本身仍被吞掉，
-   * 不影响同事件其余 handler 与业务，CONTRACTS §3）。宿主接流水日志，
-   * 让 hook 故障从「静默吞掉」变成可排查（E104）。
+   * 处理器异常回调：单个 handler 抛错时调用（异常本身仍被吞掉，
+   * 不影响同事件其余 handler 与业务）。宿主接流水日志，
+   * 让 hook 故障从「静默吞掉」变成可排查。
    */
   onHandlerError?: (error: unknown, event: HookEvent) => void;
 }
 
 /**
- * Hook 事件总线：外部程序扩展 Agent 的出口（DESIGN 13.2）。
+ * Hook 事件总线：外部程序扩展 Agent 的出口。
  * on() 登记想监听的事件类型，emit() 广播事件并等所有处理器执行完，
  * 返回各自结果（PreToolUse 的拦截结果由权限决策链汇总）。
  */
@@ -55,8 +55,8 @@ export class HookBus {
       try {
         results.push(await handler(event));
       } catch (err) {
-        // 单个 handler 异常不影响同事件其余 handler（CONTRACTS §3 事件处理出错不影响业务）；
-        // 异常经回调上报宿主流水日志，不再静默吞掉（E104）。
+        // 单个 handler 异常不影响同事件其余 handler（事件处理出错不影响业务）；
+        // 异常经回调上报宿主流水日志，不再静默吞掉。
         // 回调自身抛错同样吞掉：保证「handler 异常不向上抛、不连带丢后续 handler」无条件成立
         try {
           this.onHandlerError?.(err, event);

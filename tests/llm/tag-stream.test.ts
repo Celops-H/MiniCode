@@ -97,7 +97,7 @@ describe("InlineTagFilter（正文标签状态机）", () => {
   });
 });
 
-describe("flush 边界：恰在开标签后零内容断流（E99）", () => {
+describe("flush 边界：恰在开标签后零内容断流", () => {
   it("正文以完整裸 <tool_call> 结尾且标签后零内容：flush 回发开标签本体", () => {
     const f = new InlineTagFilter(() => 0);
     expect(feed(f, "前文<tool_call>")).toEqual([

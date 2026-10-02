@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-/** 单个指令文件：来源路径 + 正文（BACKEND §21） */
+/** 单个指令文件：来源路径 + 正文 */
 export interface InstructionFile {
   path: string;
   content: string;
@@ -31,11 +31,10 @@ export async function readInstructionFile(file: string): Promise<string | null> 
 }
 
 /**
- * 加载指令文件（BACKEND §21）：用户级 ~/.minicode/AGENTS.md 一份 + 项目级最近的一个
+ * 加载指令文件：用户级 ~/.minicode/AGENTS.md 一份 + 项目级最近的一个
  * ——当前目录有指令文件（AGENTS.md 优先、CLAUDE.md 兜底）就用它，没有才逐级向上找，
- * 找到即停（E37）。不再收集到文件系统根的全部层级：越界加载项目外祖先目录的指令文件
- * 会把无关约定拼进提示词（cc 实际行为是收集根→cwd 全部层级，本项按 request.md 预定
- * 规则对齐为最近命中即停，差异已记录）。无文件返回空数组，静默无此段。
+ * 找到即停。不收集到文件系统根的全部层级：越界加载项目外祖先目录的指令文件
+ * 会把无关约定拼进提示词，因此对齐为最近命中即停。无文件返回空数组，静默无此段。
  * @param opts 路径选项（homedir / cwd 可注入，测试用）
  * @returns 指令文件列表（用户级在最前，项目级随后）
  */
@@ -83,7 +82,7 @@ export function buildInstructionsPrompt(files: InstructionFile[]): string {
 }
 
 /**
- * /init 提示词（BACKEND §21）：让模型分析代码库生成/改进项目根 AGENTS.md。
+ * /init 提示词：让模型分析代码库生成/改进项目根 AGENTS.md。
  * 要求先实际查证再动笔（不编造）、聚焦常用命令与架构与约定；已存在时不覆盖，
  * 在其基础上提出并落实改进建议。
  * 提示词带 INIT_PROMPT_PREFIX 标记：TUI 免铺屏装弹（UserPromptSubmit 识别）与会话重演

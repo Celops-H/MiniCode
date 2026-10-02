@@ -60,7 +60,7 @@ async function drain(agent: Agent): Promise<void> {
   }
 }
 
-describe("MessageAppended 事件：消息追加路径全覆盖（可观测性 B1 验收点）", () => {
+describe("MessageAppended 事件：消息追加路径全覆盖", () => {
   it("常规轮次：用户输入、assistant 回复、工具结果各发一条（含完整消息对象）", async () => {
     const hooks = new HookBus();
     const appended = collector(hooks, "MessageAppended");
@@ -153,7 +153,7 @@ describe("MessageAppended 事件：消息追加路径全覆盖（可观测性 B1
   });
 });
 
-describe("LlmCallEnd 事件：调用耗时与用量（可观测性 B1）", () => {
+describe("LlmCallEnd 事件：调用耗时与用量", () => {
   it("成功调用：model/durationMs/stopReason/usage/systemPrompt.hash 齐全，全文仅首次附带", async () => {
     const hooks = new HookBus();
     const ends = collector(hooks, "LlmCallEnd");
@@ -367,7 +367,7 @@ describe("LlmCallEnd 事件：调用耗时与用量（可观测性 B1）", () =>
   });
 });
 
-describe("PermissionDecision 事件：权限决策镜像（可观测性 B1）", () => {
+describe("PermissionDecision 事件：权限决策镜像", () => {
   it("规则层 deny → deny/rule；规则层 allow → allow/rule", async () => {
     const hooks = new HookBus();
     const decisions = collector(hooks, "PermissionDecision");
@@ -478,7 +478,7 @@ describe("PermissionDecision 事件：权限决策镜像（可观测性 B1）", 
   });
 });
 
-describe("Compact 事件：压缩动作收口（可观测性 B1）", () => {
+describe("Compact 事件：压缩动作收口", () => {
   it("手动压缩成功：trigger=manual，ok=true，前后消息数与 token 记录", async () => {
     const hooks = new HookBus();
     const compacts = collector(hooks, "Compact");
@@ -582,7 +582,7 @@ describe("Compact 事件：压缩动作收口（可观测性 B1）", () => {
   });
 });
 
-describe("PostToolUse durationMs：执行耗时测量（可观测性 B1）", () => {
+describe("PostToolUse durationMs：执行耗时测量", () => {
   it("执行完成的调用带 durationMs；执行前被拒的失败无 durationMs", async () => {
     const hooks = new HookBus();
     const posts = collector(hooks, "PostToolUse");

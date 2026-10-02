@@ -3,7 +3,7 @@
  * 交互：/connect → 供应商弹窗选择 → 弹窗内输 API Key（Enter 确认）→ 写全局 config → 重建会话。
  * 写配置逻辑：
  * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider，key 写进该 provider 的
- *   apiKey 字段（E27：用户级配置落 key，项目目录不落 .env），不写 modelChain（模型切换
+ *   apiKey 字段（用户级配置落 key，项目目录不落 .env），不写 modelChain（模型切换
  *   归 /model 命令），过 strict schema
  * 失败不抛进程：返回 { ok, error } 由 loop 展示 toast，进程保留。
  */
@@ -44,7 +44,7 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
       apiKeyEnv: preset.apiKeyEnv,
       ...(apiKey ? { apiKey } : {}),
       ...(preset.protocol ? { protocol: preset.protocol } : {}),
-      // 厂商能力开关默认值随预设落盘（E60）：连接即带上该厂商的正确能力配置
+      // 厂商能力开关默认值随预设落盘：连接即带上该厂商的正确能力配置
       ...(preset.reasoningContent ? { reasoningContent: true } : {}),
       ...(preset.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(preset.enableThinking ? { enableThinking: true } : {}),
@@ -57,14 +57,14 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
     },
   ];
   // 只追加/替换 provider，不动 modelChain：连接供应商只是让它的模型进入列表，当前模型保持、
-  // 切换仍由 /model 命令负责（用户定论：连接后保持当前会话、不切换模型）
+  // 切换仍由 /model 命令负责（连接后保持当前会话、不切换模型）
   const merged = {
     ...raw,
     providers: updated,
   };
   const validated = configSchema.parse(merged);
   // POSIX 权限同 seed.ts：目录 700 / 配置 600（apiKey 落盘在此，不应对其他用户可读）；
-  // mode 仅创建时生效——存量 644 配置（老版本建出）写回前显式收紧（批次 5~8 审查建议）
+  // mode 仅创建时生效——存量 644 配置（老版本建出）写回前显式收紧
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", { mode: 0o600, encoding: "utf8" });
   await fs.chmod(file, 0o600);
@@ -76,7 +76,7 @@ export const FETCH_MODELS_TIMEOUT_MS = 10_000;
 /**
  * 用 API Key 调厂商 /models 端点拉全量模型列表（OpenAI 兼容格式 { data: [{id}] }）。
  * 连接供应商时调用：写入 config 的 models 用真实列表而非手维护的预设占位，
- * 厂商上新模型即时可用（N1）。失败（key 无效/网络不通/非 JSON）抛错由调用方兜底。
+ * 厂商上新模型即时可用。失败（key 无效/网络不通/非 JSON）抛错由调用方兜底。
  * @param baseUrl 厂商 OpenAI 兼容端点
  * @param apiKey 用户输入的 API Key
  * @param timeoutMs 超时 ms（缺省 FETCH_MODELS_TIMEOUT_MS）
@@ -103,10 +103,10 @@ export async function connectProvider(
   try {
     const globalFile = opts.globalConfigFile ?? resolveConfigPaths().globalConfigFile;
     // 先拉全量模型（10s 超时）：拉到即用真实列表写配置；key 无效/网络失败仅回落预设占位，
-    // 不阻断连接——连接的目的（写 key 进配置）不受影响（N1）。
+    // 不阻断连接——连接的目的（写 key 进配置）不受影响。
     // anthropic 协议端点无 OpenAI /models 拉取约定（Bearer + {data:[{id}]}），直接用
     // 预设占位，不空耗一次注定失败的请求。
-    // 拉取用固定 Bearer 认证，不带 provider 配置的 headers（E64 的 api-key 头类厂商
+    // 拉取用固定 Bearer 认证，不带 provider 配置的 headers（api-key 头类厂商
     // 拉取会失败，静默回落预设占位，连接本身不受影响）
     let models = preset.models;
     let fetchedModels: number | undefined;

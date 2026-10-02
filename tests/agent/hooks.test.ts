@@ -148,7 +148,7 @@ describe("Agent 接入 Hook 事件", () => {
     }
 
     expect(handler).toHaveBeenCalledTimes(1);
-    // Stop 带 agentPath（P8）：独立 agent 无团队归属记 /root，多 agent 下按路径区分谁空闲
+    // Stop 带 agentPath：独立 agent 无团队归属记 /root，多 agent 下按路径区分谁空闲
     expect(handler.mock.calls[0]?.[0]).toMatchObject({ type: "Stop", agentPath: "/root" });
   });
 
@@ -242,7 +242,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(result?.content).toBe("文件内容");
   });
 
-  it("规则层 deny 优先于 Hook allow（DESIGN 8.1 不变量）", async () => {
+  it("规则层 deny 优先于 Hook allow", async () => {
     let executed = false;
     const hooks = new HookBus();
     hooks.on("PreToolUse", (): HookVerdict => "allow");
@@ -348,7 +348,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
-  it("无权限管线时 PreToolUse 也无条件触发：deny 直接拒绝执行（review 修复：原实现依赖管线，CLI 未装配则永不触发）", async () => {
+  it("无权限管线时 PreToolUse 也无条件触发：deny 直接拒绝执行（原实现依赖管线，CLI 未装配则永不触发）", async () => {
     let executed = false;
     const hooks = new HookBus();
     hooks.on("PreToolUse", (): HookVerdict => "deny");
@@ -450,7 +450,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(allowed?.content).toBe("文件内容");
   });
 
-  it("工具失败路径事件闭合（此前确认）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
+  it("工具失败路径事件闭合（）：未知工具与权限拒绝都发 PostToolUseFailure（带 toolCallId 配对）", async () => {
     // 未知工具：无 tool 可执行，发失败事件
     const hooks1 = new HookBus();
     const failure1 = vi.fn();
@@ -493,7 +493,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
-  it("工具事件带 toolCallId 配对（此前确认）：PreToolUse → PostToolUse 同一调用 id", async () => {
+  it("工具事件带 toolCallId 配对（）：PreToolUse → PostToolUse 同一调用 id", async () => {
     const hooks = new HookBus();
     const pre = vi.fn();
     const post = vi.fn();

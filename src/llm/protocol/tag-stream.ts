@@ -38,7 +38,7 @@ export class InlineTagFilter {
   private mode: TagMode = "normal";
   /** 未定缓冲：normal 态是可能成标签前缀的尾部，thinking/toolcall 态是段内容 */
   private buf = "";
-  /** 当前段内是否已发出过内容（E99）：thinking 态内容即时发出后 buf 为空与「开标签后零内容」
+  /** 当前段内是否已发出过内容：thinking 态内容即时发出后 buf 为空与「开标签后零内容」
    *  无法从 buf 区分，靠此标志判断 flush 时要不要回发开标签本体 */
   private segmentEmitted = false;
   /** 标签工具调用的分配序号（与协议原生工具调用共用计数器，防撞号） */
@@ -120,7 +120,7 @@ export class InlineTagFilter {
     const rest = this.buf;
     this.buf = "";
     if (!rest) {
-      // 恰在开标签后零内容断流（E99）：开标签已从 normal 缓冲消费、段内零内容
+      // 恰在开标签后零内容断流：开标签已从 normal 缓冲消费、段内零内容
       //（segmentEmitted 为 false——thinking 态内容即时发出后 buf 同样为空，靠标志区分），
       // 按 mode 回发开标签本体，标签不凭空消失
       if (this.mode === "thinking" && !this.segmentEmitted) {

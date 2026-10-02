@@ -90,7 +90,7 @@ describe("McpClient（stdio JSON-RPC）", () => {
     await expect(pending).rejects.toThrow(/进程退出.*在途请求已终止/);
   }, 10_000);
 
-  it("server→client 请求（带 id 无 result）不顶掉在途响应（E85）", async () => {
+  it("server→client 请求（带 id 无 result）不顶掉在途响应", async () => {
     const client = makeClient("server-request");
     clients.push(client);
     await client.start();

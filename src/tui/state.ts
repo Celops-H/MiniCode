@@ -17,7 +17,7 @@ export interface MessageBlock {
   id: string;
   role: "user" | "assistant";
   source?: "human" | "system" | "command";
-  /** 助手消息的实际产出模型（E18：路由切到备选后署名跟随；缺省用会话当前模型） */
+  /** 助手消息的实际产出模型（路由切到备选后署名跟随；缺省用会话当前模型） */
   model?: string;
   text: string;
   thinking?: string;
@@ -38,7 +38,7 @@ export interface ToolBlock {
   status: "pending" | "running" | "success" | "failure";
   output?: string;
   error?: string;
-  /** 工具执行耗时 ms（可观测性 B4）：PostToolUse.durationMs 实时写入；恢复会话按
+  /** 工具执行耗时 ms：PostToolUse.durationMs 实时写入；恢复会话按
    *  toolCallId 从轨迹回填；执行前被拒（无 durationMs 事件）与被中断（无 PostToolUse）不显示 */
   durationMs?: number;
   collapsedArgs: boolean;
@@ -46,7 +46,7 @@ export interface ToolBlock {
 }
 
 /** 子 agent 活动行（派生/完成/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
- *  平时收敛成单行，点击展开（用户复核：子 agent 结果应像工具一样支持展开/关闭） */
+ *  平时收敛成单行，点击展开（子 agent 结果应像工具一样支持展开/关闭） */
 export interface AgentActivityBlock {
   kind: "agent";
   event: "spawned" | "completed" | "interrupted";
@@ -64,7 +64,7 @@ export interface NoticeBlock {
   time?: string;
 }
 
-/** 命令块（E24）：/init /compact 等命令的痕迹，一条命令一行——执行过程不铺屏，会话重演时按块还原 */
+/** 命令块：/init /compact 等命令的痕迹，一条命令一行——执行过程不铺屏，会话重演时按块还原 */
 export interface CommandBlock {
   kind: "command";
   id: string;
@@ -88,14 +88,14 @@ export interface AgentNode {
 export type AgentEventMeta = HookEvent & {
   spawnedAt?: number;
   completedAt?: number;
-  /** LlmCallEnd 附带：实际产出模型的协议（归一口径按协议区分，OBSERVABILITY §5.1） */
+  /** LlmCallEnd 附带：实际产出模型的协议（归一口径按协议区分） */
   modelApi?: string;
   /** MessageAppended / Compact 附带：root 上下文的估算 token（agent.estimateContextTokens 就地计算，
    *  用户看到的水位就是压缩判断用的水位） */
   contextTokens?: number;
 };
 
-/** 排队项（E52/E72）：在途操作结束前暂存的用户消息或命令，输入框上方排队条展示，
+/** 排队项：在途操作结束前暂存的用户消息或命令，输入框上方排队条展示，
  *  Ctrl+P 取消末项；消费（消息被轮次真正提交 / 命令真正执行）时从队列移除 */
 export interface QueuedItem {
   id: string;
@@ -103,7 +103,7 @@ export interface QueuedItem {
   text: string;
 }
 
-/** 输入行上限（UI-SPEC §1：多行输入最多 20 行，超出不再增高，靠光标移动查看） */
+/** 输入行上限：多行输入最多 20 行，超出不再增高，靠光标移动查看 */
 export const MAX_PROMPT_LINES = 20;
 
 /** 输入框选区锚点：Shift+方向键起点（光标 curLine/curCol 是焦点端，随移动扩展/收缩） */
@@ -112,7 +112,7 @@ export interface SelectionAnchor {
   col: number;
 }
 
-/** 输入框状态：多行编辑（行上限 20）+ 历史回溯 + 选区（Shift 选择，B-2） */
+/** 输入框状态：多行编辑（行上限 20）+ 历史回溯 + 选区（Shift 选择） */
 export interface PromptState {
   lines: string[];
   /** 光标所在行 */
@@ -144,15 +144,15 @@ export interface PermissionModalState {
   selected: number;
 }
 
-/** 会话切换面板：最近会话列表 + 新建入口（P6-4 新建置顶固定第一项并默认选中，selected 0=新建、1..n=会话；
- *  新建行不参与会话滚动区、无删除操作态）；当前活跃会话不展示（列表=切换其它会话，P4-2 防误删本会话）；
+/** 会话切换面板：最近会话列表 + 新建入口（新建置顶固定第一项并默认选中，selected 0=新建、1..n=会话；
+ *  新建行不参与会话滚动区、无删除操作态）；当前活跃会话不展示（列表=切换其它会话，防误删本会话）；
  *  选中行动作态 ←→ 切换 */
 export interface SessionModalState {
   kind: "session";
-  /** 会话列表（title 随 /rename 更新；sizeBytes=消息文件大小 P4-3 副行展示） */
+  /** 会话列表（title 随 /rename 更新；sizeBytes=消息文件大小副行展示） */
   sessions: Array<{ id: string; title: string; model: string; updatedAt: string; sizeBytes: number }>;
   selected: number;
-  /** 当前选中行的操作态：进入（缺省/默认）或删除（一步删除，P4-2；←→ 切换） */
+  /** 当前选中行的操作态：进入（缺省/默认）或删除（一步删除；←→ 切换） */
   action?: "enter" | "delete";
 }
 
@@ -182,8 +182,8 @@ export interface ModelModalState {
   thinkingLevel: ThinkingLevel | undefined;
 }
 
-/** /mcp 与 /skill 扩展面板（UI-SPEC §8b）：行内启用/关闭 ←→ 切换（只改弹窗内候选，Esc 取消不改），
- *  Enter 应用——按「写回定义层」规则写配置并重装配，当前会话立即生效（BACKEND §19/§20 回写规则）。
+/** /mcp 与 /skill 扩展面板：行内启用/关闭 ←→ 切换（只改弹窗内候选，Esc 取消不改），
+ *  Enter 应用——按「写回定义层」规则写配置并重装配，当前会话立即生效。
  *  拆成两个单字面量 kind 变体（与各弹窗一致）：联合判别字段在 TS 取反分支不收窄，会污染 session 分支。 */
 export interface ExtensionModalRow {
   /** 回写定位键：mcp=服务名 / skill=技能名 / settings=配置定位键（如 compact.enabled） */
@@ -208,7 +208,7 @@ export interface SkillModalState {
   selected: number;
 }
 
-/** /settings 设置面板（E115）：功能开关集中查看与切换，交互同扩展面板（行选择 + ←→ 切换 +
+/** /settings 设置面板：功能开关集中查看与切换，交互同扩展面板（行选择 + ←→ 切换 +
  *  Enter 应用写回定义层 + 重装配生效） */
 export interface SettingsModalState {
   kind: "settings";
@@ -219,7 +219,7 @@ export interface SettingsModalState {
 /** 会话面板「新建会话」条目：选中返回的 switchTo 标记 */
 export const NEW_SESSION_ID = "__new__";
 
-/** /session 面板确认目标解析（P6-4 新建置顶）：selected 0=新建会话、1..n=会话（下标 selected-1）；
+/** /session 面板确认目标解析（新建置顶）：selected 0=新建会话、1..n=会话（下标 selected-1）；
  *  返回「新建」或切换目标会话 id；越界 selected 兜底为新建（防御，正常由 loop clamp）。 */
 export function sessionModalTarget(
   selected: number,
@@ -254,7 +254,7 @@ export type ModalState =
   | SkillModalState
   | SettingsModalState;
 
-/** 权限三决策文案（UI-SPEC §4：1/2/3 数字键选择，与 selected 对应） */
+/** 权限三决策文案（1/2/3 数字键选择，与 selected 对应） */
 export const PERMISSION_OPTIONS = [
   { key: "1", label: "允许本次", decision: "allow" },
   { key: "2", label: "允许会话全部", decision: "allow-all" },
@@ -273,7 +273,7 @@ export function cyclePermissionMode(mode: PermissionMode): PermissionMode {
   return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length]!;
 }
 
-/** 权限模式显示名：default / plan mode / auto mode（P3 用户定稿；后端枚举不变 default/plan/bypassPermissions） */
+/** 权限模式显示名：default / plan mode / auto mode（后端枚举不变 default/plan/bypassPermissions） */
 export function permissionModeLabel(mode: PermissionMode): string {
   if (mode === "plan") return "plan mode";
   if (mode === "bypassPermissions") return "auto mode";
@@ -287,7 +287,7 @@ export interface Streaming {
 }
 
 /**
- * 状态行用量区数据（可观测性 B4，OBSERVABILITY §5.1）：会话级累计，含全部 agent。
+ * 状态行用量区数据：会话级累计，含全部 agent。
  * inputTokens 为归一后的真实总输入（缓存读写也是真实消耗）——anthropic = input +
  * cacheRead + cacheWrite（input_tokens 不含缓存段），openai = prompt 全量（cached ⊆
  * prompt，不可重复相加）。缓存命中率 = cacheReadTokens / inputTokens，无数据不显示。
@@ -341,14 +341,14 @@ export interface TuiState {
   permissionMode: PermissionMode;
   /** 思考等级（/model 左右调整）：undefined=厂商默认；活引用透传 reasoning_effort（仅支持的厂商） */
   thinkingLevel: ThinkingLevel | undefined;
-  /** 本轮实际产出模型（E18/E70）：轮开始（UserPromptSubmit）快照当前模型，回退事件覆盖；
+  /** 本轮实际产出模型：轮开始（UserPromptSubmit）快照当前模型，回退事件覆盖；
    *  done 落块作署名，工具循环续轮保留、回合结束清除 */
   activeModel?: string;
   /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
-  /** 排队项（E52/E72）：在途期间新消息与统一入队的命令，展示在输入框上方、不混进消息区 */
+  /** 排队项：在途期间新消息与统一入队的命令，展示在输入框上方、不混进消息区 */
   queue: QueuedItem[];
-  /** 会话级用量累计（可观测性 B4，OBSERVABILITY §5.1）：LlmCallEnd 事件随到随累，
+  /** 会话级用量累计：LlmCallEnd 事件随到随累，
    *  恢复会话按降级顺序重建（轨迹 → 会话 meta.usage → 不显示） */
   usage?: UsageSummary;
   /** root 上下文估算 token（水位分子）：随 /root 的消息追加与压缩事件刷新 */
@@ -370,7 +370,7 @@ export interface TuiState {
 
 /**
  * 全新空输入态（每次新建：不共享模块常量数组）。共享引用会让 solid reconcile 把 lines 更新
- * 当成「引用未变」而跳过 —— 表现即「发送后输入框不清空」（历史 bug，见 2026-08-26 定位）。
+ * 当成「引用未变」而跳过 —— 表现即「发送后输入框不清空」（历史 bug）。
  */
 function emptyPrompt(history: string[]): PromptState {
   return { lines: [""], curLine: 0, curCol: 0, history, historyIndex: -1, sel: null };
@@ -392,7 +392,7 @@ export function promptEmpty(prompt: PromptState): boolean {
   return prompt.lines.every((l) => l.length === 0) && prompt.lines.length === 1;
 }
 
-/** 输入框选区文本（Shift 选择锚点↔光标，B-2）：按码点取区间，跨行用换行连接；无选区返回空串 */
+/** 输入框选区文本（Shift 选择锚点↔光标）：按码点取区间，跨行用换行连接；无选区返回空串 */
 export function selectedPromptText(p: PromptState): string {
   if (!p.sel) return "";
   const a = p.sel;
@@ -410,9 +410,9 @@ export function selectedPromptText(p: PromptState): string {
 }
 
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
- *  user/assistant 消息带创建时间戳（后端消息结构 P11）时回填发送时间，切模型等 reconfigure
- *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示（审查补）
- *  toolDurations（可观测性 B4）：恢复会话按 toolCallId 从轨迹回填的工具执行耗时，轨迹不存在
+ *  user/assistant 消息带创建时间戳时回填发送时间，切模型等 reconfigure
+ *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示
+ *  toolDurations：恢复会话按 toolCallId 从轨迹回填的工具执行耗时，轨迹不存在
  *  或该调用被中断（无 PostToolUse）时无条目、卡片不显示耗时 */
 export function initState(messages: Message[], title = "", modelLabel = "", toolDurations?: Map<string, number>): TuiState {
   const blocks: BlockView[] = [];
@@ -424,12 +424,12 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
   };
   for (const message of messages) {
     if (message.role === "user") {
-      // /init 命令派生的提示词重演弱化（批次 9~14 审查问题 5）：还原为命令块，不铺出全文
+      // /init 命令派生的提示词重演弱化：还原为命令块，不铺出全文
       if (message.content.startsWith(INIT_PROMPT_PREFIX)) {
         blocks.push({ kind: "command", id: message.id, text: "/init", time: msgTime(message) });
         continue;
       }
-      // 命令消息重演为命令块（E24）：正文剥掉标记前缀，一条命令一行
+      // 命令消息重演为命令块：正文剥掉标记前缀，一条命令一行
       if (message.source === "command") {
         blocks.push({
           kind: "command",
@@ -464,7 +464,7 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
           kind: "message",
           id: message.id,
           role: "assistant",
-          // 署名跟随实际产出模型（E18）：无记录的历史消息回落会话当前模型
+          // 署名跟随实际产出模型：无记录的历史消息回落会话当前模型
           model: message.meta?.model,
           text,
           thinking: thinking || undefined,
@@ -515,7 +515,7 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
 
 /** /clear 回会话新建态：消息区/流式/弹层/候选/聚焦/agent 树/输入清空。
  *  会话条目与磁盘历史由调用方（loop /clear）处理：rewriteMessages([]) 清空；标题保留不复位。
- *  可观测性 B4：水位必须随上下文清空而清（下次消息追加自动重估，否则清空后状态行仍显示
+ *  水位必须随上下文清空而清（下次消息追加自动重估，否则清空后状态行仍显示
  *  高水位警示直到下一条消息才自愈）；usage 保留——真实消耗不清零，且轨迹 append-only、
  *  恢复重建本就会把清空前的消耗算回来，清零反而与轨迹重建口径打架 */
 export function resetToNewState(state: TuiState): TuiState {
@@ -575,7 +575,7 @@ function findActiveTool(blocks: BlockView[], index: number, turn: number): ToolB
 }
 
 /** 最近一个尚未配对的工具卡片（PreToolUse 调用 id 先于卡片存在时兜底）。
- *  边界（审查记录）：LIFO 顺序对「无 id 厂商 + 单次并行多个调用」会把 id 交叉回填
+ *  边界：LIFO 顺序对「无 id 厂商 + 单次并行多个调用」会把 id 交叉回填
  *  （结果挂到参数不符的卡上）；改 FIFO 则对陈旧残留 pending 卡场景配错，两者取其一，
  *  按更常见的陈旧残留场景保留 LIFO */
 function findPendingTool(blocks: BlockView[]): ToolBlock | undefined {
@@ -649,7 +649,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         ? appendMessageBlock(state, {
             id: `turn_${state.blocks.length}`,
             role: "assistant",
-            // 署名跟随本轮实际产出模型（E18：路由切到备选后归属正确），并清除本轮暂存
+            // 署名跟随本轮实际产出模型（路由切到备选后归属正确），并清除本轮暂存
             model: state.activeModel,
             text: state.streaming.text,
             thinking: state.streaming.thinking || undefined,
@@ -660,7 +660,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
       const status: "idle" | "running" =
       event.stopReason === "tool_use" || event.stopReason === "tool_calls" ? "running" : "idle";
       // 工具循环续轮（stopReason 为 tool_use/tool_calls）不算回合结束：保留快照——
-      // 续轮没有新的 UserPromptSubmit，此处清掉会让续轮落块署名回落「当前模型名」（review 补）
+      // 续轮没有新的 UserPromptSubmit，此处清掉会让续轮落块署名回落「当前模型名」
       return {
         ...merged,
         activeModel: status === "running" ? state.activeModel : undefined,
@@ -695,10 +695,10 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           ],
         };
       }
-      // 带前缀内容的 error（E77）：按轮边界收口——半截正文/思考合并为 isError 消息块，
+      // 带前缀内容的 error：按轮边界收口——半截正文/思考合并为 isError 消息块，
       // 流式区清空、回空闲。协议流中断路径（厂商断流、超时中断、流内错误载荷收尾）发
       // error 后不再发 done，不收口则半截正文永滞流式区、下一条消息发出时被静默清掉
-      //（盘上有、界面没有）。错误原因追加进块内正文（审查修正：优雅收尾路径不抛异常、
+      //（盘上有、界面没有）。错误原因追加进块内正文（优雅收尾路径不抛异常、
       // 无 loop 级 catch 补错误块，不展示原因则用户只看到半截正文不知为何断；error 后
       // 若同流继续增量——流内错误载荷场景——流式区照常重建）
       const blocks = [
@@ -727,7 +727,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
     }
     case "model_fallback":
       // 模型路由切换观察事件：追加常驻通知行（主模型不可用自动切备选），消息列表展示而非一闪而过；
-      // 并暂存备选为本轮产出模型（E18），done 落消息块时作署名
+      // 并暂存备选为本轮产出模型，done 落消息块时作署名
       return {
         ...state,
         activeModel: event.to,
@@ -755,7 +755,7 @@ export function interruptTurn(state: TuiState): TuiState {
       kind: "message",
       id: `turn_${blocks.length}`,
       role: "assistant",
-      // 半截块同样署名本轮实际产出模型（review 补）：与 agent 落盘的 meta.model 对齐，
+      // 半截块同样署名本轮实际产出模型：与 agent 落盘的 meta.model 对齐，
       // 否则同一消息 live 视图与恢复重演的署名不一致
       model: state.activeModel,
       text: state.streaming.text,
@@ -773,13 +773,13 @@ export function interruptTurn(state: TuiState): TuiState {
   return { ...state, blocks, streaming: undefined, status: "idle", activeModel: undefined };
 }
 
-/** 是否有运行中的子 agent（P8）：主 agent 等子 agent 结论时主状态非 running，
+/** 是否有运行中的子 agent：主 agent 等子 agent 结论时主状态非 running，
  *  Esc 判定据此仍走「打断」而非「双击退出」，子 agent 活跃时 Esc 一次即级联中断 */
 export function hasRunningAgent(agents: AgentNode[]): boolean {
   return agents.some((a) => a.path !== "/root" && a.status === "running");
 }
 
-/** 重装配族命令守卫（E13）：root 运行中或任一子 agent 后台运行中都拦截——
+/** 重装配族命令守卫：root 运行中或任一子 agent 后台运行中都拦截——
  *  /session /connect /model /mcp /skills 的重建链会重建 agent，把全部 agent 的当前工作作废 */
 export function reassemblyBlocked(state: TuiState): boolean {
   return state.status === "running" || hasRunningAgent(state.agents);
@@ -801,9 +801,9 @@ function appendMessageBlock(
 export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
   switch (event.type) {
     case "UserPromptSubmit": {
-      // 排队消息转正（E52/E72）：输入框上方排队条里的同文本消息在此消费——从队列移除并
+      // 排队消息转正：输入框上方排队条里的同文本消息在此消费——从队列移除并
       // 追加正式用户消息块；非排队输入（空闲直接发送 / CLI 路径）队列无匹配，只追加块。
-      // 轮开始快照当前模型进 activeModel（E70）：普通轮 done 落块也有署名可用——此前只在
+      // 轮开始快照当前模型进 activeModel：普通轮 done 落块也有署名可用——此前只在
       // model_fallback 事件赋值，普通轮是 undefined，渲染回落「当前模型名」，/model 切换后
       // 历史块署名跟着全翻转；回退事件仍会覆盖快照，署名始终是实际产出模型
       const queueIndex = state.queue.findIndex((q) => q.kind === "message" && q.text === event.input);
@@ -835,7 +835,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
                   ...b,
                   status: "running" as const,
                   name: event.toolName || b.name,
-                  // 兜底命中（无 id 厂商后端合成 call_N）时一并回填 id（E84）：
+                  // 兜底命中（无 id 厂商后端合成 call_N）时一并回填 id：
                   // PostToolUse/Failure 按 id 配对，不回填则结果事件永久配不上、卡片停转
                   id: b.id ?? event.toolCallId,
                 }
@@ -868,7 +868,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
               status: (event.isError ? "failure" : "success") as "failure" | "success",
               output: event.isError ? undefined : event.output,
               error: event.isError ? event.output : undefined,
-              // 执行耗时（可观测性 B4）：卡片完成行显示「耗时 x」；执行前被拒的事件不带该字段
+              // 执行耗时：卡片完成行显示「耗时 x」；执行前被拒的事件不带该字段
               durationMs: event.durationMs ?? b.durationMs,
             }
           : b,
@@ -886,17 +886,17 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks };
     }
     case "LlmCallEnd":
-      // 会话级用量累计（可观测性 B4）：归一口径按协议区分（AgentEventMeta.modelApi 注入），
+      // 会话级用量累计：归一口径按协议区分（AgentEventMeta.modelApi 注入），
       // usage 缺省（厂商未给用量）时累计不变
       return { ...state, usage: accumulateUsage(state.usage, { usage: event.usage, modelApi: event.modelApi }) };
     case "MessageAppended":
     case "Compact":
-      // root 上下文水位刷新（可观测性 B4）：loop 就地计算注入（agent.estimateContextTokens，
+      // root 上下文水位刷新：loop 就地计算注入（agent.estimateContextTokens，
       // 与压缩触发同口径——用户看到的水位就是压缩判断用的水位）；未注入（子 agent 事件/直调）不动
       if (event.contextTokens === undefined) return state;
       return { ...state, contextTokens: event.contextTokens };
     case "AgentSpawned":
-      // 已存在条目（followup 唤醒已完成/中断的 agent，P9）：重置为运行态、清完成时刻，
+      // 已存在条目（followup 唤醒已完成/中断的 agent）：重置为运行态、清完成时刻，
       // 树重新亮起（否则条目停在上一次终态、AgentStrip 10s 后过滤消失后不再出现）；
       // 不存在（初次派生）：追加新条目。两种都加一条 spawned 活动行。
       // spawnedAt：事件未携带时保留原值（loop 订阅侧恒注入当前时刻，此处兜底直调 reducer 的测试路径）
@@ -939,7 +939,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       };
     case "Stop":
       // 只把主 agent（/root）的 Stop 视为回合空闲：子 agent 每轮结束也发 Stop，
-      // 放行会把主界面误打成「空闲」（P8——Esc 判定依赖状态，见 hasRunningAgent）
+      // 放行会把主界面误打成「空闲」（Esc 判定依赖状态，见 hasRunningAgent）
       if (event.agentPath && event.agentPath !== "/root") return state;
       return { ...state, status: "idle" };
     default:
@@ -976,7 +976,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     }
     case "paste": {
       // 粘贴：bracketed paste 整段插入（多行拆行，超行数截断）；/connect key 输入态并入 key 缓冲
-      //（G-7 粘贴含换行的 key 时清掉换行/空白——API key 无空白，误带换行会污染提交值）；
+      //（粘贴含换行的 key 时清掉换行/空白——API key 无空白，误带换行会污染提交值）；
       // 其它弹窗（session/permission 等）打开时输入框不可见或不可编辑，粘贴忽略不误改状态
       if (state.modal?.kind === "connect-key") {
         return { ...state, modal: { ...state.modal, key: state.modal.key + action.text.replace(/\s+/g, "") } };
@@ -1022,11 +1022,11 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, prompt: { ...moveCursor(state.prompt, action.dir), sel: null } };
     }
     case "select": {
-      // Shift+方向键扩展选区（B-2）：锚点首按固定在当前位，光标（焦点端）移动扩展/收缩
+      // Shift+方向键扩展选区：锚点首按固定在当前位，光标（焦点端）移动扩展/收缩
       const p = state.prompt;
       const anchor = p.sel ?? { line: p.curLine, col: p.curCol };
       const moved = moveCursor(p, action.dir);
-      // 不重算 slash 候选（文本未变，与 cursor 分支一致）：/ 开头时候选已收起不会被 Shift+方向键重新弹起（审查 L-1）
+      // 不重算 slash 候选（文本未变，与 cursor 分支一致）：/ 开头时候选已收起不会被 Shift+方向键重新弹起
       return { ...state, prompt: { ...moved, sel: anchor } };
     }
     case "history": {
@@ -1085,7 +1085,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, candidate: undefined };
     case "send": {
       // 发送：输入记入历史供回溯，输入框清空进入运行态（空 prompt 用 fresh lines，见 emptyPrompt）。
-      // 运行中发送（E52/E72 排队）：消息进排队条（输入框上方，不混进消息区），轮次真正
+      // 运行中发送（排队）：消息进排队条（输入框上方，不混进消息区），轮次真正
       // 提交时（UserPromptSubmit 消费到）才转正为消息块；空闲发送由 UserPromptSubmit 统一上屏
       const sent = state.prompt.lines.join("\n").trim();
       const history = sent ? [...state.prompt.history, sent] : state.prompt.history;
@@ -1107,9 +1107,9 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       };
     }
     case "queue-cancel": {
-      // Ctrl+P 取消最后一个排队项（E72）：从队列弹出并恢复到输入框供编辑重发，
+      // Ctrl+P 取消最后一个排队项：从队列弹出并恢复到输入框供编辑重发，
       // 光标落在恢复文本末尾。输入框为空（排队时已被清空的单个空行，常态）直接恢复，
-      // 不再合并出恢复文本下方的残留空行（E107①）；仅空白的草稿同样按空处理（视觉为空，
+      // 不再合并出恢复文本下方的残留空行；仅空白的草稿同样按空处理（视觉为空，
       // 保留只会复发残留空行）。有实际内容的草稿时置于其前（换行相接，受 20 行上限截断）
       const last = state.queue.at(-1);
       if (!last) return state;
@@ -1126,7 +1126,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
         historyIndex: -1,
         sel: null,
       };
-      // 恢复后重算候选可能弹层残留（审查修正）：恢复文本未必以 / 开头，直接清掉候选
+      // 恢复后重算候选可能弹层残留：恢复文本未必以 / 开头，直接清掉候选
       return { ...state, queue: state.queue.slice(0, -1), prompt, candidate: undefined };
     }
     case "clear-input":
@@ -1160,7 +1160,7 @@ function insertText(prompt: PromptState, text: string): PromptState {
 }
 
 /** 粘贴整段文本：光标处插入，\r\n/\n 拆多行（bracketed paste 整段插入），总行数超上限截断。
- *  D-6=45 截断策略：优先保光标前/后的内容（head 接光标前、tail 接光标后），超限截中间粘贴段，
+ *  截断策略：优先保光标前/后的内容（head 接光标前、tail 接光标后），超限截中间粘贴段，
  *  不再从头 slice 丢光标后已有文本；原行已满时退化为单行贴入光标处。 */
 function pasteText(prompt: PromptState, text: string): PromptState {
   const line = prompt.lines[prompt.curLine] ?? "";
@@ -1283,7 +1283,7 @@ function deleteToEnd(prompt: PromptState): PromptState {
 }
 
 /** 删整行（Ctrl+U）：清空当前行、光标回行首；当前行已空且上方有行时删掉该行、光标到上一行尾——
- *  连续按 Ctrl+U 一行行往上清（D-2=48，不再停在行首不动） */
+ *  连续按 Ctrl+U 一行行往上清（不再停在行首不动） */
 function deleteLine(prompt: PromptState): PromptState {
   const lines = [...prompt.lines];
   if ((prompt.lines[prompt.curLine] ?? "") === "" && prompt.curLine > 0) {

@@ -25,11 +25,11 @@ describe("isSwitchableError（可切换错误分类）", () => {
     expect(isSwitchableError(new Error("fetch failed"))).toBe(true);
   });
 
-  it("认证/余额不足（401）可切换——用户定论 A：切不可用模型自动路由（备选可能跨厂商、不同 key）", () => {
+  it("认证/余额不足（401）可切换：切不可用模型自动路由（备选可能跨厂商、不同 key）", () => {
     expect(isSwitchableError({ status: 401 })).toBe(true);
   });
 
-  it("余额不足（402）可切换——DeepSeek 余额不足返回 Payment Required，失败理由与 401 同构（E53）", () => {
+  it("余额不足（402）可切换——DeepSeek 余额不足返回 Payment Required，失败理由与 401 同构", () => {
     expect(isSwitchableError({ status: 402 })).toBe(true);
   });
 
