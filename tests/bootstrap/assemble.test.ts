@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { assembleSessionExtensions } from "../../src/cli/app.js";
+import { assembleSessionExtensions } from "../../src/bootstrap/assemble.js";
 import { writeFakeServer } from "../mcp/helpers.js";
 
 describe("assembleSessionExtensions（扩展生态装配）", () => {

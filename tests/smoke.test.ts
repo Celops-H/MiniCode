@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { program } from "../src/cli/index.js";
+import { program } from "../src/bootstrap/main.js";
 
 describe("CLI 冒烟测试", () => {
   it("定义 new / continue / list 命令", () => {

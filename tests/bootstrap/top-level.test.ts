@@ -6,7 +6,7 @@
  * tui 子命令自身的 -c 仍由 commander 处理（此处返回 null）。
  */
 import { expect, it } from "vitest";
-import { topLevelTui } from "../../src/cli/app.js";
+import { topLevelTui } from "../../src/bootstrap/main.js";
 
 it("无参：进 TUI 空态（启动不建会话，P6-1）", () => {
   expect(topLevelTui([])).toEqual({ agents: true });

@@ -12,7 +12,7 @@
   },
   "packageManager": "pnpm@11.21.0",
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--experimental-ffi tsx src/cli/app.ts",
+    "dev": "cross-env NODE_OPTIONS=--experimental-ffi tsx src/bootstrap/main.ts",
     "dev:tui": "cross-env NODE_OPTIONS=--experimental-ffi vite-node src/tui/dev.tsx",
     "build": "tsc -p tsconfig.build.json && cross-env VITE_TUI_BUILD=1 vite build",
     "typecheck": "tsc --noEmit",

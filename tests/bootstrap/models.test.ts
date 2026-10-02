@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assistantMessage, createContext, toolResultMessage } from "../../src/core/index.js";
 import type { Config } from "../../src/config/index.js";
-import { buildModelClient, resolveMainModel } from "../../src/cli/models.js";
+import { buildModelClient, resolveMainModel } from "../../src/bootstrap/models.js";
 import type { ChatCompletionsClient, ChatCompletionsClientFactory } from "../../src/llm/index.js";
 
 const KEYS = { A_API_KEY: "k-a", B_API_KEY: "k-b" };

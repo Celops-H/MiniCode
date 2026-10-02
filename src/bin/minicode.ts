@@ -7,9 +7,9 @@
 import { spawn } from "node:child_process";
 import { needsFfiRestart, restartCommandArgv } from "./ffi.js";
 
-/** 已具备 FFI 能力：调 CLI 入口的 main（app.ts 仅直跑时自启 main，包装入口需显式调用） */
+/** 已具备 FFI 能力：调入口的 main（main.ts 仅直跑时自启 main，包装入口需显式调用） */
 async function run(): Promise<void> {
-  const app = await import("../cli/app.js");
+  const app = await import("../bootstrap/main.js");
   await app.main();
 }
 

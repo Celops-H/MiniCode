@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findDistRoot, isStaleBuild, newestBuildTime } from "../../src/cli/staleBuild.js";
+import { findDistRoot, isStaleBuild, newestBuildTime } from "../../src/bootstrap/staleBuild.js";
 import { pathToFileURL } from "node:url";
 
 const dirs: string[] = [];

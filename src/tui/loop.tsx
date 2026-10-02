@@ -23,7 +23,7 @@ import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, format
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
-import { interact } from "../cli/interact.js";
+import { interact } from "../bootstrap/interact.js";
 import { deleteTrace } from "../observability/index.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
 import { tuiCursor, CURSOR_STEADY_MS } from "./cursor.js";

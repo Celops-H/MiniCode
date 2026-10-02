@@ -2,7 +2,7 @@
  * 分层守卫：src/tui 之外的源码不得引用 src/tui（静态 from 导入、动态 import()、副作用 import 三形态全扫）。
  * tsc 构建排除 src/tui（TUI 由 vite 单独打包成 dist/tui/index.js），下层模块一旦反向依赖，
  * dist 里就没有对应文件，运行时即报 Cannot find module；而 typecheck 用全量 tsconfig 测不出。
- * 例外见 ALLOWED：src/cli/app.ts 懒加载 TUI 入口 ../tui/index.js，该文件是 vite 产物，dist 存在。
+ * 例外见 ALLOWED：src/bootstrap/main.ts 懒加载 TUI 入口 ../tui/index.js，该文件是 vite 产物，dist 存在。
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 /** 允许的例外：文件相对 src 的路径（正斜杠）+ 引用的模块说明符 */
-const ALLOWED = new Set(["cli/app.ts:../tui/index.js"]);
+const ALLOWED = new Set(["bootstrap/main.ts:../tui/index.js"]);
 
 /** 递归收集目录下全部 .ts/.tsx 源文件（跳过 .d.ts 与 src/tui 自身） */
 function collectFiles(dir: string): string[] {

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * 从模块 URL 解析项目根（dist 产物运行时）：取路径中最后一个 dist 段的上一级。
- * 源码直跑（路径无 dist 段，如 tsx src/cli/app.ts）返回 undefined——调用方跳过检测。
+ * 源码直跑（路径无 dist 段，如 tsx src/bootstrap/main.ts）返回 undefined——调用方跳过检测。
  * @param moduleUrl 当前模块的 import.meta.url
  * @returns 项目根目录；非 dist 运行返回 undefined
  */

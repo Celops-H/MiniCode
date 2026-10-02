@@ -38,7 +38,7 @@ export default defineConfig({
     ],
   },
   // TUI 生产构建（⑤minicode tui build）：SSR bundle src/tui/index.tsx → dist/tui/index.js，
-  // 由 tsc 编译出的 CLI（dist/cli/app.js）dynamic import 接管 `minicode tui`。
+  // 由 tsc 编译出的 CLI（dist/bootstrap/main.js）dynamic import 接管 `minicode tui`。
   // solid-js/@opentui/solid 打进 bundle（alias 单实例），其余依赖（@opentui/core 含原生 FFI
   // 子包、openai/commander/zod 与 node 内建）保持 external 走常规 node_modules 解析。
   ...(process.env.VITE_TUI_BUILD
