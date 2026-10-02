@@ -175,6 +175,9 @@ export class Agent {
   /** LlmCallEnd 已附过全文的系统提示词版本：hash 每次必带，
    *  全文仅首次出现或变更时附带，轨迹据此含提示词各版本全文而不逐条重复 */
   private emittedSystemPrompt: string | null = null;
+  /** 崩溃恢复补孤儿的合成消息（待发射）：构造同步无法发射事件，待首次驱动时补发
+   *  MessageAppended 补齐轨迹——否则压缩重写落盘后这些消息在任何记录里都无迹可查 */
+  private pendingRepairMirrors: Message[] = [];
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -212,7 +215,11 @@ export class Agent {
       // checkpoint 崩溃恢复：末尾可能残留「工具调用无结果」的孤儿状态——
       // 工具执行前已落盘但结果未及写盘。补失败结果保持配对完整（续跑不 400），
       // 模型看到「执行中断」自行决定重试或调整（比剥掉调用保留上下文）
-      this.messages.push(...repairOrphanToolCalls(options.initialMessages));
+      const repaired = repairOrphanToolCalls(options.initialMessages);
+      // 合成的失败结果记入待发射清单：构造函数不能发射事件（宿主可能尚未完成装配），
+      // 首次驱动时补发 MessageAppended，轨迹与落盘才含这些真实进入上下文的消息
+      this.pendingRepairMirrors = repaired.slice(options.initialMessages.length);
+      this.messages.push(...repaired);
     }
   }
 
@@ -268,6 +275,9 @@ export class Agent {
     this.interrupted = false;
     this.interruptController = new AbortController();
     const message = userMessage(input);
+    // 用户消息入上下文前先补发待镜像消息：合成的恢复消息在历史末尾、本轮输入之前，
+    // 先发它们轨迹的消息顺序才与上下文一致
+    this.flushPendingRepairMirrors();
     this.messages.push(message);
     // 同步方法内发射不等待：HookBus.emit 调用即同步到达首个 handler，订阅方同步记账则到达序=发生序
     void this.emitMessageAppended(message);
@@ -285,6 +295,8 @@ export class Agent {
    *  防下一轮 start() 把旧历史连同新输入一起回灌模型并重写会话文件 */
   resetHistory(): void {
     this.messages = [];
+    // 清盘即丢弃未发射的待镜像消息：消息已不在上下文，补发只会让轨迹多出不存在的消息
+    this.pendingRepairMirrors = [];
   }
 
   /**
@@ -295,6 +307,9 @@ export class Agent {
    */
   appendCommand(text: string): void {
     const message = userMessage(`${COMMAND_MARKER}${text}`, "command");
+    // 命令消息入上下文前先补发待镜像消息：恢复会话的首动作可以是 /init /compact（宿主
+    // 先 appendCommand 再 start），先发它们轨迹的消息顺序才与上下文一致
+    this.flushPendingRepairMirrors();
     this.messages.push(message);
     // 同步方法内发射不等待（同 start 的保序说明）
     void this.emitMessageAppended(message);
@@ -416,6 +431,9 @@ export class Agent {
    * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发，本方法保持纯粹。
    */
   async *runTurn(): AsyncGenerator<StreamEvent> {
+    // 首次驱动先补发待镜像消息（不经 start 的驱动路径：收件箱唤醒续跑、直调 runTurn），
+    // 置于守卫之前——消息真实在上下文中，与本轮是否跑起来无关
+    this.flushPendingRepairMirrors();
     if (this.stopped) return;
     if (this.turnCount >= this.maxTurns) {
       // maxTurns 耗尽收尾：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
@@ -699,6 +717,9 @@ export class Agent {
   /** 分层压缩执行体：裁剪 → 摘要替换；失败置位 compactDisabled 防反复失败。
    *  进入本方法即视为一次压缩动作，收口时发一条 Compact 事件（成功失败都发） */
   private async doCompact(trigger: "auto" | "manual", instructions?: string): Promise<boolean> {
+    // 压缩前补发待镜像消息：维持「在途消息压缩前已发过 MessageAppended」的时序约定，
+    // 恢复会话未经回合直接 /compact 时合成消息才不随摘要替换静默消失
+    this.flushPendingRepairMirrors();
     const startedAt = Date.now();
     const agentPath = this.agentPath?.toString() ?? "/root";
     const tokensBefore = this.estimateContextTokens();
@@ -865,6 +886,21 @@ export class Agent {
       message,
       agentPath: this.agentPath?.toString() ?? "/root",
     });
+  }
+
+  /**
+   * 补发崩溃恢复合成消息的 MessageAppended：构造函数不能发射事件，这里统一收口。
+   * 逐条同步发射不等待（同 start 的保序说明，订阅方同步记账则到达序=发生序），
+   * 调用方须保证在任何新消息发射之前调用（start 的用户消息 / appendCommand 的命令消息 /
+   * runTurn 的收件箱注入 / doCompact 的摘要消息），轨迹的消息顺序才与上下文顺序一致。
+   */
+  private flushPendingRepairMirrors(): void {
+    if (this.pendingRepairMirrors.length === 0) return;
+    const mirrors = this.pendingRepairMirrors;
+    this.pendingRepairMirrors = [];
+    for (const message of mirrors) {
+      void this.emitMessageAppended(message);
+    }
   }
 
   /** 追加消息并镜像 MessageAppended（异步上下文的消息追加统一走这里） */

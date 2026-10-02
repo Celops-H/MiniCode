@@ -5,7 +5,7 @@ import type { ModelClient } from "../../src/agent/index.js";
 import type { HookEvent } from "../../src/hooks/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
-import type { Message } from "../../src/core/index.js";
+import { assistantMessage, userMessage, type Message } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
 /** 收集某类事件的处理器：记录全部负载供断言 */
@@ -150,6 +150,164 @@ describe("MessageAppended 事件：消息追加路径全覆盖", () => {
     expect(messages).toHaveLength(3);
     expect(messages[1]).toMatchObject({ role: "assistant" });
     expect(messages[2]).toMatchObject({ role: "tool_result", content: "执行中断：用户打断，工具未执行" });
+  });
+
+  it("崩溃恢复补孤儿的合成结果：延迟补发且先于本轮用户输入（轨迹补齐、顺序与上下文一致）", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    // 模拟崩溃后的盘上状态：user + assistant(工具调用)，无 tool_result
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("继续"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+    });
+    // 构造函数不能发射事件：此刻没有任何镜像，待首次驱动补发
+    expect(appended.events).toHaveLength(0);
+    agent.start("继续");
+    await drain(agent);
+
+    const messages = appended.events.map((e) => e.message);
+    // 合成结果先于本轮用户输入（它在历史末尾、输入之前），内容为「执行中断」失败结果
+    expect(messages).toHaveLength(3); // 合成结果 + 用户输入 + assistant 回复
+    expect(messages[0]).toMatchObject({
+      role: "tool_result",
+      toolCallId: "c1",
+      isError: true,
+      content: expect.stringContaining("工具执行中断"),
+    });
+    expect(messages[1]).toMatchObject({ role: "user", content: "继续" });
+  });
+
+  it("崩溃恢复孤儿含多个工具调用：逐条按序补发，先于本轮用户输入", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    const orphanHistory: Message[] = [
+      userMessage("并行查"),
+      assistantMessage([
+        { type: "tool_call", id: "c1", name: "read", input: {} },
+        { type: "tool_call", id: "c2", name: "glob", input: {} },
+      ]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("继续"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+    });
+    agent.start("继续");
+    await drain(agent);
+
+    const messages = appended.events.map((e) => e.message);
+    expect(messages).toHaveLength(4); // 两条合成结果 + 用户输入 + assistant 回复
+    expect(messages[0]).toMatchObject({ role: "tool_result", toolCallId: "c1", isError: true });
+    expect(messages[1]).toMatchObject({ role: "tool_result", toolCallId: "c2", isError: true });
+    expect(messages[2]).toMatchObject({ role: "user", content: "继续" });
+  });
+
+  it("清盘（resetHistory）丢弃未发射的待镜像消息：消息已不在上下文，不补发", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+    });
+    agent.resetHistory();
+    agent.start("新话题");
+    await drain(agent);
+
+    const messages = appended.events.map((e) => e.message);
+    expect(messages).toHaveLength(2); // 用户输入 + assistant 回复，无补发
+    expect(messages[0]).toMatchObject({ role: "user", content: "新话题" });
+  });
+
+  it("不经 start 直接驱动（runTurn 入口补发）：收件箱唤醒续跑等路径同样补齐轨迹", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("继续"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+    });
+    await drain(agent);
+
+    const messages = appended.events.map((e) => e.message);
+    // 合成结果先补发，其后才是本轮 assistant 回复
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ role: "tool_result", toolCallId: "c1", isError: true });
+    expect(messages[1]).toMatchObject({ role: "assistant" });
+  });
+
+  it("恢复会话未经回合直接压缩（doCompact 入口补发）：合成结果先于摘要消息发射，不随摘要替换消失", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("摘要内容"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+    });
+    const ok = await agent.compactNow();
+
+    expect(ok).toBe(true);
+    const messages = appended.events.map((e) => e.message);
+    // 合成结果先补发（否则被摘要替换后在任何记录里都无迹可查），其后是摘要与恢复上下文
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({ role: "tool_result", toolCallId: "c1", isError: true });
+    expect(messages[1]).toMatchObject({ role: "user", source: "system" });
+    expect(String(messages[1]!.content)).toContain("【会话摘要】");
+    expect(String(messages[2]!.content)).toContain("恢复上下文");
+  });
+
+  it("命令痕迹（appendCommand）前也先补发：恢复会话首动作 /init 时轨迹顺序仍与上下文一致", async () => {
+    const hooks = new HookBus();
+    const appended = collector(hooks, "MessageAppended");
+    const orphanHistory: Message[] = [
+      userMessage("读文件"),
+      assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+    ];
+    const agent = new Agent({
+      modelClient: textClient("说明"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: orphanHistory,
+    });
+    // 宿主的 /init 流程：先 appendCommand 命令痕迹，再 start 走正常回合
+    agent.appendCommand("/init");
+    agent.start("生成项目说明");
+    await drain(agent);
+
+    const messages = appended.events.map((e) => e.message);
+    // 合成结果（历史末尾）→ 命令消息 → 用户输入，与上下文顺序一致
+    expect(messages[0]).toMatchObject({ role: "tool_result", toolCallId: "c1", isError: true });
+    expect(messages[1]).toMatchObject({ role: "user", source: "command" });
+    expect(messages[2]).toMatchObject({ role: "user", content: "生成项目说明" });
   });
 });
 
