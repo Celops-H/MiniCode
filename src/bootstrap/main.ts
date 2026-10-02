@@ -1,56 +1,23 @@
 /**
  * 入口与 program 装配：commander 命令定义、顶层 TUI 形态接管、进程级初始化与退出清理。
  * 会话装配函数在 ./assemble.js，模型解析在 ./models.js，会话驱动循环在 ./interact.js，
- * dist 过期检测在 ./staleBuild.js。
+ * dist 过期检测在 ./staleBuild.js。交互界面只有 TUI 一种（无参/-c 顶层形态与 tui 子命令都进 TUI）。
  */
 import { Command } from "commander";
 import path from "node:path";
-import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
-import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
-import { HookBus, type HookEvent } from "../hooks/index.js";
-import { attachRecorder } from "../observability/index.js";
-import { resolveSessionsRoot } from "../config/index.js";
-import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { killAllMcpServers } from "../mcp/index.js";
 import { SessionStore } from "../storage/index.js";
-import { createBuiltinTools, killAllBackgroundTasks } from "../tools/index.js";
-import { interact, renderStreamEvent } from "./interact.js";
-import { buildModelClient, resolveMainModel } from "./models.js";
+import { killAllBackgroundTasks } from "../tools/index.js";
 import { rebuildIfStale } from "./staleBuild.js";
-import {
-  MINICODE_VERSION,
-  SYSTEM_PROMPT,
-  assembleSessionExtensions,
-  buildCompactConfig,
-  buildHookBus,
-  createFileLogger,
-  createSessionAgent,
-} from "./assemble.js";
+import { MINICODE_VERSION } from "./assemble.js";
 
 export const program = new Command();
 program
   .name("minicode")
   .description("AI 编程 Agent 命令行工具（无参数直接进 TUI；minicode -c 继续最近会话）")
   .version(MINICODE_VERSION);
-
-program
-  .command("new")
-  .description("新建会话并开始对话")
-  .option("-m, --model <id>", "模型 id")
-  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
-  .action(async (options: { model?: string; agents?: boolean }) => {
-    await startSession(options.model, undefined, options.agents);
-  });
-
-program
-  .command("continue <sessionId>")
-  .description("继续指定会话")
-  .option("--no-agents", "禁用多 Agent 协作（单 agent 会话）")
-  .action(async (sessionId: string, options: { agents?: boolean }) => {
-    await startSession(undefined, sessionId, options.agents);
-  });
 
 program
   .command("list")
@@ -167,104 +134,6 @@ async function loadDotEnv(): Promise<void> {
   for (const [key, value] of Object.entries(vars)) {
     process.env[key] = value;
   }
-}
-
-/** 新建或继续会话，进入交互循环 */
-async function startSession(modelId?: string, sessionId?: string, agents = true): Promise<void> {
-  const config = await loadConfig();
-  const logger = createFileLogger(config);
-  const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
-  const models = buildModelClient(config, modelId);
-
-  const session = sessionId
-    ? await store.loadSession(sessionId)
-    : await store.createSession({ model: resolveMainModel(config, modelId) });
-  if (!sessionId) {
-    console.log(`会话已创建：${session.meta.id}`);
-  }
-
-  logger.info(`启动：minicode ${MINICODE_VERSION}（cwd ${process.cwd()}）`);
-  logger.info(`配置加载完成（logLevel ${config.logLevel}）`);
-  // hook 总线常在（可观测性装配需要）：无 hooks 配置时为空总线，事件发射零成本；
-  // Recorder 订阅总线把运行过程写轨迹（OBSERVABILITY §3.1 统一事件出口）
-  const onHandlerError = (err: unknown, event: HookEvent): void => logger.error(hookHandlerErrorText(err, event));
-  const hooks = buildHookBus(config.hooks, { onHandlerError }) ?? new HookBus({ onHandlerError });
-  // 可观测性装配（OBSERVABILITY §3.1/§7）：Recorder 订阅总线把运行过程写轨迹，
-  // enabled=false 时不装配；轨迹与会话存储独立，只靠 sessionId 关联
-  attachRecorder(hooks, {
-    sessionId: session.meta.id,
-    cwd: process.cwd(),
-    minicodeVersion: MINICODE_VERSION,
-    sessionsRoot: resolveSessionsRoot({ root: config.sessionsDir }),
-    enabled: config.observability?.enabled,
-    dir: config.observability?.dir,
-  });
-  // 流水日志埋点（OBSERVABILITY §6）：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志
-  attachHookLogging(hooks, logger);
-  const write = (text: string): void => {
-    process.stdout.write(text);
-  };
-  // M5 扩展生态装配（BACKEND §19/§20）：MCP server 工具与技能并入会话；失败 server 错误行输出
-  const extensions = await assembleSessionExtensions(config, { logger });
-  for (const line of extensions.mcpErrors) console.error(line);
-  // 指令文件加载（BACKEND §21）：用户级 ~/.minicode/AGENTS.md + 项目侧根→cwd 逐级，
-  // 全部拼接进系统提示词；无文件为空段不占位
-  const instructionsSection = buildInstructionsPrompt(await loadInstructionFiles());
-  const { agent, team } = createSessionAgent({
-    modelClient: models,
-    modelId: session.meta.model,
-    systemPrompt: [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
-      .filter((s) => s.length > 0)
-      .join("\n"),
-    tools: [...createBuiltinTools(), ...extensions.tools],
-    initialMessages: session.getMessages(),
-    agents,
-    hooks,
-    compactConfig: buildCompactConfig(config, session.meta.model, models),
-    // 子 agent 提示词附加段（E12/E14）：指令段与技能段派生时注入子 agent
-    subagentPromptSections: [instructionsSection, extensions.promptSection],
-    // root 被后台驱动（子 agent 完成唤醒续跑）时事件转给 CLI 渲染：
-    // 迟到子 agent 完成的汇总结论不打丢（review 修复），renderStreamEvent 与 interact 同渲染逻辑
-    onRootEvent: (event) => renderStreamEvent(write, event),
-    // checkpoint（DESIGN 14）：工具执行前把已产生的消息落盘——
-    // 以 session 内存消息数为游标（appendMessage 同步 append 到内存），只入队未落盘部分
-    checkpoint: async (messages) => {
-      const newOnes = messages.slice(session.getMessages().length);
-      for (const message of newOnes) {
-        await store.appendMessage(session, message);
-      }
-      await store.flush();
-    },
-  });
-
-  // 流水日志（文件）+ 控制台各记一条会话开始（控制台这行是既有 UX，保留直写）
-  logger.info(`会话 ${session.meta.id}（模型 ${session.meta.model}）开始`);
-  write(`开始对话（模型 ${session.meta.model}${agents ? "，多 Agent 协作开启" : ""}）\n`);
-  // 会话开始（DESIGN 13.3：会话级事件由宿主触发）
-  await hooks?.emit({ type: "SessionStart" });
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    await interact({
-      agent,
-      store,
-      session,
-      inputs: rl,
-      write,
-      hooks,
-      // 会话期错误渲染后继续输入循环（E82）：单次模型链失败不再按「启动失败」退出整个
-      // 会话进程，与 TUI 行为对称；装配期错误仍在 main catch 以「启动失败」报出
-      onError: (message) => write(`\n[会话错误] ${message}\n`),
-    });
-  } finally {
-    // 会话结束（DESIGN 13.3：会话级事件由宿主触发）；
-    // try/finally 兜底：interact 内抛错（如模型流错误）也要触发 SessionEnd，观测事件不缺失
-    await hooks?.emit({ type: "SessionEnd" });
-    // 会话收尾清理团队：中断活跃子 agent、清空注册表（防后台 resume 循环吊住进程、成员残留）
-    team?.clear();
-    // 会话结束停掉 MCP server：按进程树杀，防孤儿进程（BACKEND §19）
-    extensions.mcpManager?.stopAll();
-  }
-  rl.close();
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

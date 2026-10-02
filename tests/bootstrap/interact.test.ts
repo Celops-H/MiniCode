@@ -14,6 +14,7 @@ import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
 import type { Tool } from "../../src/tools/index.js";
 import type { Models } from "../../src/llm/index.js";
+import type { StreamEvent } from "../../src/core/index.js";
 
 /** 用给定 hooks 配置解析配置（写临时项目配置文件，绕开用户级配置） */
 async function loadConfigWith(hooks: Record<string, string[]>): Promise<Awaited<ReturnType<typeof loadConfig>>> {
@@ -35,7 +36,7 @@ function mockTextClient(text: string): ModelClient {
   };
 }
 
-describe("CLI 模型组装", () => {
+describe("模型组装", () => {
   it("可用厂商为零时报错，不再有硬编码兜底模型", () => {
     expect(() => buildModelClient(undefined, undefined, { env: {} })).toThrow("未配置任何可用厂商");
   });
@@ -55,7 +56,7 @@ describe("CLI 模型组装", () => {
   });
 });
 
-describe("CLI 多 Agent 组装", () => {
+describe("多 Agent 组装", () => {
   it("关闭 agents：单 agent 会话，协作工具不可见", async () => {
     const toolsSeen: string[][] = [];
     const client: ModelClient = {
@@ -185,7 +186,7 @@ describe("CLI 多 Agent 组装", () => {
   });
 });
 
-describe("CLI Hook 接入", () => {
+describe("interact Hook 接入", () => {
   let dir: string;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -218,6 +219,7 @@ describe("CLI Hook 接入", () => {
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
       hooks,
     });
     expect(seen).toEqual(["第一问", "第二问"]);
@@ -293,7 +295,7 @@ describe("CLI Hook 接入", () => {
       yield "用户输入";
       yield "/exit";
     }
-    const interacting = interact({ agent, store, session, inputs: inputs(), write: () => {} });
+    const interacting = interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
     await new Promise((resolve) => setTimeout(resolve, 100));
     // 后台轮还没结束：用户消息尚未入历史（等待而非 start）
     const humans = agent.getMessages().filter((m) => m.role === "user" && m.source !== "system");
@@ -319,7 +321,7 @@ describe("CLI Hook 接入", () => {
   });
 });
 
-describe("CLI Hook 配置 schema", () => {
+describe("Hook 配置 schema", () => {
   it("hooks 配置部分事件即可通过解析（partialRecord），未知事件拒绝", async () => {
     const config = await loadConfigWith({ PreToolUse: ["echo {}"] });
     expect(config.hooks).toEqual({ PreToolUse: ["echo {}"] });
@@ -328,7 +330,7 @@ describe("CLI Hook 配置 schema", () => {
   });
 });
 
-describe("CLI /compact 命令", () => {
+describe("interact /compact 命令", () => {
   let dir: string;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -373,6 +375,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
     });
 
     expect(outputs.join("")).toContain("[已压缩]");
@@ -410,6 +413,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
     });
     expect(outputs.join("")).toContain("[未压缩]");
   });
@@ -475,6 +479,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
     });
     // 工具执行时本轮 assistant 消息（含工具调用）已在盘上
     expect(diskHasAssistantDuringTool).toBe(true);
@@ -536,6 +541,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
     });
     // 盘上 = 内存（不重复、顺序一致）
     const loaded = await store.loadSession(session.meta.id);
@@ -594,6 +600,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
     });
 
     // 第二轮撞线压缩：删除了已落盘历史 → 重写整份盘 = agent 当前全部（摘要 + 本轮回复）
@@ -633,6 +640,7 @@ describe("CLI /compact 命令", () => {
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
     });
     expect(outputs.join("")).toContain("[未知命令]");
   });
@@ -666,7 +674,7 @@ describe("buildCompactConfig 装配", () => {
   });
 });
 
-describe("CLI 交互循环", () => {
+describe("交互循环", () => {
   let dir: string;
 
   afterEach(() => {
@@ -697,6 +705,9 @@ describe("CLI 交互循环", () => {
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: (event) => {
+        if (event.type === "text_delta") outputs.push(event.text);
+      },
     });
 
     expect(outputs.join("")).toContain("回复内容");
@@ -732,7 +743,7 @@ describe("CLI 交互循环", () => {
     }
 
     await expect(
-      interact({ agent, store, session, inputs: inputs(), write: () => {} }),
+      interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} }),
     ).rejects.toThrow("连接中断");
 
     // 用户消息已落盘：reconfigure/重开后的 UI 与模型上下文一致（agent 内存里有这条）
@@ -788,7 +799,7 @@ describe("CLI 交互循环", () => {
     }
 
     await expect(
-      interact({ agent, store, session, inputs: inputs(), write: () => {} }),
+      interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} }),
     ).rejects.toThrow("连接中断");
 
     // 盘上序列无重复：user + assistant(工具调用) + tool_result 各一条——
@@ -820,6 +831,7 @@ describe("CLI 交互循环", () => {
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
     });
 
     const loaded = await store.loadSession(session.meta.id);
@@ -866,18 +878,20 @@ describe("CLI 交互循环", () => {
       yield "/exit";
     }
     const outputs: string[] = [];
+    const events: StreamEvent[] = [];
     await interact({
       agent,
       store,
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: (event) => events.push(event),
     });
 
-    const out = outputs.join("");
-    expect(out).toContain("分析中…"); // 思考渲染
-    expect(out).toContain("[工具] read"); // 工具调用渲染
-    expect(out).toContain("[工具结果] 文件内容"); // 工具结果渲染
+    // 流式事件经 onEvent 结构化交付（缺省文本渲染已随 CLI 宿主删除）
+    expect(events.some((e) => e.type === "thinking_delta" && e.thinking === "分析中…")).toBe(true);
+    expect(events.some((e) => e.type === "toolcall_start" && e.name === "read")).toBe(true);
+    expect(outputs.join("")).toContain("[工具结果] 文件内容"); // 工具结果回显走 write
   });
 
   it("渲染错误事件", async () => {
@@ -900,16 +914,17 @@ describe("CLI 交互循环", () => {
       yield "hi";
       yield "/exit";
     }
-    const outputs: string[] = [];
+    const events: StreamEvent[] = [];
     await interact({
       agent,
       store,
       session,
       inputs: inputs(),
-      write: (text) => outputs.push(text),
+      write: () => {},
+      onEvent: (event) => events.push(event),
     });
 
-    expect(outputs.join("")).toContain("[错误] 流中断");
+    expect(events.some((e) => e.type === "error" && e.message === "流中断")).toBe(true);
   });
 });
 
@@ -924,7 +939,7 @@ describe("N3 环境信息进系统提示词", () => {
   });
 });
 
-describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", () => {
+describe("/init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）", () => {
   let dir: string;
 
   function makeCapturingAgent(): { agent: Agent; prompts: string[] } {
@@ -956,6 +971,7 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
       projectAgentsFile: agentsFile,
     });
     expect(prompts).toHaveLength(1);
@@ -985,6 +1001,7 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
       projectAgentsFile: agentsFile,
     });
     // 失败路径只报错；字面 "/init" 没有作为用户输入跑模型（唯一上模型的输入是"正常问题"）
@@ -1028,6 +1045,7 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
+      onEvent: () => {},
     });
     expect(outputs.some((t) => t.includes("已压缩"))).toBe(true);
     const commandMessage = agent.getMessages().find((m) => m.role === "user" && m.source === "command");
@@ -1052,6 +1070,7 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
       projectAgentsFile: agentsFile,
     });
     const commandMessage = agent.getMessages().find((m) => m.role === "user" && m.source === "command");
@@ -1088,7 +1107,8 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: (text) => outputs.push(text),
-      // CLI 注入 onError：错误渲染后继续循环
+      onEvent: () => {},
+      // 注入 onError：错误渲染后继续循环
       onError: (message) => outputs.push(`[会话错误] ${message}`),
     });
     expect(outputs.some((t) => t.includes("[会话错误]") && t.includes("429"))).toBe(true);
@@ -1113,6 +1133,7 @@ describe("CLI /init 命令（生成/改进项目根 AGENTS.md，BACKEND §21）"
       session,
       inputs: inputs(),
       write: () => {},
+      onEvent: () => {},
       projectAgentsFile: agentsFile,
     });
     expect(prompts).toHaveLength(1);

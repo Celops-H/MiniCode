@@ -6,53 +6,28 @@ import type { HookBus } from "../hooks/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { modelErrorText } from "../core/index.js";
 
-/**
- * 渲染单个流式事件为文本（CLI 与 root 后台事件共用，DESIGN 15）：
- * 文本/思考直接输出，工具调用与错误加标记。
- */
-export function renderStreamEvent(write: (text: string) => void, event: StreamEvent): void {
-  switch (event.type) {
-    case "text_delta":
-      write(event.text);
-      break;
-    case "thinking_delta":
-      write(event.thinking);
-      break;
-    case "toolcall_start":
-      write(`\n[工具] ${event.name ?? "调用"} …`);
-      break;
-    case "toolcall_end":
-      write("\n");
-      break;
-    case "error":
-      write(`\n[错误] ${event.message}`);
-      break;
-  }
-}
-
 export interface InteractOptions {
   agent: Agent;
   store: SessionStore;
   session: Session;
-  /** 输入行迭代（CLI 里是 readline 每行一个输入） */
+  /** 输入行迭代（每行一次输入；测试注入异步生成器） */
   inputs: AsyncIterable<string>;
   /**
-   * 输出函数（CLI 里写 stdout）。承担两类文本：
-   * 状态文本（[已压缩]/[未压缩]/[历史已压缩]/[未知命令]）与工具结果回显（[工具结果]，
-   * CLI 遗留路径）。TUI 不依赖 write 做结构化渲染——流式事件走 onEvent，工具结果走
-   * PostToolUse Hook 事件（此前确认）。
+   * 输出函数。承担两类文本：状态文本（[已压缩]/[未压缩]/[历史已压缩]/[未知命令]）
+   * 与工具结果回显（[工具结果]，文本宿主遗留路径）。TUI 不依赖 write 做结构化渲染——
+   * 流式事件走 onEvent，工具结果走 PostToolUse Hook 事件（此前确认）。
    */
   write: (text: string) => void;
-  /** 流式事件渲染回调（此前确认：渲染归属调用方，TUI 结构化消费）；缺省用 renderStreamEvent 文本渲染。
+  /** 流式事件渲染回调（必填：渲染归属调用方，TUI 结构化消费、测试注入收集回调）。
    * 注意与 Team.onRootEvent 配套接入：onEvent 覆盖用户输入驱动的流，onRootEvent 覆盖
    * root 后台驱动（迟到子 agent 结论）的流，两侧都要接才不遗漏。 */
-  onEvent?: (event: StreamEvent) => void;
+  onEvent: (event: StreamEvent) => void;
   /** Hook 总线（宿主触发会话级事件的通道，DESIGN 13.3）；缺省不触发 */
   hooks?: HookBus;
   /** 项目根 AGENTS.md 路径（/init 用，测试可注入）；缺省 <cwd>/AGENTS.md */
   projectAgentsFile?: string;
   /**
-   * 会话期错误回调（E82，CLI 注入）：run 消费抛错（单次模型链瞬时失败等）时渲染
+   * 会话期错误回调（E82）：run 消费抛错（单次模型链瞬时失败等）时渲染
    * 后继续输入循环，不终止会话进程；文案经 modelErrorText 与装配期「启动失败」区分。
    * 缺省不注入（TUI 宿主）：错误原样上抛，由 TUI 主循环 catch 渲染错误块（现状不变）。
    */
@@ -70,7 +45,7 @@ export interface InteractOptions {
 export async function interact(options: InteractOptions): Promise<void> {
   const { agent, store, session, inputs, write, hooks } = options;
   const projectAgentsFile = options.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
-  const render = options.onEvent ?? ((event: StreamEvent): void => renderStreamEvent(write, event));
+  const render = options.onEvent;
   // 已落盘游标 = session 内存消息数（appendMessage 会同步 append 到 session 内存；
   // checkpoint 回调在工具执行前已把 user+assistant 入队，轮末只补 tool_result）
   for await (const line of inputs) {
@@ -121,7 +96,7 @@ export async function interact(options: InteractOptions): Promise<void> {
     }
     const prompt = turnInput ?? input;
     // 会话级 hook 发射兜底（E82 审查补充）：hook 命令故障不按「启动失败」退出整个会话，
-    // 与 turn 内工具级 hook 的兜底语义对齐（CLI 经 onError 渲染后跳过本轮；TUI 上抛）
+    // 与 turn 内工具级 hook 的兜底语义对齐（注入 onError 时渲染后跳过本轮；缺省上抛）
     try {
       await hooks?.emit({ type: "UserPromptSubmit", input: prompt });
     } catch (err) {
@@ -148,9 +123,9 @@ export async function interact(options: InteractOptions): Promise<void> {
         render(event);
       }
     } catch (err) {
-      // 会话期错误（E82）：CLI 注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
-      // （429/5xx/网络）此前上抛穿到 main catch 按「启动失败」退出整个会话进程，
-      // 与 TUI 渲染错误块继续输入循环的行为不对称；未注入（TUI）保持原样上抛。
+      // 会话期错误（E82）：注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
+      // （429/5xx/网络）渲染后可继续对话而非终止进程，与 TUI 渲染错误块继续输入循环同向；
+      // 未注入（TUI 宿主）保持原样上抛。
       // 覆盖面注意（审查补充）：catch 同时兜住 turn 内宿主 checkpoint 回调的落盘故障，
       // 该类错误会被标成会话错误继续循环、随后 finally 落盘大概率再抛穿透——概率极低，
       // 真遇到按两层报错排查即可

@@ -35,7 +35,7 @@ export interface TeamOptions {
   maxConcurrent?: number;
   /** 启用 Git Worktree 隔离：子 agent 各自独立工作区（DESIGN 4.2）；非 git 仓库时自动忽略 */
   worktrees?: boolean;
-  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（CLI 渲染 root 迟到结论用，review 修复） */
+  /** root 被后台驱动（子 agent 完成唤醒续跑）时的事件转发（TUI 渲染 root 迟到结论用，review 修复） */
   onRootEvent?: (event: StreamEvent) => void;
   /** Hook 总线（子 agent 生命周期事件触发通道，此前确认）；缺省不触发 */
   hooks?: HookBus;
@@ -256,7 +256,7 @@ export class Team {
         });
       }
       // root 被后台驱动（如子 agent 完成唤醒续跑）时事件无人渲染——
-      // 转发给 onRootEvent（宿主 CLI 渲染 root 迟到结论），否则汇总结论被消费丢弃（review 修复）
+      // 转发给 onRootEvent（宿主渲染 root 迟到结论），否则汇总结论被消费丢弃（review 修复）
       const isRoot = agent.agentPath?.isRoot() ?? false;
       for await (const event of agent.resume()) {
         if (isRoot) {
