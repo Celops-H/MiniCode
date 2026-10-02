@@ -181,6 +181,9 @@ export function createSessionAgent(options: {
   /** 子 agent git worktree 隔离缺省开关（缺省关；透传给 Team，
    *  生产装配从 config.worktrees 取值——派生时 spawn_agent 的 worktree 参数缺省随它） */
   worktrees?: boolean;
+  /** 会话记忆开关（缺省关；透传给 Agent，开启后每轮后台增量维护记忆文本、
+   *  压缩时记忆替代现场摘要省一次模型调用） */
+  memory?: boolean;
   hooks?: HookBus;
   compactConfig?: CompactConfig;
   checkpoint?: (messages: Message[]) => Promise<void> | void;

@@ -8,7 +8,7 @@ import type { ModelClient } from "../../src/agent/index.js";
 import { interact } from "../../src/bootstrap/interact.js";
 import { buildModelClient } from "../../src/bootstrap/models.js";
 import { buildCompactConfig, buildHookBus, createSessionAgent } from "../../src/bootstrap/assemble.js";
-import { environmentPrompt } from "../../src/context/index.js";
+import { environmentPrompt, MEMORY_REQUEST_MARKER } from "../../src/context/index.js";
 import { configSchema, loadConfig } from "../../src/config/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
@@ -1139,5 +1139,53 @@ describe("/init 命令（生成/改进项目根 AGENTS.md）", () => {
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain("不覆盖");
     expect(prompts[0]).toContain("现有项目指令：pnpm test");
+  });
+
+  it("memory 开关接线：装配 memory 透传 Agent（开启后回合收尾维护记忆，缺省关闭）", async () => {
+    let memoryUpdates = 0;
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (
+          context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes(MEMORY_REQUEST_MARKER),
+          )
+        ) {
+          memoryUpdates++;
+          yield { type: "text_delta", text: "记忆已更新" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    // 开启：回合收尾后台维护记忆
+    const enabled = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+    });
+    enabled.agent.start("你好");
+    for await (const _ of enabled.agent.run()) {
+      // 消费
+    }
+    await enabled.agent.whenMemorySettled();
+    expect(memoryUpdates).toBe(1);
+
+    // 缺省关闭：不发生记忆更新调用
+    const disabled = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+    disabled.agent.start("你好");
+    for await (const _ of disabled.agent.run()) {
+      // 消费
+    }
+    await disabled.agent.whenMemorySettled();
+    expect(memoryUpdates).toBe(1);
   });
 });

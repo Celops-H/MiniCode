@@ -295,6 +295,8 @@ async function runTuiSession(opts: {
   const autoCompact = config.compact?.enabled !== false;
   // 子 agent worktree 隔离缺省开（config.worktrees 可关）：spawn_agent 的 worktree 参数缺省随它
   const worktrees = config.worktrees !== false;
+  // 会话记忆缺省关（config.memory 可开）：开启后每轮后台维护记忆、压缩时记忆替代现场摘要
+  const memory = config.memory === true;
   // /init 过程免审批盒子：/init 执行期间置位，PermissionPipeline 的 autoApprove 活读放行
   const initPolicyBox: { value: boolean } = { value: false };
   const agentsFile = opts.projectAgentsFile ?? path.join(process.cwd(), "AGENTS.md");
@@ -385,6 +387,7 @@ async function runTuiSession(opts: {
           compactConfig,
           autoCompact,
           worktrees,
+          memory,
           // 子 agent 提示词附加段：指令段与技能段派生时注入子 agent
           subagentPromptSections: [instructionsSection, extensions.promptSection],
           // 思考等级活引用：/model 左右调整后下一轮透传 reasoning_effort（仅支持的厂商）

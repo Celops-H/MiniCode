@@ -570,6 +570,9 @@ export class Agent {
         });
         this.messages = peeled;
         this.historyRewritten = true; // 已落盘的工具回合被剥除
+        // 覆盖点钳制：剥组只删尾部，但极端情况下会吃进已覆盖区——覆盖点收回到新数组长度内，
+        // 记忆更新的下标切片才不会越界空转（被剥掉的未覆盖消息随剥组丢弃，属剥组既定语义）
+        this.memoryCovered = Math.min(this.memoryCovered, this.messages.length);
         context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
         collected.length = 0;
         retryAttempts++;
@@ -661,6 +664,9 @@ export class Agent {
   private async updateMemoryOnce(): Promise<void> {
     // 未覆盖区取最旧一批（时间序）：覆盖点按实际发送范围推进，多轮后台更新逐步消化积压
     const uncovered = this.messages.slice(this.memoryCovered);
+    // 无未覆盖消息即短路：覆盖点错位时空批次也会白发一次模型调用（修复前的错位源已堵，
+    // 这里兜住其余路径，保证任何情况下不给记忆更新发空请求）
+    if (uncovered.length === 0) return;
     const recent = uncovered.slice(0, MEMORY_UPDATE_BATCH);
     const coveredAt = this.memoryCovered + recent.length;
     try {
@@ -820,6 +826,11 @@ export class Agent {
       }
       const summaryMessages = replaceWithSummary(summary);
       this.messages = summaryMessages;
+      // 覆盖点重排：摘要消息本身视为已覆盖（记忆分支它就是记忆文本；其他分支它概括了
+      // 全量历史，无需再喂记忆更新），其后推入的在途与恢复消息全部回到未覆盖区正常消化。
+      // 不重排的后果：旧覆盖点指向已不存在的下标，每轮记忆更新空批次白发模型调用、
+      // 在途消息永远进不了记忆，下次压缩在途切片取空导致历史删除且记忆里也没有（静默丢数据）
+      this.memoryCovered = 1;
       // 摘要消息是新进入上下文的消息，镜像进轨迹；在途消息压缩前已发过 MessageAppended，重灌不重发
       await this.emitMessageAppended(summaryMessages[0]!);
       this.messages.push(...inFlight); // 记忆分支：在途消息保留原文；其他分支为空

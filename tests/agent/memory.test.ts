@@ -261,4 +261,49 @@ describe("覆盖窗口与在途保留", () => {
     // 已覆盖头部被摘要吸收
     expect(after.some((m) => typeof m.content === "string" && m.content === "消息0")).toBe(false);
   });
+
+  it("压缩后覆盖点重排：压缩轮的记忆更新含新输入，不再空批次漏收", async () => {
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
+          );
+          yield { type: "text_delta", text: "记忆：已更新" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const pre = Array.from({ length: 4 }, (_, i) => userMessage(`预置${i}`));
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      initialMessages: pre,
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+    });
+    agent.start("压缩前输入");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 覆盖点已推进到全部 6 条（预置 4 + 本轮 2）：记忆替代压缩时在途为空，新数组只剩摘要与恢复上下文
+    await agent.compactNow();
+    // 压缩后新轮次：覆盖点若仍指旧下标，新消息（下标 2、3）在数组长度追上前永远进不了记忆，
+    // 且每次 Stop 都会空批次白发一次记忆更新调用
+    agent.start("压缩后输入");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 重排后：压缩轮的记忆更新请求包含本轮新输入（未覆盖区被正常消化）
+    expect(memoryRequests.length).toBeGreaterThanOrEqual(2);
+    expect(memoryRequests.at(-1)!).toContain("压缩后输入");
+  });
 });
