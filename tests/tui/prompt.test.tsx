@@ -1,5 +1,5 @@
 /**
- * 层 1：输入框视图——多行/候选列表渲染断言 + 光标位置计算（终端光标不占格）。
+ * 层 1：输入框视图——多行/候选列表渲染断言 + 光标（渲染进文本的反色块）与位置计算。
  */
 import { testRender } from "@opentui/solid";
 import { it, expect, describe } from "vitest";
@@ -17,6 +17,24 @@ const prompt = (over: Partial<PromptState> = {}): PromptState => ({
   sel: null,
   ...over,
 });
+
+/** 按文本精确匹配找 span，返回其 fg/bg 十六进制色（RGBA buffer → #rrggbb）；找不到属性为 undefined */
+function spanColorOf(
+  spans: { lines: Array<{ spans: Array<{ text: string; fg?: unknown; bg?: unknown }> }> },
+  text: string,
+): { fg?: string; bg?: string } {
+  const hex = (color: unknown): string | undefined => {
+    const buf = (color as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+    if (!buf) return undefined;
+    return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+  };
+  for (const line of spans.lines) {
+    for (const span of line.spans) {
+      if (span.text === text) return { fg: hex(span.fg), bg: hex(span.bg) };
+    }
+  }
+  return {};
+}
 
 it("多行输入按行渲染", async () => {
   const setup = await testRender(
@@ -104,4 +122,81 @@ it("输入/移动后 tuiCursor 实际更新（组件体 createRenderEffect 响�
   channel.onAction({ type: "cursor", dir: "left" });
   await setup.waitForVisualIdle();
   expect(tuiCursor.col).toBe(mountCol + 1);
+});
+
+describe("光标渲染进文本（反色块，常亮不闪）", () => {
+  // 光标反色：bg 文字色 / fg 面板底色（opentui 无 reverse 属性，bg/fg 互换等效）
+  const cursorBlock = { bg: "#ececf0", fg: "#101013" };
+
+  it("光标停在字符上：该字符整字反色", async () => {
+    const setup = await testRender(
+      () => <PromptView prompt={prompt({ lines: ["abc"], curCol: 1 })} />,
+      { width: 40, height: 6 },
+    );
+    await setup.waitForVisualIdle();
+    expect(spanColorOf(setup.captureSpans(), "b")).toEqual(cursorBlock);
+  });
+
+  it("光标停在行尾：追加一个空格宽的反色实心块", async () => {
+    const setup = await testRender(
+      () => <PromptView prompt={prompt({ lines: ["ab"], curCol: 2 })} />,
+      { width: 40, height: 6 },
+    );
+    await setup.waitForVisualIdle();
+    expect(spanColorOf(setup.captureSpans(), " ")).toEqual(cursorBlock);
+  });
+
+  it("空行（空输入框）光标：仅行尾反色实心块", async () => {
+    const setup = await testRender(
+      () => <PromptView prompt={prompt()} />,
+      { width: 40, height: 6 },
+    );
+    await setup.waitForVisualIdle();
+    expect(spanColorOf(setup.captureSpans(), " ")).toEqual(cursorBlock);
+  });
+
+  it("选区并存：光标段样式优先于选区段", async () => {
+    // 跨行选区锚在下一行行首：光标行（锚行）选区范围 [1,4) 盖住光标字符「b」，
+    // 光标段仍反色、选区段背景抬高（同行选区以光标为端点，光标字符恒在边界外，无重叠场景）
+    const setup = await testRender(
+      () => (
+        <PromptView
+          prompt={prompt({ lines: ["abcd", "ef"], curLine: 0, curCol: 1, sel: { line: 1, col: 0 } })}
+        />
+      ),
+      { width: 40, height: 7 },
+    );
+    await setup.waitForVisualIdle();
+    const spans = setup.captureSpans();
+    expect(spanColorOf(spans, "b")).toEqual(cursorBlock);
+    expect(spanColorOf(spans, "cd")?.bg).toBe("#1c1c22");
+  });
+
+  it("反向跨行选区（锚在上一行，光标行为焦点行）：光标段反色、焦点行选区段抬高", async () => {
+    // 锚在上一行：光标行选区范围 [0,1) 不含光标字符「f」，光标段照常反色
+    const setup = await testRender(
+      () => (
+        <PromptView
+          prompt={prompt({ lines: ["abcd", "ef"], curLine: 1, curCol: 1, sel: { line: 0, col: 1 } })}
+        />
+      ),
+      { width: 40, height: 7 },
+    );
+    await setup.waitForVisualIdle();
+    const spans = setup.captureSpans();
+    expect(spanColorOf(spans, "f")).toEqual(cursorBlock);
+    expect(spanColorOf(spans, "e")?.bg).toBe("#1c1c22");
+  });
+
+  it("showCursor=false（connect key 弹窗态）：不渲染光标块", async () => {
+    const setup = await testRender(
+      () => <PromptView prompt={prompt({ lines: ["ab"], curCol: 1 })} showCursor={false} />,
+      { width: 40, height: 6 },
+    );
+    await setup.waitForVisualIdle();
+    const spans = setup.captureSpans();
+    expect(spanColorOf(spans, "a")?.bg).toBeUndefined();
+    expect(spanColorOf(spans, "b")?.bg).toBeUndefined();
+    expect(spanColorOf(spans, " ")?.bg).toBeUndefined();
+  });
 });

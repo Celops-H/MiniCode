@@ -27,7 +27,7 @@ import { App } from "./view/App.js";
 import { interact } from "../bootstrap/interact.js";
 import { deleteTrace } from "../observability/index.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
-import { tuiCursor, CURSOR_STEADY_MS } from "./cursor.js";
+import { tuiCursor } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
@@ -149,7 +149,7 @@ export interface TuiSharedMount {
   mounted: boolean;
 }
 
-/** TUI 终端句柄：渲染器 + 光标闪烁定时器等终端级资源（跨会话复用，
+/** TUI 终端句柄：渲染器等终端级资源（跨会话复用，
  *  reconfigure 不再销毁重建渲染器——重建是「多操作闪屏」的根源） */
 export interface TuiTerminal {
   renderer: Awaited<ReturnType<typeof createCliRenderer>>;
@@ -157,7 +157,7 @@ export interface TuiTerminal {
   dispose(): void;
 }
 
-/** 创建共享终端：清输入缓冲 → 渲染器 → 光标定位 postProcess 与闪烁定时器（一次装配） */
+/** 创建共享终端：清输入缓冲 → 渲染器 → 光标定位 postProcess（一次装配） */
 export async function createTuiTerminal(): Promise<TuiTerminal> {
   // Windows 终端输入初始化：清输入缓冲在进 TUI 前，PROCESSED_INPUT
   // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
@@ -178,56 +178,14 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
   });
   win32DisableProcessedInput();
 
-  // 焦点上报：DECSET ?1004h 开启后，终端在窗口失焦/回焦时发 ESC[O / ESC[I 序列。
-  // opentui 已消化这两个序列（不落输入框、不发键）并 emit focus/blur 事件，只差开启上报；
-  // 终端不支持该模式时不回复序列，静默退化为现状（光标照常闪烁）
-  process.stdout.write("\x1b[?1004h");
-
-  // 光标定位：每帧把终端光标移到输入框光标处（不占格，替代插入字符「│」）；
-  // 闪烁由定时器翻 tuiCursor.visible 并触发重渲（postProcessFn 随帧执行 setCursorPosition）
+  // 光标定位：每帧把硬件光标写到输入框光标处、恒隐藏——光标的视觉呈现由 Prompt 渲染进
+  // 文本（反色块，常亮不闪，随帧即时跟随）；硬件光标位置仍每帧写入，供输入法候选窗跟随
   renderer.addPostProcessFn(() => {
-    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, tuiCursor.enabled && tuiCursor.visible);
+    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, false);
   });
-  // 失焦暂停闪烁：失焦时光标常亮停驻、不翻相；回焦恢复正常闪烁。
-  // 序列未开启（终端不支持）时收不到 blur/focus，行为与现状一致
-  renderer.on("blur", () => {
-    tuiCursor.terminalFocused = false;
-    tuiCursor.visible = true;
-  });
-  renderer.on("focus", () => {
-    tuiCursor.terminalFocused = true;
-  });
-  const blinkTimer = setInterval(() => {
-    if (!tuiCursor.enabled) return;
-    // 终端失焦期间不翻相，光标保持常亮
-    if (!tuiCursor.terminalFocused) {
-      if (!tuiCursor.visible) {
-        tuiCursor.visible = true;
-        renderer.requestRender();
-      }
-      return;
-    }
-    // 光标移动后宽限窗内保持常亮（移动过程持续可见），停驻后恢复正常闪烁
-    if (Date.now() - tuiCursor.lastMoveAt < CURSOR_STEADY_MS) {
-      if (!tuiCursor.visible) {
-        tuiCursor.visible = true;
-        renderer.requestRender();
-      }
-      return;
-    }
-    tuiCursor.visible = !tuiCursor.visible;
-    renderer.requestRender();
-  }, 500);
   return {
     renderer,
     dispose: () => {
-      clearInterval(blinkTimer);
-      // 关闭焦点上报：还原终端模式，防退出后终端继续发焦点序列
-      try {
-        process.stdout.write("\x1b[?1004l");
-      } catch {
-        // stdout 已不可写（进程退出竞态）忽略
-      }
       // destroy 包 try（渲染器初始化失败等边缘路径也不漏还原）
       try {
         renderer.destroy();
