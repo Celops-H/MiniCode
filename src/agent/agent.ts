@@ -431,49 +431,75 @@ export class Agent {
   /**
    * 撞轮次上限的收尾（resume 续跑预算耗尽与 runTurn 入口守卫共用）：
    * 子 agent 补一次禁用工具的收尾模型调用产出结论——结论回灌父即终态，没有第二次机会，
-   * 全靠这次调用；主 agent（含单 agent 会话）合成显式截断提示消息入上下文，
-   * 用户看得到「为什么没了下文」。收尾后发带 max_turns 原因的 Stop，
+   * 全靠这次调用；主 agent（含单 agent 会话）合成显式截断提示消息入上下文（并落盘），
+   * TUI 另经 Stop 的截断原因出提示行。收尾后发带 max_turns 原因的 Stop，
    * 与正常收尾可区分（截断率可统计，宿主据此发 warn 日志）。
+   * 收尾调用失败时上抛走失败终态：父 agent 拿到「撞上限且无结论」的明确失败文本，
+   * 而不是占位说明当结论误判完成（worktree 也不合并——产出不完整）。
    */
   private async *finalizeMaxTurns(): AsyncGenerator<StreamEvent> {
+    this.stopped = true;
+    const agentPath = this.agentPath?.toString() ?? "/root";
     const isChild = this.team !== undefined && this.agentPath !== undefined && !this.agentPath.isRoot();
-    if (isChild) {
-      const startedAt = Date.now();
-      try {
-        // 收尾调用不带工具：模型只能产出文本结论（正常轮工具循环可能就是撞线主因）
-        const context = createContext(this.systemPrompt, this.messages, [], this.thinkingLevelRef?.());
-        const collected: StreamEvent[] = [];
-        for await (const event of withInterruptTimeout(
-          this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
-          this.interruptController.signal,
-          INTERRUPT_STREAM_TIMEOUT_MS,
-        )) {
-          if (this.interruptController.signal.aborted) break;
-          collected.push(event);
-          yield event;
-        }
-        const assistant = await assembleAssistantMessage(toAsyncIterable(collected));
-        assistant.meta = { ...assistant.meta, model: this.modelId };
-        await this.appendMessage(assistant);
-        await this.emitLlmCallEnd({ model: this.modelId, durationMs: Date.now() - startedAt });
-      } catch (err) {
-        // 收尾调用失败不抛：结论缺位时父收到占位说明（lastAssistantText 只认最后一条 assistant）
-        await this.emitLlmCallEnd({
-          model: this.modelId,
-          durationMs: Date.now() - startedAt,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    } else {
+    if (!isChild) {
       await this.appendMessage(
         userMessage(
           `已连续执行 ${this.maxTurns} 轮工具调用，达到单次任务轮次上限，本轮到此为止。如需继续请再次发起或让我继续。`,
           "system",
         ),
       );
+      await this.safeEmit({ type: "Stop", agentPath, reason: "max_turns" });
+      return;
     }
-    this.stopped = true;
-    await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root", reason: "max_turns" });
+    const startedAt = Date.now();
+    let firstEventMs: number | undefined;
+    let usage: ModelUsage | undefined;
+    let stopReason: string | undefined;
+    const collected: StreamEvent[] = [];
+    try {
+      // 收尾调用不带工具：模型只能产出文本结论（正常轮工具循环可能就是撞线主因）
+      const context = createContext(this.systemPrompt, this.messages, [], this.thinkingLevelRef?.());
+      for await (const event of withInterruptTimeout(
+        this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
+        this.interruptController.signal,
+        INTERRUPT_STREAM_TIMEOUT_MS,
+      )) {
+        if (this.interruptController.signal.aborted) break;
+        firstEventMs ??= Date.now() - startedAt;
+        if (event.type === "done") {
+          stopReason = event.stopReason;
+          usage = event.usage;
+        }
+        collected.push(event);
+        yield event;
+      }
+      await this.emitLlmCallEnd({
+        model: this.modelId,
+        durationMs: Date.now() - startedAt,
+        firstEventMs,
+        usage,
+        stopReason,
+        ...(this.interruptController.signal.aborted ? { error: "用户中断" } : {}),
+      });
+    } catch (err) {
+      await this.emitLlmCallEnd({
+        model: this.modelId,
+        durationMs: Date.now() - startedAt,
+        firstEventMs,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // 用户打断：中断路径已承担终态语义（AgentInterrupted），不发截断 Stop、不上抛
+      if (this.interruptController.signal.aborted) return;
+      throw new Error(
+        `已达单次任务轮次上限 ${this.maxTurns}，收尾调用失败：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    // 打断或未收到任何流事件（拼不出消息）：不发截断 Stop，结论由占位/失败路径兜底
+    if (this.interruptController.signal.aborted || collected.length === 0) return;
+    const assistant = await assembleAssistantMessage(toAsyncIterable(collected));
+    assistant.meta = { ...assistant.meta, model: this.modelId };
+    await this.appendMessage(assistant);
+    await this.safeEmit({ type: "Stop", agentPath, reason: "max_turns" });
   }
 
   /**
@@ -1357,11 +1383,6 @@ function repairOrphanToolCalls(messages: Message[]): Message[] {
   ];
 }
 
-/**
- * 从消息末尾向前找第一条含文本的 assistant 消息，返回其文本内容。
- * @param messages 消息数组
- * @returns 文本结论；找不到时返回占位说明
- */
 /**
  * 最后一条 assistant 消息的结论文本（completion watcher 回灌父 agent 用）。
  * 只认最后一条 assistant 消息：向前放宽会把更早轮次的旧文本当结论

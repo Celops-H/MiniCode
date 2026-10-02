@@ -1464,6 +1464,22 @@ describe("maxTurns 耗尽收尾", () => {
     // 旧实现向前放宽会把「第 1 轮开场白」当结论回灌父 agent
     expect(agent.conclusionText()).toBe("(子代理未产出结论)");
   });
+
+  it("conclusionText 取最后一条 assistant 的正文（更早轮有正文也不抢先）", () => {
+    const agent = new Agent({
+      modelClient: mockTextClient("x"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [
+        userMessage("任务"),
+        assistantMessage([{ type: "text", text: "第 1 轮开场白" }]),
+        assistantMessage([{ type: "tool_call", id: "c1", name: "read", input: {} }]),
+        toolResultMessage("c1", "read", "内容"),
+        assistantMessage([{ type: "text", text: "最终结论：任务完成" }]),
+      ],
+    });
+    expect(agent.conclusionText()).toBe("最终结论：任务完成");
+  });
 });
 
 

@@ -211,4 +211,46 @@ describe("Team（注册表与并发限制）", () => {
     const lastAssistant = messages.findLast((m) => m.role === "assistant");
     expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
   });
+
+  it("子 agent 撞上限且收尾调用失败：失败终态回灌，父拿到撞上限的明确失败文本", async () => {
+    const failingFinalClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) throw new Error("收尾模型不可用");
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      },
+    };
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: failingFinalClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+      maxTurns: 1,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+    // 失败终态：结论带「撞上限 + 收尾失败」，父不再拿占位文本误判完成
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBe(true);
+    expect(completed[0]!.conclusion).toContain("轮次上限");
+    expect(completed[0]!.conclusion).toContain("收尾调用失败");
+  });
 });
