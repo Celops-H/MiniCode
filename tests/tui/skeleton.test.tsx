@@ -16,6 +16,7 @@ import {
   cycleThinkingLevel,
   permissionModeLabel,
   hasRunningAgent,
+  isFoldable,
   formatTime,
   type TuiState,
   type MessageBlock,
@@ -131,6 +132,38 @@ it("AgentSpawned 唤醒已完成 agent：条目重置为运行态（树重新亮
   // followup 唤醒：再发 AgentSpawned → 条目回运行态、完成时刻清空，spawnedAt 保留
   const revived = reduceHook(done, { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
   expect(revived.agents[1]).toEqual({ path: "/root/t", status: "running", spawnedAt: 100, completedAt: null });
+});
+
+it("AgentCompleted.failed：树条目落失败态、活动行标失败（不再与完成同形）", () => {
+  const base = initState([]);
+  const spawned = reduceHook(base, { type: "AgentSpawned", path: "/root/t", parentPath: "/root", spawnedAt: 100 });
+  const failed = reduceHook(spawned, {
+    type: "AgentCompleted",
+    path: "/root/t",
+    parentPath: "/root",
+    conclusion: "子代理 t 失败：连接超时",
+    failed: true,
+    completedAt: 900,
+  });
+  expect(failed.agents[1]).toEqual({ path: "/root/t", status: "failed", spawnedAt: 100, completedAt: 900 });
+  expect(failed.blocks.at(-1)).toMatchObject({ kind: "agent", event: "failed", path: "/root/t", collapsed: true });
+  // 失败结论可展开看全文（与完成的结论走同一条折叠链）
+  expect(isFoldable(failed.blocks.at(-1)!)).toBe(true);
+  // 失败但没有结论/合并结果（正常路径不会出现）：不可折叠，不挂出无内容的折叠提示
+  expect(isFoldable({ kind: "agent", event: "failed", path: "/root/t", collapsed: true })).toBe(false);
+  // 失败不算运行中：Esc 判定与重装配守卫按终态放行
+  expect(hasRunningAgent(failed.agents)).toBe(false);
+  // followup 唤醒失败条目：与完成态一样重置回运行态
+  expect(reduceHook(failed, { type: "AgentSpawned", path: "/root/t", parentPath: "/root" }).agents[1]).toEqual({
+    path: "/root/t",
+    status: "running",
+    spawnedAt: 100,
+    completedAt: null,
+  });
+  // 无 failed 标记的完成事件仍是 completed（失败态不误伤正常完成）
+  const done = reduceHook(spawned, { type: "AgentCompleted", path: "/root/t", parentPath: "/root", conclusion: "ok", completedAt: 900 });
+  expect(done.agents[1]).toMatchObject({ status: "completed" });
+  expect(done.blocks.at(-1)).toMatchObject({ event: "completed" });
 });
 
 it("hasRunningAgent：主 agent 或 completed/interrupted 不算，运行中的子 agent 才算", () => {

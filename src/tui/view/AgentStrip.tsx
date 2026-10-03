@@ -1,9 +1,11 @@
 /**
  * 底栏 agent 树：`● main` 仅多 agent 启用（存在子 agent）时显示；
- * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`（中断 `(×)`），完成/中断 10s 后从树消失；
- * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)` 括号中心列；
+ * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`、失败 `(!) 名称 耗时`（中断 `(×)`），
+ * 失败行整行红字（与消息区失败活动行同色，扫一眼就能看出哪个子任务挂了）；
+ * 终态（完成/失败/中断）条目 10s 后从树消失；
+ * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)`/`(!)`/`(×)` 括号中心列；
  * main 首行、子 agent 次行紧凑。
- * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。完成条目消失由本组件定时器过滤（state 保留，
+ * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。终态条目消失由本组件定时器过滤（state 保留，
  * 长会话内存由 blocks 消息承担，树只读当前活动子集）。
  */
 import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -34,31 +36,38 @@ function durText(ms: number | null): string {
 }
 
 /** 单条内容：main=`● main`（无状态括号——括号是子 agent 状态占位，main 恒运行）；
- *  子 agent=`( ) 名` / `(√) 名 耗时` / `(×) 名` */
+ *  子 agent=`( ) 名` / `(√) 名 耗时` / `(!) 名 耗时` / `(×) 名` */
 function agentContent(a: AgentNode, name?: string): string {
   const shown = name ?? agentName(a.path);
   if (a.path === "/root") return "● main";
-  if (a.status === "completed") {
-    // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
+  // 完成与失败都带耗时（失败跑多久才失败，与完成一样有参考价值），符号区分：√ 完成、! 失败；
+  // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
+  if (a.status === "completed" || a.status === "failed") {
     const dur = durText(a.completedAt != null && a.spawnedAt != null ? a.completedAt - a.spawnedAt : null);
-    return `(√) ${shown}${dur ? ` ${dur}` : ""}`;
+    return `${a.status === "failed" ? "(!)" : "(√)"} ${shown}${dur ? ` ${dur}` : ""}`;
   }
   if (a.status === "interrupted") return `(×) ${shown}`;
   return `( ) ${shown}`;
 }
 
-/** 内容里括号中心列偏移：子 agent 带状态括号 `( ) 名`/`(√) 名`/`(×) 名` → 括号中心列（起点+1）；
+/** 内容里括号中心列偏移：子 agent 带状态括号 `( ) 名`/`(√) 名`/`(!) 名`/`(×) 名` → 括号中心列（起点+1）；
  *  main `● main` 无括号 → 圆点列（0） */
 function parenCenterOffset(content: string): number {
   return content.startsWith("(") ? 1 : 0;
 }
 
+/** 一行树内容：text 为补齐后的整行文本；failed 标记该行对应 agent 是失败终态（整行红字显示） */
+interface AgentRow {
+  text: string;
+  failed: boolean;
+}
+
 /**
  * 树渲染：DFS 从 /root 起，子 agent 连接线放父「中心列」——main（`● main` 无括号）为中心 0 即圆点列，
  * 子 agent 放各自括号中心列；祖先层的竖线（│/空格）放各自中心列——层级竖线对齐父圆点/括号中心。
- * 返回逐行字符串（行内左侧用空格补齐，保证竖线列对齐）。
+ * 返回逐行内容（行内左侧用空格补齐，保证竖线列对齐）。
  */
-function renderTree(nodes: AgentNode[]): string[] {
+function renderTree(nodes: AgentNode[]): AgentRow[] {
   const present = new Set(nodes.map((n) => n.path));
   const byPath = new Map(nodes.map((n) => [n.path, n]));
   // 子表：父 → 子路径；父被剪枝（完成条目消失）时子重挂到最近存活祖先，运行中子 agent 不失联
@@ -91,7 +100,7 @@ function renderTree(nodes: AgentNode[]): string[] {
     }
   }
 
-  const rows: string[] = [];
+  const rows: AgentRow[] = [];
   const render = (path: string, ancCols: number[], ancMore: boolean[], isLast: boolean): void => {
     const node = byPath.get(path);
     if (!node) return; // /root 缺失等防御（生产恒有）
@@ -108,7 +117,7 @@ function renderTree(nodes: AgentNode[]): string[] {
       row[connectorCol + 1] = "─";
     }
     for (let i = 0; i < content.length; i++) row[startCol + i] = content[i]!;
-    rows.push(row.join(""));
+    rows.push({ text: row.join(""), failed: node.status === "failed" });
     const myCenter = startCol + parenCenterOffset(content);
     const kids = childrenOf.get(path) ?? [];
     for (let i = 0; i < kids.length; i++) {
@@ -141,7 +150,7 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
     <Show when={rows().length > 0}>
       <box flexDirection="column" flexShrink={0} paddingX={1} paddingTop={1} backgroundColor={theme.backgroundPanel}>
         {rows().map((r) => (
-          <text fg={theme.textMuted}>{r}</text>
+          <text fg={r.failed ? theme.error : theme.textMuted}>{r.text}</text>
         ))}
       </box>
     </Show>

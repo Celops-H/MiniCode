@@ -45,11 +45,13 @@ export interface ToolBlock {
   collapsedOutput: boolean;
 }
 
-/** 子 agent 活动行（派生/完成/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
- *  平时收敛成单行，点击展开（子 agent 结果应像工具一样支持展开/关闭） */
+/** 子 agent 活动行（派生/完成/失败/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
+ *  平时收敛成单行，点击展开（子 agent 结果应像工具一样支持展开/关闭）。
+ *  failed 是 AgentCompleted 的失败终态（驱动失败，结论为明确失败文本）：与正常完成分开成一种
+ *  展示态，消息区按红色错误样式显示，不与「完成」混淆 */
 export interface AgentActivityBlock {
   kind: "agent";
-  event: "spawned" | "completed" | "interrupted";
+  event: "spawned" | "completed" | "failed" | "interrupted";
   path: string;
   conclusion?: string;
   mergeResult?: string;
@@ -75,11 +77,11 @@ export interface CommandBlock {
 
 export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock | CommandBlock;
 
-/** agent 树节点：路径 + 运行/完成状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），
- *  完成条目在底栏树展示 10s 后消失，耗时 = completedAt - spawnedAt */
+/** agent 树节点：路径 + 运行/完成/失败/中断状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），
+ *  终态（完成/失败/中断）条目在底栏树展示 10s 后消失，耗时 = completedAt - spawnedAt */
 export interface AgentNode {
   path: string;
-  status: "running" | "completed" | "interrupted";
+  status: "running" | "completed" | "failed" | "interrupted";
   spawnedAt: number | null;
   completedAt: number | null;
 }
@@ -529,12 +531,14 @@ export function resetToNewState(state: TuiState): TuiState {
   };
 }
 
-/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠 / 子 agent 结论与合并）；导出供 loop 空输入展开交互复用 */
+/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠 / 子 agent 结论与合并，失败结论同样可展开）；
+ *  导出给视图判断是否挂折叠提示与悬停高亮——折叠动作 fold-at 也用同一份判定，两处条件保持同源 */
 export function isFoldable(block: BlockView): boolean {
   if (block.kind === "message") return Boolean(block.thinking);
   if (block.kind === "tool") return Boolean(block.args) || Boolean(block.output || block.error);
-  // 子 agent 有结论/合并结果才可折叠（派生/中断无内容不需折叠）
-  if (block.kind === "agent") return block.event === "completed" && Boolean(block.conclusion || block.mergeResult);
+  // 子 agent 有结论/合并结果才可折叠（派生/中断无内容不需折叠；失败结论是失败文本，同样可展开看全文）
+  if (block.kind === "agent")
+    return (block.event === "completed" || block.event === "failed") && Boolean(block.conclusion || block.mergeResult);
   return false;
 }
 
@@ -905,17 +909,20 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
           : [...state.agents, { path: event.path, status: "running", spawnedAt: event.spawnedAt ?? null, completedAt: null }],
         blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path, collapsed: true }],
       };
-    case "AgentCompleted":
+    case "AgentCompleted": {
+      // failed 标记的完成是失败终态（驱动/模型链失败，结论为明确失败文本，见 AgentCompleted 负载注释）：
+      // 树与活动行都按失败展示，不再与正常完成同形（此前失败与完成在界面上无任何区分）
+      const failed = event.failed === true;
       return {
         ...state,
         agents: state.agents.map((a) =>
-          a.path === event.path ? { ...a, status: "completed", completedAt: event.completedAt ?? null } : a,
+          a.path === event.path ? { ...a, status: failed ? "failed" : "completed", completedAt: event.completedAt ?? null } : a,
         ),
         blocks: [
           ...state.blocks,
           {
             kind: "agent",
-            event: "completed",
+            event: failed ? "failed" : "completed",
             path: event.path,
             conclusion: event.conclusion,
             mergeResult: event.mergeResult,
@@ -923,6 +930,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
           },
         ],
       };
+    }
     case "AgentInterrupted":
       return {
         ...state,

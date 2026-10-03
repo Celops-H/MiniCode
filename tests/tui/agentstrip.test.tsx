@@ -1,5 +1,6 @@
 /**
- * 层 1：底栏 agent 树——main 仅多 agent 显示、子 agent ( )/(√)+耗时、树线对齐父圆点/括号中心列、10s 消失。
+ * 层 1：底栏 agent 树——main 仅多 agent 显示、子 agent ( )/(√) 耗时/(!) 耗时/(×)、失败行整行红字、
+ * 树线对齐父圆点/括号中心列、终态 10s 消失。
  */
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
@@ -18,9 +19,29 @@ const done = (path: string, spawnedAt: number, completedAt: number): AgentNode =
   spawnedAt,
   completedAt,
 });
+const failed = (path: string, spawnedAt: number, completedAt: number): AgentNode => ({
+  path,
+  status: "failed",
+  spawnedAt,
+  completedAt,
+});
 
 const render = (agents: AgentNode[]) =>
   testRender(() => <AgentStrip agents={agents} />, { width: 40, height: 10 });
+
+/** 取首个含 text 的 span 的 fg（hex）；无匹配/无颜色返回 undefined */
+function spanFgOf(spans: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
+  for (const line of spans.lines) {
+    for (const span of line.spans) {
+      if (span.text.includes(text)) {
+        const buf = (span.fg as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+        if (!buf) return undefined;
+        return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+      }
+    }
+  }
+  return undefined;
+}
 
 it("仅 main（无子 agent）不显示底栏——main 只多 agent 启用时出现", async () => {
   const setup = await render([running("/root")]);
@@ -69,6 +90,44 @@ it("完成父被剪（超 10s）时运行中的子 agent 重挂最近存活祖�
   const mainLine = frame.split("\n").find((l) => l.includes("● main")) ?? "";
   const sub = frame.split("\n").find((l) => l.includes("( ) sub")) ?? "";
   expect(sub.indexOf("└")).toBe(mainLine.indexOf("●"));
+});
+
+it("子 agent 失败显示 (!) 名称 耗时，与完成 (√) 区分且 10s 后消失", async () => {
+  const t = Date.now();
+  const setup = await render([running("/root"), failed("/root/task_1", t - 3000, t)]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("(!) task_1 3s");
+  expect(frame).not.toContain("(√)"); // 失败不再显成完成
+  // 失败与完成、中断一样：终态 10s 后从树消失
+  const setup2 = await render([running("/root"), failed("/root/task_2", t - 20_000, t - 10_000)]);
+  await setup2.waitForVisualIdle();
+  expect(setup2.captureCharFrame()).not.toContain("task_2");
+});
+
+it("失败行整行红字，与完成行的灰字区分（多 agent 并行时一眼看出谁挂了）", async () => {
+  const t = Date.now();
+  const setup = await render([
+    running("/root"),
+    failed("/root/task_1", t - 2000, t),
+    done("/root/task_2", t - 1000, t),
+  ]);
+  await setup.waitForVisualIdle();
+  const spans = setup.captureSpans();
+  expect(spanFgOf(spans, "(!) task_1")).toBe("#e06c75"); // error 红
+  expect(spanFgOf(spans, "(√) task_2")).toBe("#8f9096"); // textMuted 灰
+  expect(spanFgOf(spans, "● main")).toBe("#8f9096"); // main 行不受影响
+});
+
+it("失败父节点仍按括号中心列对齐其子节点的树线", async () => {
+  const t = Date.now();
+  const setup = await render([running("/root"), failed("/root/task_1", t - 2000, t), running("/root/task_1/sub")]);
+  await setup.waitForVisualIdle();
+  const lines = setup.captureCharFrame().split("\n");
+  const t1 = lines.find((l) => l.includes("(!) task_1")) ?? "";
+  const sub = lines.find((l) => l.includes("( ) sub")) ?? "";
+  // (!) 与 ( )/(√) 同为两字符括号：子节点连接线对齐父括号中心列
+  expect(sub.indexOf("└")).toBe(t1.indexOf("(") + 1);
 });
 
 it("中断 (×) 名称 显示且 10s 后消失", async () => {
@@ -164,4 +223,7 @@ it("agentRowCount：仅 main=0；1 个子 agent 含 paddingTop=2 行（App 光�
   expect(agentRowCount([running("/root"), done("/root/task_1", 0, Date.now() - 1000)])).toBe(3); // 1s 前完成：10s 可见期内
   // 完成超 10s：消失 → 0
   expect(agentRowCount([running("/root"), done("/root/task_1", 0, 5000)], 20000)).toBe(0);
+  // 失败条目与完成同口径（renderTree 返回值改对象后行数计算不变）：10s 内计行、超时消失
+  expect(agentRowCount([running("/root"), failed("/root/task_1", 0, Date.now() - 1000)])).toBe(3);
+  expect(agentRowCount([running("/root"), failed("/root/task_1", 0, 5000)], 20000)).toBe(0);
 });

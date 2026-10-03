@@ -3,13 +3,14 @@
  * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你/模型=浅蓝、工具/思考/子agent=灰、
  * 通知=红警示），后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
  * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
- * 子 agent 活动行带结论/合并；错误块红色标记。
+ * 子 agent 活动行带结论/合并，失败终态按红色标记；错误块红色标记。
  * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
  * 所有展示状态在 state，本组件只读呈现。
  */
 import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
+import { isFoldable } from "../state.js";
 import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { messageScroller, noteScrollPosition, noteUserScroll } from "../scroll.js";
 import { theme } from "./theme.js";
@@ -28,10 +29,11 @@ function toolStatus(b: ToolBlock): { icon: string; fg: string } {
   }
 }
 
-/** 块来源 → 首行圆点标记的颜色（你=绿、模型=浅蓝、工具/思考/子agent=灰、通知=红警示） */
+/** 块来源 → 首行圆点标记的颜色（你=绿、模型=浅蓝、工具/思考/子agent=灰、子agent失败=红、通知=红警示） */
 function markerFor(b: BlockView): string {
   if (b.kind === "message") return b.role === "user" ? theme.success : theme.modelColor;
   if (b.kind === "tool") return theme.textMuted;
+  if (b.kind === "agent") return b.event === "failed" ? theme.error : theme.textMuted;
   if (b.kind === "notice") return theme.warning;
   return theme.textMuted;
 }
@@ -272,11 +274,13 @@ function hasOutput(b: ToolBlock): boolean {
   return Boolean(b.output || b.error);
 }
 
-/** 子 agent 活动行：派生/完成（结论+合并可折叠）/中断——结论/合并长内容平时收敛单行，
+/** 子 agent 活动行：派生/完成（结论+合并可折叠）/失败（失败文本，红字）/中断——结论长内容平时收敛单行，
  *  点击展开（子 agent 结果应像工具一样支持展开/关闭） */
 function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: () => void }): JSX.Element {
   const b = props.b;
-  const foldable = b.event === "completed" && Boolean(b.conclusion || b.mergeResult);
+  // 折叠判定复用 state 的 isFoldable（原先视图另抄了一份同样条件，改一处易漏改）；
+  // 工具卡片的参数与输出是两个独立开关，不走这里
+  const foldable = isFoldable(b);
   const h = useFoldHover(props.onFold);
   return (
     <box
@@ -288,14 +292,19 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
     >
       <text fg={h.fg()}>
         <span style={{ fg: theme.foregroundAccent }}>⑂</span> 子 agent [{b.path}]
-        {b.event === "spawned"
-          ? " 已派生"
-          : b.event === "completed"
-            ? ` 完成${b.conclusion ? ` · 输出 ${b.conclusion.trimEnd().split("\n").length} 行` : ""}${foldable && b.collapsed ? "（▸ 点击展开）" : ""}`
-            : " 中断"}
+        {b.event === "spawned" ? " 已派生" : null}
+        {b.event === "interrupted" ? " 中断" : null}
+        {/* 失败终态：红字「失败」，与完成的「完成」一眼分开（此前两者同形） */}
+        {b.event === "failed" ? <span style={{ fg: theme.error }}> 失败</span> : null}
+        {b.event === "completed" ? " 完成" : null}
+        {b.event === "completed" && b.conclusion
+          ? ` · 输出 ${b.conclusion.trimEnd().split("\n").length} 行`
+          : ""}
+        {foldable && b.collapsed ? "（▸ 点击展开）" : ""}
       </text>
       <Show when={foldable && !b.collapsed}>
-        <text fg={theme.textMuted}>
+        {/* 失败详情用红色，与工具卡片的错误详情同口径（失败是需要看见的信息，不压成普通灰字） */}
+        <text fg={b.event === "failed" ? theme.error : theme.textMuted}>
           {b.conclusion ? `结论：${b.conclusion}` : null}
           {b.conclusion && b.mergeResult ? "\n" : null}
           {b.mergeResult ? `合并：${b.mergeResult}` : null}

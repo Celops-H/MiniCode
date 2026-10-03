@@ -180,6 +180,32 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("中断");
   });
 
+  it("AgentCompleted(failed) 后底栏树显示 (!) 名、消息区显示失败活动行", async () => {
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 12 });
+    await setup.waitForVisualIdle();
+    setState(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 0 }));
+    await setup.waitForVisualIdle();
+    // 驱动失败终态：failed 标记的 AgentCompleted——树里 ( ) → (!)，消息区出现失败活动行
+    setState(
+      reduceHook(state, {
+        type: "AgentCompleted",
+        path: "/root/task_1",
+        parentPath: "/root",
+        conclusion: "子代理 task_1 失败：连接超时",
+        failed: true,
+        completedAt: Date.now(),
+      }),
+    );
+    await setup.waitForVisualIdle();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("(!) task_1");
+    expect(frame).not.toContain("(√) task_1");
+    expect(frame).toContain("子 agent [/root/task_1]");
+    expect(frame).toContain("失败");
+    expect(frame).not.toContain("完成");
+  });
+
   it("/session 打开后全屏化生效：消息区/输入框/状态行隐藏，关闭后恢复（全屏判定须响应式）", async () => {
     const [state, setState] = createStore<TuiState>(initState([], "标题"));
     const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 14 });

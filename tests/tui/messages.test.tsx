@@ -147,6 +147,40 @@ it("子 agent 结论展开后显示结论与合并（默认折叠，点击展开
   expect(frame).toContain("合并：2 处改动");
 });
 
+it("子 agent 失败活动行：红字「失败」与完成区分，失败文本可展开", async () => {
+  const collapsed = await app([
+    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
+  ]);
+  await collapsed.waitForVisualIdle();
+  const frame = collapsed.captureCharFrame();
+  expect(frame).toContain("子 agent [/root/task_1]");
+  expect(frame).toContain("失败");
+  expect(frame).not.toContain("完成");
+  expect(frame).toContain("点击展开");
+  expect(frame).not.toContain("连接超时"); // 折叠时失败文本不展示
+  // 失败行红字（error #e06c75），与工具失败的红色语义一致
+  expect(spanFgOf(collapsed.captureSpans(), "失败")).toBe("#e06c75");
+  // 首行圆点同步转红（失败块整块按错误语义显示，不只状态词）
+  expect(spanFgOf(collapsed.captureSpans(), "●")).toBe("#e06c75");
+  // 展开显示失败文本（结论）
+  const expanded = await app([
+    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: false },
+  ]);
+  await expanded.waitForVisualIdle();
+  expect(expanded.captureCharFrame()).toContain("结论：子代理 task_1 失败：连接超时");
+});
+
+it("同屏失败与完成块各按自身状态着色（不互相串色）", async () => {
+  const setup = await app([
+    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
+    { kind: "agent", event: "completed", path: "/root/task_2", conclusion: "已合并分区逻辑", collapsed: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const spans = setup.captureSpans();
+  expect(spanFgOf(spans, "失败")).toBe("#e06c75"); // 失败块红
+  expect(spanFgOf(spans, "完成")).toBe("#8f9096"); // 完成块保持灰
+});
+
 it("流式尾显示思考与增量文本", async () => {
   const setup = await app([], { text: "正在处理…", thinking: "展开中" });
   await setup.waitForVisualIdle();
