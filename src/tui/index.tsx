@@ -219,7 +219,10 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         continue;
       }
       if (!result.switchTo) break;
-      // /session 切换：视图按新会话消息重建
+      // /session 切换：重读配置再进新会话——技能清单等装配输入按最新配置生效
+      //（技能开关变更不重装配、提示下个会话生效，切换型会话是进程内最主要的「下个会话」入口）；
+      // 视图按新会话消息重建
+      config = await loadConfig();
       session =
         result.switchTo === NEW_SESSION_ID
           ? await store.createSession({ model: modelId })

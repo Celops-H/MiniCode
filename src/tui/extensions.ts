@@ -136,6 +136,26 @@ export function diffExtensionRows(
   return rows.filter((r) => base.get(r.id) !== undefined && base.get(r.id) !== r.enabled);
 }
 
+/**
+ * 技能开关改动后的关闭名单同步（纯函数便于测试）：启用移出名单、关闭加入名单。
+ * 技能变更不做会话内重装配（清单在会话开始时注入系统提示词，下个会话生效），
+ * 会话内持一份活名单在写盘成功后就地同步，重开 /skill 面板的启用态才与已写配置一致。
+ * @param disabled 当前关闭名单（会话内活副本）
+ * @param changed 改动行（enabled 为切换后的新状态）
+ * @returns 同步后的关闭名单
+ */
+export function syncDisabledList(
+  disabled: string[],
+  changed: Array<{ id: string; enabled: boolean }>,
+): string[] {
+  const off = new Set(disabled);
+  for (const row of changed) {
+    if (row.enabled) off.delete(row.id);
+    else off.add(row.id);
+  }
+  return [...off];
+}
+
 /** 读 config 原始 JSON；文件不存在返回 {}，解析失败抛错（坏配置不该被静默重置）。
  *  导出供 /settings 面板复用（settings.ts 同一套写盘风格） */
 export async function readConfigRaw(file: string): Promise<Record<string, unknown>> {

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { mapKey } from "../../src/tui/keymap.js";
-import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled } from "../../src/tui/extensions.js";
+import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList } from "../../src/tui/extensions.js";
 import type { McpServerStatus } from "../../src/mcp/index.js";
 import type { SkillInfo } from "../../src/skills/index.js";
 
@@ -163,6 +163,17 @@ describe("setMcpServerEnabled / setSkillDisabled（写回定义层）", () => {
       { id: "new", label: "new", detail: "", enabled: true },
     ];
     expect(diffExtensionRows(baseline, rows).map((r) => r.id)).toEqual(["b"]);
+  });
+
+  it("syncDisabledList：关闭加入名单、启用移出名单，不改名单外的项", () => {
+    expect(syncDisabledList(["old"], [
+      { id: "a", enabled: false },
+      { id: "b", enabled: true },
+    ])).toEqual(["old", "a"]);
+    // 名单内的项启用后移出
+    expect(syncDisabledList(["a", "b"], [{ id: "b", enabled: true }])).toEqual(["a"]);
+    // 已在名单里再关闭不重复加入
+    expect(syncDisabledList(["a"], [{ id: "a", enabled: false }])).toEqual(["a"]);
   });
 });
 
