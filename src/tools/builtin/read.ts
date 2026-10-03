@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
@@ -27,6 +27,18 @@ export const readTool: Tool = {
       limit?: number;
     }>(readTool, input);
     const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd
+    // 目录目标先识别：readFile 打在目录上只会抛 EISDIR 裸系统错误，模型无从纠偏。
+    // 列出条目并提示读文件给具体路径、按模式找文件用 glob，按正常结果返回
+    const target = await stat(file);
+    if (target.isDirectory()) {
+      const entries = await readdir(file, { withFileTypes: true });
+      const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
+      return [
+        `「${path}」是目录，不是文件。目录下 ${entries.length} 个条目，带 / 的是子目录：`,
+        ...names,
+        "读文件内容请给出具体文件路径；按名称模式找文件用 glob 工具。",
+      ].join("\n");
+    }
     const content = await readFile(file, "utf8");
     // 记录版本令牌：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
     const fileState = currentFileState();

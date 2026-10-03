@@ -49,6 +49,27 @@ describe("文件类内置工具", () => {
     expect(out).toBe("2\t二\n3\t三");
   });
 
+  it("read 打在目录上时列出条目并给指路提示，不抛 EISDIR 裸错误", async () => {
+    const dir = setup();
+    mkdirSync(path.join(dir, "子目录"));
+    writeFileSync(path.join(dir, "a.txt"), "内容");
+    const out = await tool("read").execute({ path: dir });
+    expect(out).toContain("是目录，不是文件");
+    expect(out).toContain("2 个条目");
+    expect(out).toContain("子目录/");
+    expect(out).toContain("a.txt");
+    expect(out).toContain("glob");
+  });
+
+  it("read 打在空目录上时提示 0 个条目与指路，不抛 EISDIR 裸错误", async () => {
+    const dir = setup();
+    mkdirSync(path.join(dir, "empty"));
+    const out = await tool("read").execute({ path: path.join(dir, "empty") });
+    expect(out).toContain("是目录，不是文件");
+    expect(out).toContain("0 个条目");
+    expect(out).toContain("glob");
+  });
+
   it("write 写入文件并自动创建父目录", async () => {
     const dir = setup();
     const file = path.join(dir, "sub", "b.txt");
