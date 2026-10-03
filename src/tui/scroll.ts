@@ -66,3 +66,15 @@ export function forceScrollToBottom(): void {
   messageScroller.userScrolled = false;
   messageScroller.box?.scrollToBottom();
 }
+
+/**
+ * 视口高度变化后的跟随回底：仅跟随态（非读历史）生效。
+ * 输入框长高/回落、终端改行数都会收缩/扩张消息区视口；opentui 对视口变化的自带吸附
+ * 只在「内部手动滚动标记」为假时生效，该标记会被内容一帧内跳变误置位，且只有内容
+ * 增长事件能自愈——空闲打字恰好没有内容事件，标记残留时视口收缩不回底，
+ * 最后几行被输入框挡住。这里按本模块的跟随标记兜底回底（回落单行时同步收拢，不留空行）。
+ */
+export function followOnViewportResize(): void {
+  if (messageScroller.userScrolled) return;
+  messageScroller.box?.scrollToBottom();
+}

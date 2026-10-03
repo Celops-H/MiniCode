@@ -5,10 +5,11 @@
  */
 import { testRender } from "@opentui/solid";
 import { createStore } from "solid-js/store";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
 import { initState, reduceHook, type TuiState } from "../../src/tui/state.js";
+import { messageScroller } from "../../src/tui/scroll.js";
 import { assistantMessage } from "../../src/core/index.js";
 
 /** 取首个文本等于 text 的 span 的 fg 颜色（hex）；无匹配或无颜色返回 undefined */
@@ -290,5 +291,90 @@ describe("view/App 渲染链", () => {
     setState({ contextTokens: 90000 });
     await setup.waitForVisualIdle();
     expect(textFgContaining(setup.captureSpans(), "上下文 90%")).toBe("#e06c75");
+  });
+});
+
+describe("输入框高度与消息区让位", () => {
+  afterEach(() => {
+    messageScroller.box = null;
+    messageScroller.userScrolled = false;
+  });
+
+  /** 30 条助手消息撑出滚动（每条 1 行正文），返回 store 与setter */
+  function scrollableState() {
+    const messages = Array.from({ length: 30 }, (_, i) =>
+      assistantMessage([{ type: "text", text: `模型回复内容 ${i}` }]),
+    );
+    return createStore<TuiState>(initState(messages, "", "m"));
+  }
+
+  function maxScrollTop(): number {
+    const box = messageScroller.box!;
+    return Math.max(0, box.scrollHeight - box.viewportHeight);
+  }
+
+  /** 构造「内部手动滚动标记残留」态：滚离底部置位 opentui 内部标记后，
+   *  本模块跟随标记被复位。生产中该残留由内容一帧内跳变的吸附误判造成，
+   *  空闲期没有内容事件自愈——输入框长高时视口收缩，opentui 自带吸附不生效 */
+  async function staleStickyState(
+    setup: Awaited<ReturnType<typeof testRender>>,
+  ): Promise<void> {
+    messageScroller.userScrolled = true;
+    messageScroller.box!.scrollToTop();
+    await setup.waitForVisualIdle();
+    messageScroller.userScrolled = false;
+    await setup.waitForVisualIdle();
+  }
+
+  it("输入框长高后消息区视口收缩并跟随回底，最后几行始终可见", async () => {
+    const [state, setState] = scrollableState();
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, {
+      width: 60,
+      height: 20,
+    });
+    await setup.waitForVisualIdle();
+    await staleStickyState(setup);
+    // 输入框长高到 5 行：消息区让位收缩，且跟随回底——底部消息不被挡
+    setState({ prompt: { ...state.prompt, lines: ["a", "b", "c", "d", "e"], curLine: 4, curCol: 1 } });
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("模型回复内容 29");
+    expect(messageScroller.box!.viewportHeight).toBeLessThan(16);
+    expect(messageScroller.box!.scrollTop).toBeGreaterThanOrEqual(maxScrollTop() - 1);
+  });
+
+  it("输入框回落单行后同步收拢回底，不留空行不跳动", async () => {
+    const [state, setState] = scrollableState();
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, {
+      width: 60,
+      height: 20,
+    });
+    await setup.waitForVisualIdle();
+    setState({ prompt: { ...state.prompt, lines: ["a", "b", "c", "d", "e"], curLine: 4, curCol: 1 } });
+    await setup.waitForVisualIdle();
+    await staleStickyState(setup);
+    const grownViewport = messageScroller.box!.viewportHeight;
+    // 回落单行：视口扩张回原高度，跟随态回底——底部消息贴着输入框上沿显示
+    setState({ prompt: { ...state.prompt, lines: ["a"], curLine: 0, curCol: 1 } });
+    await setup.waitForVisualIdle();
+    expect(messageScroller.box!.viewportHeight).toBeGreaterThan(grownViewport);
+    expect(setup.captureCharFrame()).toContain("模型回复内容 29");
+    expect(messageScroller.box!.scrollTop).toBeGreaterThanOrEqual(maxScrollTop() - 1);
+  });
+
+  it("读历史态（userScrolled）输入框长高不拽回底部", async () => {
+    // 本例锁门控：无 userScrolled 判断时兜底会把读历史视口拽回底部。
+    // 有修复与否 opentui 自带吸附都因内部标记置位不动作，故此例不用于证伪兜底本身
+    const [state, setState] = scrollableState();
+    const setup = await testRender(() => <App state={state} onAction={() => {}} />, {
+      width: 60,
+      height: 20,
+    });
+    await setup.waitForVisualIdle();
+    messageScroller.userScrolled = true;
+    messageScroller.box!.scrollToTop();
+    await setup.waitForVisualIdle();
+    setState({ prompt: { ...state.prompt, lines: ["a", "b", "c"], curLine: 2, curCol: 1 } });
+    await setup.waitForVisualIdle();
+    expect(messageScroller.box!.scrollTop).toBe(0);
   });
 });

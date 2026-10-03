@@ -12,7 +12,7 @@ import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import { isFoldable } from "../state.js";
 import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
-import { messageScroller, noteScrollPosition, noteUserScroll } from "../scroll.js";
+import { messageScroller, noteScrollPosition, noteUserScroll, followOnViewportResize } from "../scroll.js";
 import { theme } from "./theme.js";
 
 /** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗 */
@@ -375,10 +375,18 @@ export function Messages(props: {
     const box = el as {
       scrollTop: number;
       scrollHeight: number;
-      viewport: { height: number };
+      viewport: { height: number; onSizeChange?: () => void };
       onMouseEvent?: (e: unknown) => void;
       scrollBy: (delta: number, unit?: "absolute" | "viewport") => void;
       verticalScrollBar?: { slider?: { onChange?: (value: number) => void } };
+    };
+    // 视口高度变化（输入框长高/回落让位、终端改行数）：跟随态下兜底回底。
+    // 原回调是 opentui 内部滚动条重算，必须保留调用，只在其后追加跟随兜底
+    const viewport = box.viewport;
+    const origOnSizeChange = viewport.onSizeChange;
+    viewport.onSizeChange = () => {
+      origOnSizeChange?.();
+      followOnViewportResize();
     };
     const orig = box.onMouseEvent?.bind(box);
     box.onMouseEvent = (e: unknown) => {
