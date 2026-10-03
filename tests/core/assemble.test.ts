@@ -34,9 +34,68 @@ describe("事件收集器", () => {
       ),
     );
     expect(msg.content).toEqual([
-      { type: "text", text: "答案" },
       { type: "thinking", thinking: "推理" },
+      { type: "text", text: "答案" },
     ]);
+  });
+
+  it("思考签名并进同序号思考块（同模型回传校验必需）", async () => {
+    const msg = await assembleAssistantMessage(
+      events(
+        { type: "thinking_delta", thinking: "推理", index: 0 },
+        { type: "thinking_signature", index: 0, signature: "sig-1" },
+        { type: "text_delta", text: "答案" },
+        { type: "done", stopReason: "end_turn" },
+      ),
+    );
+    expect(msg.content).toEqual([
+      { type: "thinking", thinking: "推理", signature: "sig-1" },
+      { type: "text", text: "答案" },
+    ]);
+  });
+
+  it("多思考块按序号各归一块，签名各随其块（交叉思考形态）", async () => {
+    const msg = await assembleAssistantMessage(
+      events(
+        { type: "thinking_delta", thinking: "第一段", index: 0 },
+        { type: "thinking_signature", index: 0, signature: "sig-0" },
+        { type: "thinking_delta", thinking: "第二段", index: 2 },
+        { type: "thinking_signature", index: 2, signature: "sig-2" },
+        { type: "toolcall_start", index: 1, id: "c1", name: "read" },
+        { type: "toolcall_end", index: 1 },
+        { type: "done", stopReason: "tool_calls" },
+      ),
+    );
+    expect(msg.content).toEqual([
+      { type: "thinking", thinking: "第一段", signature: "sig-0" },
+      { type: "thinking", thinking: "第二段", signature: "sig-2" },
+      { type: "tool_call", id: "c1", name: "read", input: {} },
+    ]);
+  });
+
+  it("加密思考块保留为 redactedData（无明文也产出内容块，供同模型回传解密）", async () => {
+    const msg = await assembleAssistantMessage(
+      events(
+        { type: "redacted_thinking", index: 0, data: "encrypted-blob" },
+        { type: "text_delta", text: "答案" },
+        { type: "done", stopReason: "end_turn" },
+      ),
+    );
+    expect(msg.content).toEqual([
+      { type: "thinking", thinking: "", redactedData: "encrypted-blob" },
+      { type: "text", text: "答案" },
+    ]);
+  });
+
+  it("无序号的思考增量归同一块（openai 链无块概念，行为不变）", async () => {
+    const msg = await assembleAssistantMessage(
+      events(
+        { type: "thinking_delta", thinking: "甲" },
+        { type: "thinking_delta", thinking: "乙" },
+        { type: "done", stopReason: "end_turn" },
+      ),
+    );
+    expect(msg.content).toEqual([{ type: "thinking", thinking: "甲乙" }]);
   });
 
   it("工具调用增量拼接并解析参数", async () => {
@@ -117,8 +176,8 @@ describe("事件收集器", () => {
       ),
     );
     expect(kept.content).toEqual([
-      { type: "text", text: "\n答案\n" },
       { type: "thinking", thinking: "\n推理\n" },
+      { type: "text", text: "\n答案\n" },
     ]);
   });
 

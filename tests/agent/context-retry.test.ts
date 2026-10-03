@@ -90,3 +90,92 @@ function makeToolRound(): Message[] {
   ];
 }
 
+describe("历史改写后组装剥 thinking 块", () => {
+  /** 早期工具回合：assistant 带思考块 + tool_result（剥最近一组后仍留在历史里） */
+  const initial: Message[] = [
+    userMessage("先看看"),
+    assistantMessage([
+      { type: "thinking", thinking: "早期思考" },
+      { type: "tool_call", id: "r0", name: "read", input: {} },
+    ]),
+    toolResultMessage("r0", "read", "旧内容", false),
+    userMessage("读文件"),
+    ...makeToolRound(),
+  ];
+
+  interface SeenRequest {
+    messages: Message[];
+    thinkingLevel: string | undefined;
+  }
+
+  function stripAwareClient(seenRequests: SeenRequest[]): ModelClient {
+    let calls = 0;
+    return {
+      async *stream(_modelId, context) {
+        calls++;
+        // 拷贝：context 持有内部数组引用，断言时点会漂移
+        seenRequests.push({ messages: [...context.messages], thinkingLevel: context.thinkingLevel });
+        if (calls === 1) {
+          // 命中超窗判定但不带可解析缺口数字：按「剥最近一组」重试，早期工具回合（含思考块）保留
+          throw new Error("prompt is too long");
+        }
+        yield { type: "text_delta", text: `第 ${calls} 次回复` };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+  }
+
+  it("剥组重试的请求剥掉 thinking 块（工具调用与结果保留），内部历史不动", async () => {
+    const seenRequests: SeenRequest[] = [];
+    const agent = new Agent({
+      modelClient: stripAwareClient(seenRequests),
+      modelId: "mock",
+      systemPrompt: "助手",
+      thinkingLevelRef: () => "high",
+      initialMessages: initial,
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(seenRequests.length).toBe(2);
+    // 首次请求：thinking 块在、思考等级照常
+    expect(seenRequests[0]!.messages.some((m) => m.role === "assistant")).toBe(true);
+    expect(seenRequests[0]!.thinkingLevel).toBe("high");
+    // 重发请求：thinking 块被剥掉，同一条 assistant 的工具调用保留；
+    // 思考等级一并撤下（严格校验端点要求带 thinking 参数的请求以 thinking 块开头，剥块后照发会反复 400）
+    const retried = seenRequests[1]!;
+    const early = retried.messages.find((m) => m.role === "assistant")!;
+    expect(early.content.some((b) => b.type === "thinking")).toBe(false);
+    expect(early.content.some((b) => b.type === "tool_call")).toBe(true);
+    expect(retried.thinkingLevel).toBeUndefined();
+    // 剥块只影响请求视图：内部历史仍保留思考块（未改写场景同模型要带签名回传）
+    const internal = agent.getMessages().find((m) => m.role === "assistant")!;
+    expect(internal.content.some((b) => b.type === "thinking")).toBe(true);
+  });
+
+  it("改写标记被宿主消费复位后，下一轮请求恢复回传 thinking 块与思考等级", async () => {
+    const seenRequests: SeenRequest[] = [];
+    const agent = new Agent({
+      modelClient: stripAwareClient(seenRequests),
+      modelId: "mock",
+      systemPrompt: "助手",
+      thinkingLevelRef: () => "high",
+      initialMessages: initial,
+    });
+    agent.start("继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(agent.consumeHistoryRewritten()).toBe(true); // 宿主轮末消费（复位标记）
+    agent.start("再继续");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    const next = seenRequests[2]!;
+    const early = next.messages.find((m) => m.role === "assistant")!;
+    expect(early.content.some((b) => b.type === "thinking")).toBe(true);
+    expect(next.thinkingLevel).toBe("high");
+  });
+});
+

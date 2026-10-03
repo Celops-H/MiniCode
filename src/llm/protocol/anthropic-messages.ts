@@ -5,8 +5,9 @@ import { InlineTagFilter } from "./tag-stream.js";
 interface AnthropicChunk {
   type?: string;
   index?: number;
-  /** text/thinking 块可能把首段内容放在 start 而非 delta（部分兼容端点） */
-  content_block?: { type?: string; id?: string; name?: string; text?: string; thinking?: string };
+  /** text/thinking 块可能把首段内容放在 start 而非 delta（部分兼容端点）；
+   *  redacted_thinking 块的加密数据在 start 携带（data 字段） */
+  content_block?: { type?: string; id?: string; name?: string; text?: string; thinking?: string; data?: string };
   /** message_start 携带的用量（input_tokens，output_tokens 为流初值）；
    *  cache 字段为补充（缓存读命中与缓存写入，官方语义 input_tokens 不含缓存段） */
   message?: {
@@ -21,6 +22,8 @@ interface AnthropicChunk {
     type?: string;
     text?: string;
     thinking?: string;
+    /** signature_delta 携带的思考块签名（思考文本增量之后到达） */
+    signature?: string;
     partial_json?: string;
     stop_reason?: string;
     /** message_delta 携带的用量（output_tokens 为累计最终值；cache 字段同为累计值时取最后一次） */
@@ -38,17 +41,18 @@ export class AnthropicMessagesProtocol implements Protocol {
   readonly type = "anthropic-messages" as const;
 
   /**
-   * 统一 Context → Anthropic messages 请求体；model 与 stream 参数由 Provider 组装。
+   * 统一 Context → Anthropic messages 请求体；stream 参数由 Provider 组装。
+   * 思考块按目标模型转换：同模型回传带签名/加密块原样发（续跑校验必需），
+   * 异模型降级为标签文本（签名跨模型无效）；目标模型由 model.id 与消息 meta.model 对比。
    * @param context 一次模型调用的完整输入
-   * @param _model 本次请求的模型定义（Protocol 接口统一签名；anthropic 协议的思考参数
-   *   在 Provider 层组装，模型能力位此处不消费）
+   * @param model 本次请求的模型定义（同模型判定来源，可省略；省略时一律按异模型降级）
    * @returns Anthropic messages 请求体（不含 model / stream）
    */
-  buildRequest(context: Context, _model?: ModelInfo): unknown {
+  buildRequest(context: Context, model?: ModelInfo): unknown {
     return {
       // 系统提示词放顶层 system 字段（Anthropic 约定；空串不占位，厂商拒空 system）
       ...(context.systemPrompt ? { system: context.systemPrompt } : {}),
-      messages: toAnthropicMessages(context.messages),
+      messages: toAnthropicMessages(context.messages, model?.id),
       ...(context.tools.length > 0 ? { tools: context.tools.map(toAnthropicTool) } : {}),
     };
   }
@@ -56,6 +60,7 @@ export class AnthropicMessagesProtocol implements Protocol {
   /**
    * 解析 Anthropic 流式响应，转成统一事件流。
    * tool_use 参数经 input_json_delta 增量到达；content_block 的 index 映射为工具调用序号。
+   * 思考块按内容块序号发思考增量与签名（signature_delta），redacted_thinking 块整块发加密数据。
    * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件），按 content
    * 块生命周期各用一份，见 tag-stream.ts。
    * @param stream Anthropic 原始流式事件对象
@@ -122,9 +127,17 @@ export class AnthropicMessagesProtocol implements Protocol {
               };
               break;
             }
-            // text/thinking 块：start 可能已携带首段内容（部分兼容端点不放 delta）
+            // text/thinking 块：start 可能已携带首段内容（部分兼容端点不放 delta）；
+            // redacted_thinking 块整块到达（加密数据无增量）
             if (block.type === "thinking") {
-              if (block.thinking) yield { type: "thinking_delta", thinking: block.thinking };
+              if (block.thinking) {
+                yield { type: "thinking_delta", thinking: block.thinking, index: blockIndex };
+              }
+            } else if (block.type === "redacted_thinking") {
+              // data 缺失/为空的畸形块直接丢：空加密块回传会被严格校验端点拒收
+              if (block.data) {
+                yield { type: "redacted_thinking", index: blockIndex, data: block.data };
+              }
             } else if (block.text) {
               for (const out of pushText(blockIndex, block.text)) yield out;
             }
@@ -140,7 +153,14 @@ export class AnthropicMessagesProtocol implements Protocol {
               }
             } else if (delta?.type === "thinking_delta") {
               // 字段缺失不发空事件（部分兼容端点发空 delta，全空流会产出空内容块）
-              if (delta.thinking) yield { type: "thinking_delta", thinking: delta.thinking };
+              if (delta.thinking) {
+                yield { type: "thinking_delta", thinking: delta.thinking, index: blockIndex };
+              }
+            } else if (delta?.type === "signature_delta") {
+              // 思考块签名：与思考文本同属一个内容块，按块序号归块
+              if (delta.signature) {
+                yield { type: "thinking_signature", index: blockIndex, signature: delta.signature };
+              }
             } else if (delta?.type === "input_json_delta") {
               // 映射不到块 index 的参数增量直接跳过：兜底并到工具 0 会污染它的参数流
               const toolIndex = toolIndexByBlock.get(blockIndex);
@@ -229,15 +249,17 @@ export class AnthropicMessagesProtocol implements Protocol {
 
 /**
  * 统一消息 → Anthropic 消息；工具结果归并进 user 消息（Anthropic 要求）。
+ * 思考块按目标模型转换（见 toAnthropicBlock）。
  * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过：与 openai 侧
  * buildRequest 的过滤对称，跨协议切模型续跑不再把它发给严格校验端点吃 400。
  * 跳过（以及错误轮紧跟工具轮等形态）会让历史出现相邻同角色的 user 消息，而严格
  * 校验端点要求角色交替——相邻 user 合并为一条（内容块数组并列，顺序不变），
  * 请求体不再产生相邻同角色消息。
  * @param messages 统一格式消息数组
+ * @param targetModelId 目标模型 id（与消息 meta.model 对比判同模型），可省略
  * @returns Anthropic 消息参数数组
  */
-function toAnthropicMessages(messages: Message[]): unknown[] {
+function toAnthropicMessages(messages: Message[], targetModelId?: string): unknown[] {
   const out: unknown[] = [];
   let pendingToolResults: Array<Record<string, unknown>> = [];
 
@@ -267,11 +289,19 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
         flushToolResults();
         pushUser(message.content);
         break;
-      case "assistant":
+      case "assistant": {
         if (message.content.length === 0) break;
         flushToolResults();
-        out.push({ role: "assistant", content: message.content.map(toAnthropicBlock) });
+        // 同模型判定：meta.model 记录产出消息的模型 id，与目标一致才原样回传思考块
+        //（无 meta.model 的历史消息按异模型降级，方向安全）
+        const sameModel = message.meta?.model !== undefined && message.meta.model === targetModelId;
+        const blocks = message.content
+          .map((block) => toAnthropicBlock(block, sameModel))
+          .filter((block) => block !== null);
+        if (blocks.length === 0) break;
+        out.push({ role: "assistant", content: blocks });
         break;
+      }
       case "tool_result":
         pendingToolResults.push({
           type: "tool_result",
@@ -287,16 +317,30 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
 }
 
 /**
- * 内容块 → Anthropic content block。
+ * 内容块 → Anthropic content block；思考块按目标模型转换。
  * @param block 统一格式内容块（text / thinking / tool_call）
- * @returns Anthropic 内容块对象
+ * @param sameModel 思考块来源模型与目标模型是否一致：一致时带签名 thinking 与
+ *   加密块原样回传（厂商侧校验/解密）；不一致时签名跨模型无效，有明文转标签文本、
+ *   空思考与加密块直接丢
+ * @returns Anthropic 内容块对象；思考块被丢弃时 null（调用方过滤）
  */
-function toAnthropicBlock(block: ContentBlock): Record<string, unknown> {
+function toAnthropicBlock(block: ContentBlock, sameModel: boolean): Record<string, unknown> | null {
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text };
     case "thinking":
-      // continuation 需要 signature，统一模型无此字段，退化为文本
+      if (sameModel) {
+        if (block.redactedData !== undefined) {
+          return { type: "redacted_thinking", data: block.redactedData };
+        }
+        if (!block.thinking) return null;
+        return {
+          type: "thinking",
+          thinking: block.thinking,
+          ...(block.signature ? { signature: block.signature } : {}),
+        };
+      }
+      if (!block.thinking) return null;
       return { type: "text", text: `<thinking>${block.thinking}</thinking>` };
     case "tool_call":
       return { type: "tool_use", id: block.id, name: block.name, input: block.input };

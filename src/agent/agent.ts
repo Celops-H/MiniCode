@@ -460,10 +460,12 @@ export class Agent {
     let firstEventMs: number | undefined;
     let usage: ModelUsage | undefined;
     let stopReason: string | undefined;
+    // 收尾实际产出模型：路由切到备选时更新，署名与同模型回传判定都靠它（meta.model）
+    let effectiveModel = this.modelId;
     const collected: StreamEvent[] = [];
     try {
       // 收尾调用不带工具：模型只能产出文本结论（正常轮工具循环可能就是撞线主因）
-      const context = createContext(this.systemPrompt, this.messages, [], this.thinkingLevelRef?.());
+      const context = createContext(this.systemPrompt, this.requestMessages(), [], this.contextThinkingLevel());
       for await (const event of withInterruptTimeout(
         this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
         this.interruptController.signal,
@@ -475,11 +477,14 @@ export class Agent {
           stopReason = event.stopReason;
           usage = event.usage;
         }
+        if (event.type === "model_fallback") {
+          effectiveModel = event.to;
+        }
         collected.push(event);
         yield event;
       }
       await this.emitLlmCallEnd({
-        model: this.modelId,
+        model: effectiveModel,
         durationMs: Date.now() - startedAt,
         firstEventMs,
         usage,
@@ -488,7 +493,7 @@ export class Agent {
       });
     } catch (err) {
       await this.emitLlmCallEnd({
-        model: this.modelId,
+        model: effectiveModel,
         durationMs: Date.now() - startedAt,
         firstEventMs,
         error: err instanceof Error ? err.message : String(err),
@@ -502,7 +507,7 @@ export class Agent {
     // 打断或未收到任何流事件（拼不出消息）：不发截断 Stop，结论由占位/失败路径兜底
     if (this.interruptController.signal.aborted || collected.length === 0) return;
     const assistant = await assembleAssistantMessage(toAsyncIterable(collected));
-    assistant.meta = { ...assistant.meta, model: this.modelId };
+    assistant.meta = { ...assistant.meta, model: effectiveModel };
     await this.appendMessage(assistant);
     await this.safeEmit({ type: "Stop", agentPath, reason: "max_turns" });
   }
@@ -532,7 +537,7 @@ export class Agent {
         await this.appendMessage(userMessage(formatMailMessage(mail), "system"));
       }
     }
-    let context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
+    let context = createContext(this.systemPrompt, this.requestMessages(), this.registry.definitions(), this.contextThinkingLevel());
     const collected: StreamEvent[] = [];
     const agentPath = this.agentPath?.toString() ?? "/root";
     // 本轮实际产出模型：路由切到备选时更新，组装后写入消息 meta 供署名/重演一致展示
@@ -652,7 +657,7 @@ export class Agent {
         // 小于覆盖点即越界——收回到新数组长度内兜底；剩余长度仍覆盖点的场景下
         // 前移导致的「未覆盖消息被当已覆盖」按剥组应急丢弃语义接受（被剥消息本就丢弃）
         this.memoryCovered = Math.min(this.memoryCovered, this.messages.length);
-        context = createContext(this.systemPrompt, this.messages, this.registry.definitions(), this.thinkingLevelRef?.());
+        context = createContext(this.systemPrompt, this.requestMessages(), this.registry.definitions(), this.contextThinkingLevel());
         collected.length = 0;
         retryAttempts++;
       }
@@ -942,6 +947,32 @@ export class Agent {
       await emitCompact(false, err instanceof Error ? err.message : String(err));
       return false;
     }
+  }
+
+  /**
+   * 组装请求用的消息视图：历史被改写过（裁剪/压缩/超窗剥组）时剥掉 thinking 块再发。
+   * 改写后思考对应的现场已不在（工具输出变裁剪标记、消息换摘要），回传思考没有意义，
+   * 且改写点之后的请求前缀本已变化，此时剥块保持此后请求前缀稳定；
+   * 未改写时原样回传（同模型思考块带签名，续跑校验必需）。切模型不做隐式压缩，
+   * 改写与否只看本标记，与目标模型无关。
+   * @returns 请求用消息数组（未改写时为内部数组的原引用）
+   */
+  private requestMessages(): Message[] {
+    if (!this.historyRewritten) return this.messages;
+    return this.messages.map((m) =>
+      m.role === "assistant" ? { ...m, content: m.content.filter((b) => b.type !== "thinking") } : m,
+    );
+  }
+
+  /**
+   * 请求思考等级：历史被改写（thinking 块已剥）时不带。
+   * 带 thinking 参数的请求要求最后一条 assistant 以 thinking 块开头（严格校验端点），
+   * 剥块后照发会反复 400 烧完重试额度；不带则该轮退回厂商默认思考行为，请求必达。
+   * @returns 思考等级；历史被改写过时 undefined
+   */
+  private contextThinkingLevel(): ThinkingLevel | undefined {
+    if (this.historyRewritten) return undefined;
+    return this.thinkingLevelRef?.();
   }
 
   /**

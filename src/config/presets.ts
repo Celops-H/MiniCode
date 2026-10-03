@@ -78,6 +78,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://api.moonshot.cn/anthropic",
     apiKeyEnv: "MOONSHOT_API_KEY",
     protocol: "anthropic-messages",
+    // 两模型都支持 thinking 参数（k3 默认开启可关；k2.7-code 强制开启，缺参数请求被拒）
+    reasoningModels: ["kimi-k3", "kimi-k2.7-code"],
     models: ["kimi-k3", "kimi-k2.7-code"],
     defaultModel: "kimi-k3",
   },
@@ -110,6 +112,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://open.bigmodel.cn/api/anthropic",
     apiKeyEnv: "ZHIPU_API_KEY",
     protocol: "anthropic-messages",
+    // GLM-5.3 系列均支持思考（端点按 Claude Code 语义接 thinking 参数与 effort 映射）
+    reasoningModels: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flash[1m]"],
     models: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flash[1m]"],
     defaultModel: "glm-5.3",
   },

@@ -212,6 +212,49 @@ describe("Team（注册表与并发限制）", () => {
     expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
   });
 
+  it("子 agent 收尾调用路由切到备选：消息署名跟随备选（同模型回传判定依赖 meta.model）", async () => {
+    const fallbackFinalClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          // 收尾调用：主模型流内失败，路由切到备选后继续产出
+          yield { type: "model_fallback", from: "mock", to: "backup", reason: "error" };
+          yield { type: "text_delta", text: "收尾结论：备选模型产出" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
+        yield { type: "toolcall_end", index: 0 };
+        yield { type: "done", stopReason: "tool_calls" };
+      },
+    };
+    const team = new Team({ hooks: new HookBus() });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: fallbackFinalClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      maxTurns: 1,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 收尾产出记到实际产出模型名下：meta.model 是同模型回传判定依据，记错主模型会把
+    // 备选模型的签名发给主模型
+    const lastAssistant = child.getMessages().findLast((m) => m.role === "assistant");
+    expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
+    expect(lastAssistant?.meta?.model).toBe("backup");
+  });
+
   it("子 agent 撞上限且收尾调用失败：失败终态回灌，父拿到撞上限的明确失败文本", async () => {
     const failingFinalClient: ModelClient = {
       async *stream(_modelId, context) {

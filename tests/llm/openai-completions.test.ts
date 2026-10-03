@@ -167,6 +167,19 @@ describe("buildRequest：消息与工具转换", () => {
     });
   });
 
+  it("reasoningContent 模式：无思考的 assistant 也带 reasoning_content 空串（缺思考补空串）", () => {
+    const reasoningProtocol = new OpenAICompletionsProtocol({ reasoningContent: true });
+    const context = createContext("s", [
+      assistantMessage([{ type: "text", text: "回复" }]),
+      assistantMessage([{ type: "tool_call", id: "call_1", name: "read", input: { path: "a.ts" } }]),
+    ]);
+    const req = reasoningProtocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    // DeepSeek 等推理厂商要求每条 assistant 都带 reasoning_content 字段（不看来源模型），
+    // 无思考补空串
+    expect((req.messages[1] as Record<string, unknown>).reasoning_content).toBe("");
+    expect((req.messages[2] as Record<string, unknown>).reasoning_content).toBe("");
+  });
+
   it("空 assistant（无文本/无工具/无思考）续跑时从请求体丢弃（防 400 残留面）", () => {
     const context = createContext("s", [assistantMessage([])]);
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };

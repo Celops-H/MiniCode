@@ -1,6 +1,9 @@
 /**
  * 统一流式事件：适配器将各家流式输出转成该事件流，主循环只消费它。
  * text / thinking 以 delta 增量到达（TUI 渲染累积即可，无需 start/end）；
+ * thinking_delta 可带思考块序号（anthropic 按内容块标号），同序号的思考与签名归为
+ * 同一块；thinking_signature 携带思考块签名、redacted_thinking 携带加密思考数据
+ * （无明文），组装时并进对应思考块，供同模型回传续跑。
  * toolcall 三组 start-delta-end（start 携带工具名与 id，标记调用边界；
  * 同一 index 可能重复 start——id/name 后补时（OpenAI 兼容厂商先发参数后补 id），
  * 消费端取最后一次的值）。
@@ -22,7 +25,9 @@ export type ModelFallbackReason = "cooldown" | "unresolved" | "error";
 
 export type StreamEvent =
   | { type: "text_delta"; text: string }
-  | { type: "thinking_delta"; thinking: string }
+  | { type: "thinking_delta"; thinking: string; /** 思考块序号（anthropic 按内容块标号）；缺省归入同一思考块（openai 链无块概念） */ index?: number }
+  | { type: "thinking_signature"; index: number; signature: string }
+  | { type: "redacted_thinking"; index: number; data: string }
   | { type: "toolcall_start"; index: number; id?: string; name?: string }
   | { type: "toolcall_delta"; index: number; partialJson: string }
   | { type: "toolcall_end"; index: number }

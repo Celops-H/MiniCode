@@ -31,10 +31,6 @@ export interface AnthropicCompatibleOptions {
   env?: NodeJS.ProcessEnv;
   /** 附加请求头，经 SDK defaultHeaders 透传（anthropic-beta 等场景） */
   headers?: Record<string, string>;
-  /** 端点按 Anthropic 官方语义强制校验 thinking 块签名：为 true 时请求带 tools
-   *  期间不发 thinking 参数——历史 thinking 块无签名退化文本，真 Anthropic API 二轮 400；
-   *  GLM/Kimi/DeepSeek 兼容端点不校验签名，缺省 false 不受影响 */
-  requireThinkingSignature?: boolean;
   /** 流空闲超时（ms）：厂商断流/网络中断、N 秒无新 chunk 时中断并报错；默认 STREAM_IDLE_TIMEOUT_MS */
   streamIdleTimeoutMs?: number;
   /** 收尾宽限窗（ms）：stop_reason/message_stop 已到后空闲按正常收尾关流不报超时；默认 TAIL_GRACE_TIMEOUT_MS */
@@ -63,7 +59,6 @@ export class AnthropicCompatibleProvider implements Provider {
   private readonly streamIdleTimeoutMs: number;
   private readonly streamTailGraceMs: number;
   private readonly defaultMaxTokens: number;
-  private readonly requireThinkingSignature: boolean;
   private readonly apiKeyEnv: string;
   private readonly apiKey?: string;
   private readonly headers?: Record<string, string>;
@@ -78,7 +73,6 @@ export class AnthropicCompatibleProvider implements Provider {
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
     this.streamTailGraceMs = options.streamTailGraceMs ?? TAIL_GRACE_TIMEOUT_MS;
     this.defaultMaxTokens = options.defaultMaxTokens ?? DEFAULT_MAX_TOKENS;
-    this.requireThinkingSignature = options.requireThinkingSignature ?? false;
     this.apiKeyEnv = options.apiKeyEnv;
     const resolved = resolveAuth({ apiKeyEnv: options.apiKeyEnv, storedKey: options.apiKey, env: options.env });
     this.auth = resolved.auth;
@@ -111,13 +105,13 @@ export class AnthropicCompatibleProvider implements Provider {
     const maxTokens = info?.maxTokens ?? this.defaultMaxTokens;
     // 跨厂商同 id 模型限定名（模型id@厂商id）：厂商侧请求用原始模型 id
     const vendorModelId = info?.vendorId ?? modelId;
-    const request = this.protocol.buildRequest(context);
+    // 模型定义随请求传给协议：思考块按目标模型判定回传形态（同模型带签名原样发）
+    const request = this.protocol.buildRequest(context, info);
     // 思考等级：anthropic 协议以 thinking 预算表达；maxTokens 决定预算上限。
-    // 签名校验端点的廉价缓解：请求带 tools 期间不发 thinking 参数——
-    // 历史 thinking 块无签名，真 Anthropic API 会因最后一条 assistant 非带签名
-    // thinking 块开头而 400
+    // 按模型能力位门控（与 openai 链一致）：思考参数仅对推理系列模型随思考等级下发，
+    // 混排厂商下非思考模型照发会被拒；历史思考块的回传形态由协议层按目标模型转换
     const thinking =
-      context.thinkingLevel && !(this.requireThinkingSignature && context.tools.length > 0)
+      info?.reasoning === true && context.thinkingLevel
         ? anthropicThinkingParam(context.thinkingLevel, maxTokens)
         : undefined;
     // 中断合并 controller 同 openai-compatible：用户 signal 转发 + idle 超时 abort 共用

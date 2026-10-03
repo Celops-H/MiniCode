@@ -15,6 +15,10 @@ export interface TextContent {
 export interface ThinkingContent {
   type: "thinking";
   thinking: string;
+  /** 思考块签名（anthropic 流下发）：同模型回传时随块携带，厂商侧校验思考真实性 */
+  signature?: string;
+  /** 加密思考数据（anthropic redacted_thinking 块）：无明文思考，同模型回传时原样携带 */
+  redactedData?: string;
 }
 
 export interface ToolCall {

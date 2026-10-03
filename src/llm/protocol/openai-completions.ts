@@ -417,12 +417,12 @@ function toOpenAIMessage(message: Message, reasoningContent: boolean): Record<st
 
       const out: Record<string, unknown> = { role: "assistant" };
       const contentBlocks = [...textBlocks];
-      // DeepSeek 等推理厂商：上一轮 reasoning_content 必须原样回传（工具调用后下一轮缺了会 400 拒绝），
-      // 放到同名字段而不是退化进 content；OpenAI 官方保持退化文本行为。
+      // DeepSeek 等推理厂商：assistant 消息一律带 reasoning_content 字段（缺思考补空串，
+      // 不看来源模型），思考轮缺字段工具续轮会被拒；OpenAI 官方无此字段不受影响。
       // 边界：消息只有 thinking 没有文本/工具调用（如思考中打断收尾落下的半截思考）时退化进 content——
       // 否则请求体是只有 reasoning_content 的 assistant，厂商校验 content/tool_calls 至少一个非空会 400
       // （真机「思考中打断再发消息 400 content or tool_calls must be set」根因）
-      if (thinkingText && reasoningContent && (contentBlocks.length > 0 || toolCalls.length > 0)) {
+      if (reasoningContent && (contentBlocks.length > 0 || toolCalls.length > 0)) {
         out.reasoning_content = thinkingText;
       } else if (thinkingText) {
         contentBlocks.push({ type: "text", text: `<thinking>${thinkingText}</thinking>` });

@@ -44,14 +44,52 @@ describe("buildRequest：消息与工具转换", () => {
     });
   });
 
-  it("thinking 块退化为文本（无 signature）", () => {
+  it("异模型（或未指定目标模型）思考块降级为标签文本，加密块丢弃", () => {
     const context = createContext("s", [
-      assistantMessage([{ type: "thinking", thinking: "内部推理" }]),
+      assistantMessage([{ type: "thinking", thinking: "内部推理" }], { model: "另一个模型" }),
+      assistantMessage([{ type: "thinking", thinking: "", redactedData: "encrypted" }], { model: "另一个模型" }),
+      assistantMessage([{ type: "thinking", thinking: "", redactedData: "encrypted" }], { model: "claude-x" }),
     ]);
+    // 未指定目标模型：一律按异模型降级（方向安全的缺省）
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
     expect(req.messages[0]).toEqual({
       role: "assistant",
       content: [{ type: "text", text: "<thinking>内部推理</thinking>" }],
+    });
+    // 异模型：加密块无明文可降级，assistant 变空整条跳过（两条都如此）
+    expect(req.messages[1]).toBeUndefined();
+    expect(req.messages[2]).toBeUndefined();
+  });
+
+  it("同模型思考块带签名与加密块原样回传（续跑校验/解密必需）", () => {
+    const model = { id: "claude-x", name: "Claude X", api: "anthropic-messages" as const, providerId: "p" };
+    const context = createContext("s", [
+      assistantMessage(
+        [
+          { type: "thinking", thinking: "内部推理", signature: "sig-1" },
+          { type: "text", text: "回复" },
+        ],
+        { model: "claude-x" },
+      ),
+      assistantMessage([{ type: "thinking", thinking: "", redactedData: "encrypted" }], { model: "claude-x" }),
+      // 同模型但思考块无签名（如标签状态机转出的思考）：原样发，不强造签名字段
+      assistantMessage([{ type: "thinking", thinking: "标签转思考" }], { model: "claude-x" }),
+    ]);
+    const req = protocol.buildRequest(context, model) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages[0]).toEqual({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "内部推理", signature: "sig-1" },
+        { type: "text", text: "回复" },
+      ],
+    });
+    expect(req.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "redacted_thinking", data: "encrypted" }],
+    });
+    expect(req.messages[2]).toEqual({
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "标签转思考" }],
     });
   });
 
@@ -185,7 +223,7 @@ describe("parseStream：SSE → 统一事件", () => {
     ]);
   });
 
-  it("thinking_delta 统一成思考增量", async () => {
+  it("thinking_delta 统一成思考增量（携带内容块序号）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
       chunkGen(
@@ -199,7 +237,31 @@ describe("parseStream：SSE → 统一事件", () => {
       events.push(e);
     }
     expect(events).toEqual([
-      { type: "thinking_delta", thinking: "推理" },
+      { type: "thinking_delta", thinking: "推理", index: 0 },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("signature_delta 与 redacted_thinking 块转成统一事件（签名与加密块回传源）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
+        { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "推理" } },
+        { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-1" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "content_block_start", index: 1, content_block: { type: "redacted_thinking", data: "encrypted" } },
+        { type: "content_block_stop", index: 1 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "推理", index: 0 },
+      { type: "thinking_signature", index: 0, signature: "sig-1" },
+      { type: "redacted_thinking", index: 1, data: "encrypted" },
       { type: "done", stopReason: "end_turn" },
     ]);
   });
@@ -357,8 +419,8 @@ describe("parseStream：五类现象", () => {
       events.push(e);
     }
     expect(events).toEqual([
-      { type: "thinking_delta", thinking: "先想" },
-      { type: "thinking_delta", thinking: "再想" },
+      { type: "thinking_delta", thinking: "先想", index: 0 },
+      { type: "thinking_delta", thinking: "再想", index: 0 },
       { type: "done", stopReason: "end_turn" },
     ]);
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createContext, userMessage } from "../../src/core/index.js";
+import { assistantMessage, createContext, userMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import { anthropicThinkingParam, AnthropicCompatibleProvider, defaultAnthropicCreateClient, DEFAULT_MAX_TOKENS, REQUEST_TIMEOUT_MS } from "../../src/llm/index.js";
 import type { AnthropicMessagesClient, ModelInfo } from "../../src/llm/index.js";
@@ -9,8 +9,10 @@ async function* chunkGen(...vals: unknown[]): AsyncIterable<unknown> {
 }
 
 const MODELS: ModelInfo[] = [
-  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", api: "anthropic-messages", providerId: "anthropic" },
-  { id: "big-context", name: "Big", api: "anthropic-messages", providerId: "anthropic", maxTokens: 4096 },
+  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", api: "anthropic-messages", providerId: "anthropic", reasoning: true },
+  { id: "big-context", name: "Big", api: "anthropic-messages", providerId: "anthropic", maxTokens: 4096, reasoning: true },
+  // 非推理系列：思考参数门控的对照模型
+  { id: "plain", name: "Plain", api: "anthropic-messages", providerId: "anthropic" },
 ];
 
 /** Anthropic 原始流式事件样例（与协议层 parseStream 的输入一致） */
@@ -146,43 +148,15 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
     expect(seen[0]).toEqual({ "anthropic-beta": "interleaved-thinking" });
   });
 
-  it("requireThinkingSignature 端点带 tools 期间不发 thinking 参数（廉价缓解）", async () => {
-    let lastRequest: Record<string, unknown> | undefined;
-    const client: AnthropicMessagesClient = {
-      messages: {
-        async create(request) {
-          lastRequest = request;
-          return chunkGen(...RAW_CHUNKS);
-        },
-      },
-    };
-    const make = () =>
-      new AnthropicCompatibleProvider({
-        id: "anthropic",
-        name: "Anthropic",
-        baseUrl: "https://api.anthropic.com",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        env: { ANTHROPIC_API_KEY: "sk" },
-        requireThinkingSignature: true,
-        models: MODELS,
-        createClient: () => client,
-      });
-    const toolContext = createContext("s", [userMessage("q")], [
-      { name: "read", description: "读文件", inputSchema: { type: "object", properties: {} } },
-    ], "high");
-    // 带 tools：不发 thinking（历史 thinking 块无签名，二轮会被官方 API 400）
-    for await (const _ of make().stream("claude-sonnet-4-5", toolContext)) {
+  it("非推理模型不发 thinking 参数（能力位门控，与 openai 链一致）", async () => {
+    const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    for await (const _ of provider.stream("plain", createContext("s", [userMessage("q")], [], "high"))) {
       // 消费流
     }
-    expect("thinking" in lastRequest!).toBe(false);
-    // 不带 tools：thinking 正常下发（首轮请求无历史，签名要求不触发）
-    for await (const _ of make().stream("claude-sonnet-4-5", createContext("s", [userMessage("q")], [], "high"))) {
-      // 消费流
-    }
-    expect(lastRequest!.thinking).toEqual({ type: "enabled", budget_tokens: 7168 });
+    expect(getRequest()).not.toHaveProperty("thinking");
   });
 
-  it("缺省（兼容端点）带 tools 也照发 thinking，工具循环思考不受影响", async () => {
+  it("推理模型带 tools 照发 thinking 参数（思考块回传由协议层按目标模型转换）", async () => {
     let lastRequest: Record<string, unknown> | undefined;
     const client: AnthropicMessagesClient = {
       messages: {
@@ -303,6 +277,28 @@ describe("AnthropicCompatibleProvider（anthropic-messages 协议）", () => {
       { type: "done", stopReason: "end_turn" },
     ]);
     expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it("同模型历史思考块带签名原样回传（模型定义传给协议层判同模型）", async () => {
+    const { provider, getRequest } = makeProvider({ ZHIPU_API_KEY: "sk" }, ...RAW_CHUNKS);
+    const context = createContext("s", [
+      userMessage("q"),
+      assistantMessage(
+        [
+          { type: "thinking", thinking: "推理", signature: "sig-1" },
+          { type: "text", text: "答" },
+        ],
+        { model: "claude-sonnet-4-5" },
+      ),
+      // 异模型来源：签名无效，降级为标签文本
+      assistantMessage([{ type: "thinking", thinking: "另一模型的思考" }], { model: "其他模型" }),
+    ]);
+    for await (const _ of provider.stream("claude-sonnet-4-5", context)) {
+      // 消费流
+    }
+    const messages = getRequest()!.messages as Array<{ content: Array<Record<string, unknown>> }>;
+    expect(messages[1]!.content[0]).toEqual({ type: "thinking", thinking: "推理", signature: "sig-1" });
+    expect(messages[2]!.content[0]).toEqual({ type: "text", text: "<thinking>另一模型的思考</thinking>" });
   });
 
   it("思考等级随请求下发为 thinking 预算", async () => {
