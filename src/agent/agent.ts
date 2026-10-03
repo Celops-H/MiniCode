@@ -355,8 +355,10 @@ export class Agent {
   /**
    * 续跑循环（供调度器唤醒驱动）：与 run 相同的 turn 推进，但不触发
    * 会话级 Hook（SessionStart / UserPromptSubmit 只属于用户驱动）。
-   * 每轮跑完后：收件箱非空（含排队消息）→ 继续续跑，下一轮 runTurn 消费注入；
-   * 收件箱空且终态（模型已回复无工具调用）→ 结束；工具循环续轮（模型仍在调工具）→ 继续。
+   * 每轮跑完后：收件箱有续跑型消息（消息/任务/结论）→ 复位继续，下一轮 runTurn 消费注入；
+   * 只有中断标记 → 被打断时保持终态退出（标记留给下次输入消费，不顶着打断意图
+   * 重启），未被打断时继续下一轮消费；收件箱空且终态（模型已回复无工具调用）→ 结束；
+   * 工具循环续轮（模型仍在调工具）→ 继续。
    * 循环无轮次上限：自然边界是撞线压缩（水位）与用户中断（Esc）。
    * 空闲（loop 结束）后的唤醒只由 triggerTurn 消息经 Team 驱动发起。
    * 防重入：已有活跃续跑循环时直接返回（忙时投递只入队，活跃循环在每轮结束自行消费）。
@@ -374,13 +376,20 @@ export class Agent {
         for await (const event of this.runTurn()) {
           yield event;
         }
-        // 收件箱非空（含排队消息）→ 继续 loop：下一轮 runTurn 消费注入（排队消息不永远滞留）
-        if (this.mailbox.hasPending()) {
+        // 收件箱有续跑型消息 → 继续 loop：轮间继续 = 新任务，中断状态一并复位
+        // （原实现只入口复位，interrupt 落活跃循环中途 + 排队消息继续时，
+        // 新任务结论仍被 notifyCompletion 吞掉）
+        if (this.mailbox.hasReviving()) {
           this.stopped = false;
-          // 轮间继续 = 新任务：中断状态一并复位（原实现只入口复位，
-          // interrupt 落活跃循环中途 + 排队消息继续时，新任务结论仍被 notifyCompletion 吞掉）
           this.interrupted = false;
           this.interruptController = new AbortController();
+          continue;
+        }
+        // 收件箱只剩中断标记：被中断则保持终态退出（Esc 级联下父与子同时被打断，
+        // 标记是排队的状态通知不是新任务）；未被中断（如父主动 interrupt_agent 后
+        // 继续跑）则继续下一轮消费标记
+        if (this.mailbox.hasPending()) {
+          if (this.stopped) return;
           continue;
         }
         // 收件箱空且终态（本轮模型回复无工具调用）→ 会话结束；
@@ -1327,7 +1336,7 @@ function repairOrphanToolCalls(messages: Message[]): Message[] {
  * 最后一条 assistant 消息的结论文本（completion watcher 回灌父 agent 用）。
  * 只认最后一条 assistant 消息：向前放宽会把更早轮次的旧文本当结论
  * （子 agent 全程无正文时把第 1 轮开场白当任务结论，父据此误判完成或重派）；
- * 最后一条没有正文（只有 thinking/工具调用，或收尾调用失败）返回占位说明。
+ * 最后一条没有正文（只有 thinking/工具调用）返回空串，回灌文案由调用方决定。
  */
 function lastAssistantText(messages: Message[]): string {
   const last = messages.findLast((message) => message.role === "assistant");
@@ -1335,7 +1344,7 @@ function lastAssistantText(messages: Message[]): string {
     ?.content.filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("");
-  return text && text.trim() ? text : "(子代理未产出结论)";
+  return text && text.trim() ? text : "";
 }
 
 /**

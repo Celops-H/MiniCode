@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { Agent } from "../../src/agent/agent.js";
+import type { ModelClient } from "../../src/agent/agent.js";
 import { AgentPath } from "../../src/agent/agent-path.js";
 import { Team } from "../../src/agent/team.js";
 import { HookBus } from "../../src/hooks/index.js";
-import type { ModelClient } from "../../src/agent/agent.js";
+import type { Tool } from "../../src/tools/index.js";
 
 /** 毫秒睡眠（等子 agent 后台驱动收尾） */
 function sleep(ms: number): Promise<void> {
@@ -132,5 +134,312 @@ describe("Team（注册表与并发限制）", () => {
     expect(child.hasPendingMail()).toBe(true);
     team.clear();
     expect(child.hasPendingMail()).toBe(false);
+  });
+});
+
+describe("子 agent 结论回灌终态口径", () => {
+  it("子 agent 被中断：回灌「已中断」标记且不唤醒父", async () => {
+    const hooks = new HookBus();
+    const interrupted: string[] = [];
+    hooks.on("AgentInterrupted", (e) => {
+      interrupted.push(e.path);
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: {
+        async *stream(_modelId, _context, options) {
+          yield { type: "text_delta", text: "半截文本" };
+          await new Promise<void>((_, reject) => {
+            options?.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(100);
+    // Esc 级联中断（父同时被打断）
+    child.interrupt();
+    await sleep(300);
+
+    // 中断终态：AgentInterrupted 发出；标记消息只排队不唤醒父（父闲置、零消息，
+    // 唤醒会顶着打断意图重启父）
+    expect(interrupted).toEqual(["/root/worker"]);
+    expect(root.hasPendingMail()).toBe(true);
+    expect(root.getMessages()).toHaveLength(0);
+    // 父下一轮输入消费标记：模型据此知晓任务未完成，不把中途文本当结论
+    root.start("继续");
+    for await (const _ of root.run()) {
+      // 消费事件流
+    }
+    const injected = root.getMessages().find(
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("已中断"),
+    );
+    expect(injected).toBeDefined();
+    expect(String(injected?.content)).toContain("任务未完成");
+  });
+
+  it("结论命中工具调用标记特征：按不可信失败处理回灌", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      // 模型失配形态：把厂商私有工具调用标记原文吐进正文（deepseek-v4 实测样本）
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read">' };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 不可信失败终态：失败标记 + 明确失败文本，不再把标记原文当结论回灌父
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBe(true);
+    expect(completed[0]!.conclusion).toContain("不可信");
+    const mail = root.getMessages().find(
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务结论】"),
+    );
+    expect(String(mail?.content)).toContain("产出不可信");
+  });
+
+  it("子 agent 未产出正文：事件结论为空串，回灌占位说明", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "thinking_delta", thinking: "只想不说" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 正常完成但无正文：事件保留空串（TUI 显示警示行），回灌父的是占位说明
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBeUndefined();
+    expect(completed[0]!.conclusion).toBe("");
+    const mail = root.getMessages().find(
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务结论】"),
+    );
+    expect(String(mail?.content)).toContain("(子代理未产出结论)");
+  });
+
+  it("结论含通用工具调用写法不误伤：正文讨论 <tool_call> 不判不可信", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      // 通用写法正文可能合法讨论（如任务本身涉及工具调用格式），不在特征闸内
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "适配层的 <tool_call> 解析需要处理嵌套调用" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBeUndefined();
+  });
+
+  it("中断与不可信结论同时发生：中断分支优先，不发失败完成事件", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ failed: e.failed });
+    });
+    const interruptedPaths: string[] = [];
+    hooks.on("AgentInterrupted", (e) => {
+      interruptedPaths.push(e.path);
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      // 半截文本恰好含 DSML 标记：仍按中断终态处理，不落进不可信失败
+      modelClient: {
+        async *stream(_modelId, _context, options) {
+          yield { type: "text_delta", text: "<｜｜DSML｜｜ calls> 半截" };
+          await new Promise<void>((_, reject) => {
+            options?.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(100);
+    child.interrupt();
+    await sleep(300);
+
+    expect(interruptedPaths).toEqual(["/root/worker"]);
+    expect(completed).toHaveLength(0);
+  });
+
+  it("中断标记不顶着打断重启父：父 unwind 窗口内到达只排队，轮末不再续跑", async () => {
+    let rootCalls = 0;
+    // 慢工具（不响应中断，模拟 bash 收尾排水窗口）：父的轮次要等它收尾才结束
+    const slowTool: Tool = {
+      name: "slow",
+      description: "慢工具",
+      inputSchema: z.object({}),
+      isReadOnly: false,
+      maxResultSizeChars: 100,
+      execute: () => new Promise((resolve) => setTimeout(() => resolve("工具完成"), 150)),
+    };
+    const hooks = new HookBus();
+    const interruptedPaths: string[] = [];
+    hooks.on("AgentInterrupted", (e) => {
+      interruptedPaths.push(e.path);
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({
+      modelClient: {
+        async *stream(_modelId, ctx) {
+          rootCalls++;
+          if (ctx.messages.some((m) => m.role === "tool_result")) {
+            yield { type: "text_delta", text: "收尾" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          yield { type: "toolcall_start", index: 0, id: "c1", name: "slow" };
+          yield { type: "toolcall_end", index: 0 };
+          yield { type: "done", stopReason: "tool_use" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [slowTool],
+      team,
+      hooks,
+    });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: {
+        async *stream(_modelId, _context, options) {
+          yield { type: "text_delta", text: "半截" };
+          await new Promise<void>((_, reject) => {
+            options?.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    // 父派活后继续跑自己的轮次（工具窗口 150ms）；子同时被驱动并在流中挂起
+    const rootRun = (async () => {
+      root.start("干活");
+      for await (const _ of root.run()) {
+        // 消费事件流
+      }
+    })();
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(50);
+    // Esc 级联：父子同时被中断。子先收尾，中断标记随即落进父收件箱，
+    // 此刻父仍在工具窗口内（unwind 未结束）
+    team.interruptAll();
+    await rootRun;
+    await sleep(200);
+
+    // 子按中断回灌，标记只排队；父被打断后保持终态退出，不再发起新模型调用
+    expect(interruptedPaths).toEqual(["/root/worker"]);
+    expect(rootCalls).toBe(1);
+    expect(root.hasPendingMail()).toBe(true);
+    // 父下次输入消费标记
+    root.start("继续");
+    for await (const _ of root.run()) {
+      // 消费事件流
+    }
+    const injected = root.getMessages().find(
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("已中断"),
+    );
+    expect(injected).toBeDefined();
   });
 });

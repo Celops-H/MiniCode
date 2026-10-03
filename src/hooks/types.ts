@@ -66,8 +66,9 @@ export type HookEvent =
   | { type: "SessionStart" }
   | { type: "SessionEnd" }
   | { type: "AgentSpawned"; path: string; parentPath: string }
-  /** failed 标记子 agent 失败终态：模型流失败等由驱动层捕获，结论不可信——
-   *  失败不合并 worktree、conclusion 为明确失败文本 */
+  /** failed 标记子 agent 失败终态：驱动捕获的模型流失败，或结论命中工具调用标记
+   *  特征（模型失配把工具调用原文吐进正文，结论不可信）——失败不合并 worktree，
+   *  conclusion 为明确失败文本；正常完成但模型未产出正文时 conclusion 为空串 */
   | { type: "AgentCompleted"; path: string; parentPath: string; conclusion: string; mergeResult?: string; failed?: boolean }
   | { type: "AgentInterrupted"; path: string; parentPath: string }
   /**

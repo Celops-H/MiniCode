@@ -1403,7 +1403,7 @@ describe("结论文本与消息署名", () => {
     expect(lastAssistant?.meta?.model).toBe("backup");
   });
 
-  it("conclusionText 只认最后一条 assistant 消息：全程无正文返回占位而非早期旧文本", () => {
+  it("conclusionText 只认最后一条 assistant 消息：全程无正文返回空串而非早期旧文本", () => {
     const agent = new Agent({
       modelClient: mockTextClient("x"),
       modelId: "mock",
@@ -1415,8 +1415,8 @@ describe("结论文本与消息署名", () => {
         toolResultMessage("c1", "read", "内容"),
       ],
     });
-    // 旧实现向前放宽会把「第 1 轮开场白」当结论回灌父 agent
-    expect(agent.conclusionText()).toBe("(子代理未产出结论)");
+    // 旧实现向前放宽会把「第 1 轮开场白」当结论回灌父 agent；空串交由回灌方决定文案
+    expect(agent.conclusionText()).toBe("");
   });
 
   it("conclusionText 取最后一条 assistant 的正文（更早轮有正文也不抢先）", () => {

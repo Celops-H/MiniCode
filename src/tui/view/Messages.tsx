@@ -300,6 +300,10 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
         {b.event === "completed" && b.conclusion
           ? ` · 输出 ${b.conclusion.trimEnd().split("\n").length} 行`
           : ""}
+        {/* 空结论（模型未产出正文）：警示措辞与色，不与真完成同形 */}
+        {b.event === "completed" && !b.conclusion ? (
+          <span style={{ fg: theme.warning }}> · 未产出结论</span>
+        ) : null}
         {foldable && b.collapsed ? "（▸ 点击展开）" : ""}
       </text>
       <Show when={foldable && !b.collapsed}>

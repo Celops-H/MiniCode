@@ -170,6 +170,20 @@ it("子 agent 失败活动行：红字「失败」与完成区分，失败文本
   expect(expanded.captureCharFrame()).toContain("结论：子代理 task_1 失败：连接超时");
 });
 
+it("子 agent 空结论活动行：警示措辞「未产出结论」，不与真完成同形", async () => {
+  // 模型未产出正文（conclusion 为空串）：旧行为显示「完成 · 输出 1 行」（占位文案计一行）
+  const setup = await app([
+    { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "", collapsed: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("子 agent [/root/task_1]");
+  expect(frame).toContain("未产出结论");
+  expect(frame).not.toContain("输出 1 行");
+  // 警示色（warning），与正常完成的灰字区分
+  expect(spanFgOf(setup.captureSpans(), "未产出结论")).toBe("#e06c75");
+});
+
 it("同屏失败与完成块各按自身状态着色（不互相串色）", async () => {
   const setup = await app([
     { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: true },

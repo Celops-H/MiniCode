@@ -15,6 +15,16 @@ function agentNameOf(path: AgentPath): string {
   return path.toString().split("/").filter(Boolean).at(-1) ?? path.toString();
 }
 
+/** 工具调用标记特征：模型失配时会把厂商私有的工具调用标记原文吐进正文
+ *  （deepseek-v4 实测样本形如 `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read">`）。
+ *  只收带特殊字符的私有标记，通用写法（如 <tool_call>）正文可能合法讨论，不收防误伤 */
+const TOOL_CALL_MARKUP: RegExp[] = [/<｜｜DSML｜｜/, /<｜tool▁calls▁begin｜>/];
+
+/** 结论是否命中工具调用标记特征（命中即判定模型失配、结论不可信） */
+function looksLikeRawToolCallMarkup(text: string): boolean {
+  return TOOL_CALL_MARKUP.some((pattern) => pattern.test(text));
+}
+
 export interface TeamMember {
   /** agent 实例；预留未提交时为 undefined */
   agent: Agent | undefined;
@@ -279,6 +289,7 @@ export class Team {
   /**
    * completion watcher：子 agent 达到终态（resume 结束）时，
    * 把其结论以 FINAL_ANSWER 回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源。
+   * 被中断时不投结论，只排队中断标记不唤醒（INTERRUPTED 类型，见中断分支）。
    * wait_agent 只挂起不消费结论，避免重复投递。
    * @param agent 完成的子 agent
    * @param failure 驱动失败：非 undefined 时走失败终态——不合并 worktree、
@@ -291,17 +302,26 @@ export class Team {
     const parentPath = member?.parentPath;
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
+    const name = agentNameOf(path);
     if (agent.isInterrupted()) {
-      // 被中断：显式动作，调用方已知，不投中途文本当结论。
-      // 不清理 worktree——后续 followup 可复活续用，目录/分支/注册均保留
+      // 被中断：显式动作，不投中途文本当结论，只回灌「已中断」标记让父知晓任务未完成。
+      // 用 INTERRUPTED 类型只排队不唤醒、不参与父的续跑判定：中断多来自 Esc 级联
+      // （父同时被打断），标记若参与续跑判定，父 unwind 窗口内到达会顶着打断意图
+      // 重启父；标记留在收件箱，父下次输入时消费。不清理 worktree——后续 followup
+      // 可复活续用，目录/分支/注册均保留
       await this.safeEmit({
         type: "AgentInterrupted",
         path: path.toString(),
         parentPath: parentPath.toString(),
       });
+      await this.sendMessage(parentPath, {
+        type: "INTERRUPTED",
+        from: path,
+        content: `子代理 ${name} 已中断，任务未完成。可对其发消息唤醒续跑（原路径保留），或放弃该子任务。`,
+        triggerTurn: false,
+      });
       return;
     }
-    const name = agentNameOf(path);
     if (failure !== undefined) {
       // 失败终态：模型链耗尽等驱动失败——不合并 worktree（产出不完整），
       // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本当结论
@@ -321,22 +341,44 @@ export class Team {
       });
       return;
     }
-    // 自然完成：合并 worktree 分支进主分支，合并结果附在结论前提示父
+    // 结论可信度闸：正文命中厂商私有工具调用标记，判定模型失配把工具调用原文
+    // 吐成了正文，按不可信失败处理（不合并 worktree，产出不完整）
+    const conclusion = agent.conclusionText();
+    if (looksLikeRawToolCallMarkup(conclusion)) {
+      const reason = "结论命中工具调用标记，判定模型失配把工具调用原文吐进了正文";
+      await this.safeEmit({
+        type: "AgentCompleted",
+        path: path.toString(),
+        parentPath: parentPath.toString(),
+        conclusion: `子代理 ${name} 结论不可信：${reason}`,
+        failed: true,
+      });
+      await this.sendMessage(parentPath, {
+        type: "FINAL_ANSWER",
+        from: path,
+        content: `子代理 ${name} 产出不可信（${reason}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
+        triggerTurn: true,
+      });
+      return;
+    }
+    // 自然完成：合并 worktree 分支进主分支；空结论回灌占位说明。
+    // 事件 conclusion 保留原值（可空串，TUI 据此显示警示行、轨迹保留原貌），
+    // 回灌父的文案带合并提示前缀（父需要知道 worktree 产出已进自己工作区）
     const mergeMessage = this.completeChildWorktree(path);
-    const content = mergeMessage
-      ? `${mergeMessage}。\n${agent.conclusionText()}`
-      : agent.conclusionText();
+    const mailContent = mergeMessage
+      ? `${mergeMessage}。\n${conclusion || "(子代理未产出结论)"}`
+      : conclusion || "(子代理未产出结论)";
     await this.safeEmit({
       type: "AgentCompleted",
       path: path.toString(),
       parentPath: parentPath.toString(),
-      conclusion: content,
+      conclusion,
       mergeResult: mergeMessage,
     });
     await this.sendMessage(parentPath, {
       type: "FINAL_ANSWER",
       from: path,
-      content,
+      content: mailContent,
       triggerTurn: true,
     });
   }

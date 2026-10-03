@@ -47,8 +47,8 @@ export interface ToolBlock {
 
 /** 子 agent 活动行（派生/完成/失败/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
  *  平时收敛成单行，点击展开（子 agent 结果应像工具一样支持展开/关闭）。
- *  failed 是 AgentCompleted 的失败终态（驱动失败，结论为明确失败文本）：与正常完成分开成一种
- *  展示态，消息区按红色错误样式显示，不与「完成」混淆 */
+ *  failed 是 AgentCompleted 的失败终态（驱动/模型链失败，或结论命中工具调用标记判不可信，
+ *  结论为明确失败文本）：与正常完成分开成一种展示态，消息区按红色错误样式显示，不与「完成」混淆 */
 export interface AgentActivityBlock {
   kind: "agent";
   event: "spawned" | "completed" | "failed" | "interrupted";
@@ -910,7 +910,8 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path, collapsed: true }],
       };
     case "AgentCompleted": {
-      // failed 标记的完成是失败终态（驱动/模型链失败，结论为明确失败文本，见 AgentCompleted 负载注释）：
+      // failed 标记的完成是失败终态（驱动/模型链失败，或结论命中工具调用标记判不可信，
+      // 结论为明确失败文本，见 AgentCompleted 负载注释）：
       // 树与活动行都按失败展示，不再与正常完成同形（此前失败与完成在界面上无任何区分）
       const failed = event.failed === true;
       return {
