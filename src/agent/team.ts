@@ -1,6 +1,6 @@
 /**
  * Team 与线程树：注册表持有命名 agent（`path → TeamMember`），
- * root 预注册为协调者（不计数）；spawn 槽位预留/提交/释放防计数泄漏；
+ * root 预注册为协调者；spawn 槽位预留/提交/释放防路径泄漏；
  * 并发执行限制器限制同时推进的 agent 数（默认 4）。
  */
 import { AgentPath } from "./agent-path.js";
@@ -27,8 +27,6 @@ export interface TeamMember {
 }
 
 export interface TeamOptions {
-  /** spawn 派生总数上限（root 不计）；缺省 15 */
-  maxAgents?: number;
   /** spawn 深度上限（root=0，递归防护）；缺省 2（main→子→孙） */
   maxDepth?: number;
   /** 同时推进的 agent 数上限；缺省 4 */
@@ -43,19 +41,16 @@ export interface TeamOptions {
 
 export class Team {
   private readonly members = new Map<string, TeamMember>();
-  private readonly maxAgents: number;
   private readonly maxDepth: number;
   private readonly maxConcurrent: number;
   private readonly worktrees: boolean;
   private readonly onRootEvent: ((event: StreamEvent) => void) | undefined;
   private readonly hooks: HookBus | undefined;
-  private spawnCount = 0;
   private activeExecutions = 0;
   /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒） */
   private readonly pendingDrives = new Set<Agent>();
 
   constructor(options: TeamOptions = {}) {
-    this.maxAgents = options.maxAgents ?? 15;
     this.maxDepth = options.maxDepth ?? 2;
     this.maxConcurrent = options.maxConcurrent ?? 4;
     this.worktrees = options.worktrees ?? false;
@@ -125,7 +120,7 @@ export class Team {
     member.worktree = undefined;
   }
 
-  /** 注册根 agent（协调者，路径固定 `/root`，不占 spawn 计数） */
+  /** 注册根 agent（协调者，路径固定 `/root`） */
   registerRoot(agent: Agent): void {
     const root = AgentPath.root();
     agent.agentPath = root;
@@ -133,8 +128,8 @@ export class Team {
   }
 
   /**
-   * 预留 spawn 槽位：校验父存在、深度上限、路径唯一、总数上限，并占用路径。
-   * 提交用 commitSpawn；不提交时调用方应 releaseSpawn 释放（防计数/路径泄漏）。
+   * 预留 spawn 槽位：校验父存在、深度上限、路径唯一，并占用路径。
+   * 提交用 commitSpawn；不提交时调用方应 releaseSpawn 释放（防路径泄漏）。
    * @param parentPath 父 agent 路径
    * @param agentName 子 agent 名（路径末段）
    * @returns 子路径（可直接作 spawn 目标）或错误文本
@@ -147,14 +142,12 @@ export class Team {
     const child = parentPath.join(agentName);
     if (typeof child === "string") return child;
     if (this.members.has(child.toString())) return `agent 路径 ${child} 已存在`;
-    if (this.spawnCount >= this.maxAgents) return `agent 总数超限：最多 ${this.maxAgents} 个`;
-    // 预留即占槽位（防「只预留不提交」绕过上限），commit 只填实例，release 退回
-    this.spawnCount++;
+    // 预留即占路径（防「只预留不提交」绕过唯一性），commit 只填实例，release 释放
     this.members.set(child.toString(), { agent: undefined, path: child, parentPath, depth });
     return child;
   }
 
-  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（计数已在预留时占用）。
+  /** 提交已预留的 spawn：填入 agent 实例并记录其路径（路径已在预留时占用）。
    *  派生观测事件（AgentSpawned）由驱动层（consumeDriving）发射——初次派生与 followup 唤醒
    *  都经后台驱动续跑，统一在驱动起点发，避免 commitSpawn 发一次、唤醒又发一次的重复。 */
   commitSpawn(path: AgentPath, agent: Agent): void {
@@ -164,15 +157,13 @@ export class Team {
     agent.agentPath = path;
   }
 
-  /** 释放已预留或已提交的 spawn：移除路径并退回计数（防泄漏）；有 worktree 时一并清理 */
+  /** 释放已预留或已提交的 spawn：移除路径（防泄漏）；有 worktree 时一并清理 */
   releaseSpawn(path: AgentPath): void {
     const member = this.members.get(path.toString());
     if (member?.worktree) {
       this.abortChildWorktree(path);
     }
-    if (this.members.delete(path.toString())) {
-      this.spawnCount--;
-    }
+    this.members.delete(path.toString());
   }
 
   /** 按路径查 agent（含 root；预留未提交时 agent 为 undefined） */
@@ -196,7 +187,7 @@ export class Team {
   }
 
   /**
-   * 会话收尾清理（SessionEnd 后调用）：中断全部活跃 agent、清空注册表/派生计数/待驱动队列。
+   * 会话收尾清理（SessionEnd 后调用）：中断全部活跃 agent、清空注册表/待驱动队列。
    * 防后台 resume 循环吊住进程不退，成员记录也不泄漏到下一生命周期。
    */
   clear(): void {
@@ -209,7 +200,6 @@ export class Team {
     }
     this.members.clear();
     this.pendingDrives.clear();
-    this.spawnCount = 0;
     // activeExecutions 不显式归零：driveAgent 是即发即忘的后台驱动，clear 时通常有在途 consumeDriving
     // 循环持槽位，其 finally 的 release() 会自然排干计数；显式归零会让迟到 release 把计数减成负数（并发槽位失真）
   }

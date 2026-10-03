@@ -43,7 +43,7 @@ describe("Team（注册表与并发限制）", () => {
     team.commitSpawn(path, sub);
     expect(team.resolveAgent(path)?.agent).toBe(sub);
     expect(team.listAgents()).toHaveLength(1);
-    // 释放后移除并退回计数
+    // 释放后移除路径
     team.releaseSpawn(path);
     expect(team.resolveAgent(path)).toBeUndefined();
     expect(team.listAgents()).toHaveLength(0);
@@ -74,25 +74,6 @@ describe("Team（注册表与并发限制）", () => {
     const grand = team.reserveSpawn(child as AgentPath, "task_2"); // 深度 2（孙）允许
     expect(typeof grand).not.toBe("string");
     expect(typeof team.reserveSpawn(grand as AgentPath, "task_3")).toBe("string"); // 深度 3 超限
-  });
-
-  it("默认派生总数 15：第 16 个超限", () => {
-    const team = new Team(); // 默认 maxAgents=15（root 不计）
-    team.registerRoot(makeAgent());
-    for (let i = 0; i < 15; i++) {
-      expect(typeof team.reserveSpawn(AgentPath.root(), `a${i}`)).not.toBe("string");
-    }
-    expect(typeof team.reserveSpawn(AgentPath.root(), "overflow")).toBe("string");
-  });
-
-  it("spawn 总数上限", () => {
-    const team = new Team({ maxAgents: 2 });
-    team.registerRoot(makeAgent());
-    const a = team.reserveSpawn(AgentPath.root(), "a");
-    const b = team.reserveSpawn(AgentPath.root(), "b");
-    expect(typeof a).not.toBe("string");
-    expect(typeof b).not.toBe("string");
-    expect(typeof team.reserveSpawn(AgentPath.root(), "c")).toBe("string");
   });
 
   it("父路径不存在时 spawn 报错", () => {
@@ -151,149 +132,5 @@ describe("Team（注册表与并发限制）", () => {
     expect(child.hasPendingMail()).toBe(true);
     team.clear();
     expect(child.hasPendingMail()).toBe(false);
-  });
-
-  it("子 agent 撞轮次上限：补一次禁用工具的收尾调用，结论回灌父不再是早期旧文本", async () => {
-    const toolAlwaysClient: ModelClient = {
-      async *stream(_modelId, context) {
-        if (context.tools.length === 0) {
-          // 收尾调用（不带工具）：产出文本结论
-          yield { type: "text_delta", text: "收尾结论：任务完成一半被截断" };
-          yield { type: "done", stopReason: "end_turn" };
-          return;
-        }
-        // 正常轮：永远调工具（撞 maxTurns 的典型形态）
-        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
-        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
-        yield { type: "toolcall_end", index: 0 };
-        yield { type: "done", stopReason: "tool_calls" };
-      },
-    };
-    const hooks = new HookBus();
-    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
-    hooks.on("AgentCompleted", (e) => {
-      completed.push({ conclusion: e.conclusion, failed: e.failed });
-    });
-    const stopReasons: Array<string | undefined> = [];
-    hooks.on("Stop", (e) => {
-      stopReasons.push(e.reason);
-    });
-
-    // 生命周期事件（AgentCompleted/Stop）由 Team 经构造注入的总线发射
-    const team = new Team({ hooks });
-    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
-    team.registerRoot(root);
-    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
-    const child = new Agent({
-      modelClient: toolAlwaysClient,
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-      hooks,
-      maxTurns: 1,
-    });
-    team.commitSpawn(path, child);
-    await team.sendMessage(path, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    await sleep(300);
-
-    // 收尾调用产出结论并回灌父（不再是占位或第 1 轮旧文本）
-    expect(completed).toHaveLength(1);
-    expect(completed[0]!.conclusion).toContain("收尾结论");
-    // 撞线收尾的 Stop 带 max_turns 原因
-    expect(stopReasons).toContain("max_turns");
-    // 子 agent 最后一条 assistant 是收尾结论
-    const messages = child.getMessages();
-    const lastAssistant = messages.findLast((m) => m.role === "assistant");
-    expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
-  });
-
-  it("子 agent 收尾调用路由切到备选：消息署名跟随备选（同模型回传判定依赖 meta.model）", async () => {
-    const fallbackFinalClient: ModelClient = {
-      async *stream(_modelId, context) {
-        if (context.tools.length === 0) {
-          // 收尾调用：主模型流内失败，路由切到备选后继续产出
-          yield { type: "model_fallback", from: "mock", to: "backup", reason: "error" };
-          yield { type: "text_delta", text: "收尾结论：备选模型产出" };
-          yield { type: "done", stopReason: "end_turn" };
-          return;
-        }
-        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
-        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
-        yield { type: "toolcall_end", index: 0 };
-        yield { type: "done", stopReason: "tool_calls" };
-      },
-    };
-    const team = new Team({ hooks: new HookBus() });
-    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team });
-    team.registerRoot(root);
-    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
-    const child = new Agent({
-      modelClient: fallbackFinalClient,
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-      maxTurns: 1,
-    });
-    team.commitSpawn(path, child);
-    await team.sendMessage(path, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    await sleep(300);
-
-    // 收尾产出记到实际产出模型名下：meta.model 是同模型回传判定依据，记错主模型会把
-    // 备选模型的签名发给主模型
-    const lastAssistant = child.getMessages().findLast((m) => m.role === "assistant");
-    expect(JSON.stringify(lastAssistant?.content)).toContain("收尾结论");
-    expect(lastAssistant?.meta?.model).toBe("backup");
-  });
-
-  it("子 agent 撞上限且收尾调用失败：失败终态回灌，父拿到撞上限的明确失败文本", async () => {
-    const failingFinalClient: ModelClient = {
-      async *stream(_modelId, context) {
-        if (context.tools.length === 0) throw new Error("收尾模型不可用");
-        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
-        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
-        yield { type: "toolcall_end", index: 0 };
-        yield { type: "done", stopReason: "tool_calls" };
-      },
-    };
-    const hooks = new HookBus();
-    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
-    hooks.on("AgentCompleted", (e) => {
-      completed.push({ conclusion: e.conclusion, failed: e.failed });
-    });
-    const team = new Team({ hooks });
-    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
-    team.registerRoot(root);
-    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
-    const child = new Agent({
-      modelClient: failingFinalClient,
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-      hooks,
-      maxTurns: 1,
-    });
-    team.commitSpawn(path, child);
-    await team.sendMessage(path, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    await sleep(300);
-    // 失败终态：结论带「撞上限 + 收尾失败」，父不再拿占位文本误判完成
-    expect(completed).toHaveLength(1);
-    expect(completed[0]!.failed).toBe(true);
-    expect(completed[0]!.conclusion).toContain("轮次上限");
-    expect(completed[0]!.conclusion).toContain("收尾调用失败");
   });
 });

@@ -60,9 +60,9 @@ export type HookEvent =
       durationMs?: number;
       agentPath: string;
     }
-  /** 回合结束。reason 缺省为正常收尾；max_turns 为撞单次任务轮次上限被截断
-   *  （与正常收尾可区分，截断率可统计），宿主据此发 warn 日志 */
-  | { type: "Stop"; agentPath: string; reason?: "max_turns" }
+  /** 回合结束（模型回复无工具调用时发）；中断收尾不发本事件，由界面收尾与
+   *  AgentInterrupted 承担 */
+  | { type: "Stop"; agentPath: string }
   | { type: "SessionStart" }
   | { type: "SessionEnd" }
   | { type: "AgentSpawned"; path: string; parentPath: string }

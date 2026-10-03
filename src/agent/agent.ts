@@ -81,8 +81,6 @@ export interface AgentOptions {
   tools?: Tool[];
   /** 初始消息（会话续跑时传入历史），默认为空 */
   initialMessages?: Message[];
-  /** 最大轮数，防止失控 */
-  maxTurns?: number;
   /** 上下文压缩配置；不传则不做撞线压缩 */
   compactConfig?: CompactConfig;
   /** 撞线自动压缩开关（缺省开）：false 仅关掉撞线自动触发；压缩配置仍供
@@ -122,7 +120,6 @@ export class Agent {
   private readonly modelClient: ModelClient;
   private readonly modelId: string;
   private readonly systemPrompt: string;
-  private readonly maxTurns: number;
   /** 只读快工具正常执行超时（ms） */
   private readonly toolTimeoutMs: number;
   /** 协作子 agent 的提示词附加段：派生时拼进子 agent 系统提示词 */
@@ -163,8 +160,6 @@ export class Agent {
   private compactDisabled = false;
   /** 历史被改写标记（压缩/裁剪/超窗剥组改过已落盘消息）：宿主据此重写持久化，防落盘与内存错位 */
   private historyRewritten = false;
-  /** 已执行的 turn 数（与 maxTurns 比较，防失控） */
-  private turnCount = 0;
   /** Stop 已触发：run 结束；多 Agent 场景下收件箱来消息可唤醒续跑 */
   private stopped = false;
   /** 是否有活跃的续跑循环（防重复驱动：忙时投递只入队，活跃循环自行消费） */
@@ -187,7 +182,6 @@ export class Agent {
     this.modelId = options.modelId;
     this.systemPrompt = options.systemPrompt;
     this.thinkingLevelRef = options.thinkingLevelRef;
-    this.maxTurns = options.maxTurns ?? 10;
     this.toolTimeoutMs = options.toolTimeoutMs ?? TOOL_READONLY_TIMEOUT_MS;
     this.subagentPromptSections = options.subagentPromptSections ?? [];
     this.compactConfig = options.compactConfig;
@@ -257,7 +251,6 @@ export class Agent {
       permission: this.permission,
       hooks: this.hooks,
       team: this.team,
-      maxTurns: this.maxTurns,
       outputDir: this.outputDir,
       sessionId: this.sessionId,
       cwd: childCwd,
@@ -275,11 +268,10 @@ export class Agent {
    * @param input 用户输入内容
    */
   start(input: string): void {
-    // 新一轮用户输入到来：重置 Stop 与 turnCount，允许再次跑 turn（单次续跑上限）；
+    // 新一轮用户输入到来：重置 Stop，允许再次跑 turn；
     // 同步复位中断状态（新对话 = 新的生命周期，上一轮中断作废，结论可正常回灌），
     // 并新建中断信号（上一轮的 abort 不作用于新对话）
     this.stopped = false;
-    this.turnCount = 0;
     this.interrupted = false;
     this.interruptController = new AbortController();
     const message = userMessage(input);
@@ -363,8 +355,9 @@ export class Agent {
   /**
    * 续跑循环（供调度器唤醒驱动）：与 run 相同的 turn 推进，但不触发
    * 会话级 Hook（SessionStart / UserPromptSubmit 只属于用户驱动）。
-   * 每轮跑完后：收件箱非空（含排队消息）→ 重置续跑预算继续，下一轮 runTurn 消费注入；
-   * 收件箱空且终态（模型已回复无工具调用或续跑预算耗尽）→ 结束。
+   * 每轮跑完后：收件箱非空（含排队消息）→ 继续续跑，下一轮 runTurn 消费注入；
+   * 收件箱空且终态（模型已回复无工具调用）→ 结束；工具循环续轮（模型仍在调工具）→ 继续。
+   * 循环无轮次上限：自然边界是撞线压缩（水位）与用户中断（Esc）。
    * 空闲（loop 结束）后的唤醒只由 triggerTurn 消息经 Team 驱动发起。
    * 防重入：已有活跃续跑循环时直接返回（忙时投递只入队，活跃循环在每轮结束自行消费）。
    */
@@ -384,22 +377,15 @@ export class Agent {
         // 收件箱非空（含排队消息）→ 继续 loop：下一轮 runTurn 消费注入（排队消息不永远滞留）
         if (this.mailbox.hasPending()) {
           this.stopped = false;
-          this.turnCount = 0;
           // 轮间继续 = 新任务：中断状态一并复位（原实现只入口复位，
           // interrupt 落活跃循环中途 + 排队消息继续时，新任务结论仍被 notifyCompletion 吞掉）
           this.interrupted = false;
           this.interruptController = new AbortController();
           continue;
         }
-        // 收件箱空且终态（本轮模型回复无工具调用 → stopped；或续跑预算耗尽 → 收尾截断）
-        // → 会话结束；两者皆否则继续下一轮（工具循环续轮）
+        // 收件箱空且终态（本轮模型回复无工具调用）→ 会话结束；
+        // 否则继续下一轮（工具循环续轮，直到模型收尾或用户中断）
         if (this.stopped) return;
-        if (this.turnCount >= this.maxTurns) {
-          // maxTurns 耗尽收尾：不发 Stop 时宿主收到的最后事件是 done(tool_use)，
-          // 界面永远「运行中」、排队命令不 drain——与「回复无工具调用」分支真正同形
-          yield* this.finalizeMaxTurns();
-          return;
-        }
       }
     } finally {
       this.active = false;
@@ -434,89 +420,10 @@ export class Agent {
   }
 
   /**
-   * 撞轮次上限的收尾（resume 续跑预算耗尽与 runTurn 入口守卫共用）：
-   * 子 agent 补一次禁用工具的收尾模型调用产出结论——结论回灌父即终态，没有第二次机会，
-   * 全靠这次调用；主 agent（含单 agent 会话）合成显式截断提示消息入上下文（并落盘），
-   * TUI 另经 Stop 的截断原因出提示行。收尾后发带 max_turns 原因的 Stop，
-   * 与正常收尾可区分（截断率可统计，宿主据此发 warn 日志）。
-   * 收尾调用失败时上抛走失败终态：父 agent 拿到「撞上限且无结论」的明确失败文本，
-   * 而不是占位说明当结论误判完成（worktree 也不合并——产出不完整）。
-   */
-  private async *finalizeMaxTurns(): AsyncGenerator<StreamEvent> {
-    this.stopped = true;
-    const agentPath = this.agentPath?.toString() ?? "/root";
-    const isChild = this.team !== undefined && this.agentPath !== undefined && !this.agentPath.isRoot();
-    if (!isChild) {
-      await this.appendMessage(
-        userMessage(
-          `已连续执行 ${this.maxTurns} 轮工具调用，达到单次任务轮次上限，本轮到此为止。如需继续请再次发起或让我继续。`,
-          "system",
-        ),
-      );
-      await this.safeEmit({ type: "Stop", agentPath, reason: "max_turns" });
-      return;
-    }
-    const startedAt = Date.now();
-    let firstEventMs: number | undefined;
-    let usage: ModelUsage | undefined;
-    let stopReason: string | undefined;
-    // 收尾实际产出模型：路由切到备选时更新，署名与同模型回传判定都靠它（meta.model）
-    let effectiveModel = this.modelId;
-    const collected: StreamEvent[] = [];
-    try {
-      // 收尾调用不带工具：模型只能产出文本结论（正常轮工具循环可能就是撞线主因）
-      const context = createContext(this.systemPrompt, this.requestMessages(), [], this.contextThinkingLevel());
-      for await (const event of withInterruptTimeout(
-        this.modelClient.stream(this.modelId, context, { signal: this.interruptController.signal }),
-        this.interruptController.signal,
-        INTERRUPT_STREAM_TIMEOUT_MS,
-      )) {
-        if (this.interruptController.signal.aborted) break;
-        firstEventMs ??= Date.now() - startedAt;
-        if (event.type === "done") {
-          stopReason = event.stopReason;
-          usage = event.usage;
-        }
-        if (event.type === "model_fallback") {
-          effectiveModel = event.to;
-        }
-        collected.push(event);
-        yield event;
-      }
-      await this.emitLlmCallEnd({
-        model: effectiveModel,
-        durationMs: Date.now() - startedAt,
-        firstEventMs,
-        usage,
-        stopReason,
-        ...(this.interruptController.signal.aborted ? { error: "用户中断" } : {}),
-      });
-    } catch (err) {
-      await this.emitLlmCallEnd({
-        model: effectiveModel,
-        durationMs: Date.now() - startedAt,
-        firstEventMs,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      // 用户打断：中断路径已承担终态语义（AgentInterrupted），不发截断 Stop、不上抛
-      if (this.interruptController.signal.aborted) return;
-      throw new Error(
-        `已达单次任务轮次上限 ${this.maxTurns}，收尾调用失败：${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    // 打断或未收到任何流事件（拼不出消息）：不发截断 Stop，结论由占位/失败路径兜底
-    if (this.interruptController.signal.aborted || collected.length === 0) return;
-    const assistant = await assembleAssistantMessage(toAsyncIterable(collected));
-    assistant.meta = { ...assistant.meta, model: effectiveModel };
-    await this.appendMessage(assistant);
-    await this.safeEmit({ type: "Stop", agentPath, reason: "max_turns" });
-  }
-
-  /**
    * 执行单个 turn（多 Agent 协作的 turn 级调度单元）。
    * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
    * 无工具调用则置 Stop 结束，否则执行工具调用并回灌结果。
-   * 结束（Stop / 达到 maxTurns）后不再产生事件；收件箱消息可在后续注入唤醒续跑。
+   * 结束（Stop）后不再产生事件；收件箱消息可在后续注入唤醒续跑。
    * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发，本方法保持纯粹。
    */
   async *runTurn(): AsyncGenerator<StreamEvent> {
@@ -524,11 +431,6 @@ export class Agent {
     // 置于守卫之前——消息真实在上下文中，与本轮是否跑起来无关
     this.flushPendingRepairMirrors();
     if (this.stopped) return;
-    if (this.turnCount >= this.maxTurns) {
-      // maxTurns 耗尽收尾（与 resume 续跑预算耗尽共用，见 finalizeMaxTurns）
-      yield* this.finalizeMaxTurns();
-      return;
-    }
 
     await this.maybeCompact();
     // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本）
@@ -681,7 +583,6 @@ export class Agent {
       return;
     }
     await this.appendMessage(assistant);
-    this.turnCount++;
 
     const calls = toolCallsOf(assistant);
     if (calls.length === 0) {

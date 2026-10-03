@@ -454,7 +454,13 @@ describe("Agent 主循环：turn 内真打断", () => {
   it("只读快工具正常完成：超时兜底不误伤，正常结果回灌", async () => {
     vi.useFakeTimers();
     const client: ModelClient = {
-      async *stream() {
+      async *stream(_modelId, ctx) {
+        // 回灌结果后模型总结收尾（轮次上限已撤销，mock 必须自己收敛，不能永远发工具调用）
+        if (ctx.messages.some((m) => m.role === "tool_result")) {
+          yield { type: "text_delta", text: "完成" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
         yield { type: "toolcall_start", index: 0, id: "call_1", name: "glob" };
         yield { type: "toolcall_end", index: 0 };
         yield { type: "done", stopReason: "tool_use" };

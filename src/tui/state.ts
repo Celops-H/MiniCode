@@ -943,23 +943,6 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       // 只把主 agent（/root）的 Stop 视为回合空闲：子 agent 每轮结束也发 Stop，
       // 放行会把主界面误打成「空闲」（Esc 判定依赖状态，见 hasRunningAgent）
       if (event.agentPath && event.agentPath !== "/root") return state;
-      // 截断收尾追加常驻提示行：agent 合成的截断说明只入上下文/落盘，实时界面靠这里收束
-      // （原实现无任何告警，用户看到「模型不说话」）
-      if (event.reason === "max_turns") {
-        return {
-          ...state,
-          status: "idle",
-          blocks: [
-            ...state.blocks,
-            {
-              kind: "notice",
-              id: `notice_${state.blocks.length}`,
-              text: "已连续多轮执行工具调用，达到单次任务轮次上限，本轮到此为止",
-              time: formatTime(),
-            },
-          ],
-        };
-      }
       return { ...state, status: "idle" };
     default:
       return state;

@@ -30,8 +30,8 @@ export const COLLAB_SUBAGENT_PROMPT =
 const AGENT_NAME_PATTERN = /^[a-z0-9_]+$/;
 
 /**
- * 失败结果：协作工具的守卫失败（名字/路径/额度等）统一按失败回灌，
- * 父 agent 才能把命名失败、额度超限当失败处理而不是当正常结果消费
+ * 失败结果：协作工具的守卫失败（名字/路径/深度等）统一按失败回灌，
+ * 父 agent 才能把命名失败、深度超限当失败处理而不是当正常结果消费
  */
 function failure(text: string): { output: string; isError: true } {
   return { output: text, isError: true };
@@ -110,7 +110,7 @@ function spawnAgentTool(deps: CollabDeps): Tool {
         }
         return `已派生 ${path}，初始任务已下达`;
       } catch (err) {
-        // 创建/投递中途失败：释放已预留的 spawn 槽位与路径（防计数泄漏）
+        // 创建/投递中途失败：释放已预留的 spawn 槽位与路径（防路径泄漏）
         deps.team.releaseSpawn(path);
         throw err;
       }

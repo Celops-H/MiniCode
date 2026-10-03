@@ -8,7 +8,6 @@ import type { ModelClient } from "../../src/agent/index.js";
 import { PRUNED_MARKER, MEMORY_REQUEST_MARKER } from "../../src/context/index.js";
 import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage, type Context, type ThinkingLevel } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
-import { HookBus } from "../../src/hooks/index.js";
 import { executeDeadline } from "../../src/agent/agent.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
@@ -71,26 +70,6 @@ describe("Agent 主循环：模型对话闭环", () => {
       role: "assistant",
       content: [{ type: "text", text: "第一轮回复" }],
     });
-  });
-
-  it("start 重置 turnCount：每轮用户输入独立受 maxTurns 限制", async () => {
-    const agent = new Agent({
-      modelClient: mockTextClient("回复"),
-      modelId: "mock",
-      systemPrompt: "助手",
-      maxTurns: 1,
-    });
-    agent.start("第一个问题");
-    for await (const _ of agent.run()) {
-      // 消费事件流
-    }
-    const events: StreamEvent[] = [];
-    agent.start("第二个问题");
-    for await (const e of agent.run()) events.push(e);
-
-    // 修复回归：turnCount 不重置会累计到 maxTurns，第二轮输入静默无响应
-    expect(events.length).toBeGreaterThan(0);
-    expect(agent.getMessages()).toHaveLength(4);
   });
 
   it("resetHistory 清空消息历史：清空后再 start 只带新输入（/clear 回会话新建态用）", async () => {
@@ -1400,53 +1379,28 @@ describe("Agent 主循环：模型对话闭环", () => {
 });
 
 
-describe("maxTurns 耗尽收尾", () => {
-  it("maxTurns 耗尽时发 Stop Hook 事件（TUI 不会永远停在运行中）", async () => {
-    const tool: Tool = {
-      name: "echo",
-      description: "回显",
-      inputSchema: z.object({ text: z.string() }),
-      isReadOnly: false,
-      maxResultSizeChars: 1000,
-      execute: (input) => String((input as { text: string }).text),
-    };
-    // 模型永远调工具：第 1 轮执行工具后 turnCount=1 达 maxTurns，循环收尾补发 Stop
-    const client: ModelClient = {
-      async *stream() {
-        yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
-        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ text: "x" }) };
-        yield { type: "toolcall_end", index: 0 };
-        yield { type: "done", stopReason: "tool_calls" };
-      },
-    };
-    // Stop 是 Hook 事件（TUI 靠它回空闲并驱动排队出队），经 HookBus 断言
-    const hooks = new HookBus();
-    const stopEvents: Array<{ reason?: string }> = [];
-    hooks.on("Stop", (e) => {
-      stopEvents.push({ reason: e.reason });
-    });
+describe("结论文本与消息署名", () => {
+  it("轮内模型切换：assistant 消息署名跟随备选模型（meta.model 供同模型回传判定）", async () => {
     const agent = new Agent({
-      modelClient: client,
+      modelClient: {
+        async *stream() {
+          // 主模型流内失败，路由切到备选后继续产出
+          yield { type: "model_fallback", from: "mock", to: "backup", reason: "error" };
+          yield { type: "text_delta", text: "备选模型产出" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
       modelId: "mock",
       systemPrompt: "助手",
-      tools: [tool],
-      maxTurns: 1,
-      hooks,
     });
-    const events: StreamEvent[] = [];
     agent.start("跑");
-    for await (const e of agent.run()) {
-      events.push(e);
+    for await (const _ of agent.run()) {
+      // 消费事件流
     }
-    // 撞线收尾：Stop 带 max_turns 原因（与正常收尾可区分，可统计截断率）
-    expect(stopEvents).toHaveLength(1);
-    expect(stopEvents[0]!.reason).toBe("max_turns");
-    // 主 agent 合成显式截断提示消息入上下文（不再是「模型不说话」）
-    const messages = agent.getMessages();
-    expect(messages.at(-1)).toMatchObject({ role: "user", source: "system" });
-    expect(String(messages.at(-1)?.content)).toContain("轮次上限");
-    // 事件流照常以 done(tool_calls) 结束，截断收尾不产生额外流事件
-    expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "tool_calls" });
+    // 产出记到实际产出模型名下：meta.model 记错主模型会把备选模型的思考签名发给主模型
+    const lastAssistant = agent.getMessages().findLast((m) => m.role === "assistant");
+    expect(JSON.stringify(lastAssistant?.content)).toContain("备选模型产出");
+    expect(lastAssistant?.meta?.model).toBe("backup");
   });
 
   it("conclusionText 只认最后一条 assistant 消息：全程无正文返回占位而非早期旧文本", () => {

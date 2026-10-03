@@ -18,7 +18,7 @@ const DECISION_SOURCES: Record<string, string> = {
 /**
  * 把 hook 事件流水接到日志（埋点）：
  * 模型请求耗时与结果、token 用量（debug）、fallback 决策、压缩动作、工具失败详情、
- * 权限拒绝。事件级失败（模型请求失败、工具失败、权限拒绝、压缩失败、截断收尾）走
+ * 权限拒绝。事件级失败（模型请求失败、工具失败、权限拒绝、压缩失败）走
  * warn，按级别可筛出问题行。隐私口径：info 级不含消息正文与工具参数全文，
  * 参数只在 debug 级展开。
  * @param bus hook 事件总线
@@ -53,12 +53,6 @@ export function attachHookLogging(bus: HookBus, logger: Logger, sessionId?: stri
         ? `完成：消息 ${e.messagesBefore} → ${e.messagesAfter} 条`
         : `失败${e.error ? `（${e.error}）` : ""}`;
       emit(e.ok ? "info" : "warn", `压缩${e.trigger === "auto" ? "（撞线自动）" : ""}${outcome}`);
-    }),
-    bus.on("Stop", (e) => {
-      // 撞轮次上限的截断收尾：曾与正常收尾同形无法统计，warn 级可筛
-      if (e.reason === "max_turns") {
-        emit("warn", `agent ${e.agentPath} 达到单次任务轮次上限，本轮被截断`);
-      }
     }),
     bus.on("PostToolUseFailure", (e) => {
       emit("warn", `工具失败 ${e.toolName}：${e.error}`);

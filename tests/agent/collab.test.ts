@@ -417,28 +417,6 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(expectFailure(await tool.execute({ target: "Bad/Name", message: "x" }))).toContain("agent 名");
   });
 
-  it("spawn_agent：总数上限守卫", async () => {
-    const team = new Team({ maxAgents: 1 });
-    const root = new Agent({
-      modelClient: toolThenTextClient("spawn_agent", { agentName: "a", prompt: "1" }),
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    team.registerRoot(root);
-    root.start("派");
-    for await (const _ of root.run()) {
-      // 消费
-    }
-    const first = root.getMessages().find((m) => m.role === "tool_result");
-    expect(String(first?.content)).toContain("已派生 /root/a");
-
-    // 第二个 spawn 被总数上限拒绝（按失败回灌）
-    const tool = collabTool(team, "spawn_agent");
-    expect(expectFailure(await tool.execute({ agentName: "b", prompt: "2" }))).toContain("总数超限");
-    expect(team.resolveAgent(AgentPath.parse("/root/b") as AgentPath)).toBeUndefined();
-  });
-
   it("spawn_agent：非法 agent 名被 schema 拒绝（约束前置，不再当正常结果回灌）", async () => {
     const tool = collabTool(new Team(), "spawn_agent");
     const bad = ["Bad-Name", "大写", "has/slash", ""];
