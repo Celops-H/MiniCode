@@ -7,8 +7,8 @@ import { TRACE_FORMAT, type TraceEventLine, type TraceHeader, type TraceMessageL
 
 /**
  * 轨迹读取的通用原语：流式逐行扫描、按 kind/event/agentPath
- * 过滤、容错反序列化。TUI 的累计重建与工具耗时回填是它的两个内置消费方；
- * 指标聚合口径不进本模块，留在消费侧（评测）。
+ * 过滤、容错反序列化。TUI 的累计重建、工具耗时回填与子 agent 终态读取
+ * （readAgentOutcomes）是它的内置消费方；指标聚合口径不进本模块，留在消费侧（评测）。
  *
  * 容错规则：未知 kind / event 跳过不报错——事件类型是开放
  * 清单，前向兼容靠这条，新增事件类型老读者零改动；损坏行同样跳过（宁丢一行
@@ -97,6 +97,57 @@ export class TraceReader {
       yield line;
     }
   }
+}
+
+/** 子 agent 终态（轨迹读取侧口径）：按 AgentCompleted.failed 与 AgentInterrupted
+ *  区分完成/失败/中断，成功率与失败计数据此统计（口径统一在此，评测侧不再
+ *  自行解释原始事件负载） */
+export interface AgentOutcome {
+  /** 子 agent 路径（如 /root/worker） */
+  path: string;
+  /** completed 正常完成（含未产出正文）；failed 失败（驱动失败或结论不可信）；interrupted 被中断 */
+  outcome: "completed" | "failed" | "interrupted";
+  /** 完成结论（正常完成时可能为空串；失败时为明确失败文本） */
+  conclusion?: string;
+  /** worktree 合并结果（有隔离工作区且发生合并时存在） */
+  mergeResult?: string;
+}
+
+/**
+ * 读取轨迹中子 agent 的终态：扫描 AgentCompleted / AgentInterrupted 事件，
+ * 每个子 agent 取最后一次终态（followup 唤醒再跑后以最新终态为准）。
+ * 注意边界：终态之后又派生但未跑到下一次终态（进程被杀等非正常终止）时，
+ * 结果里仍是那次旧终态；需要精确区分的消费方配合 AgentSpawned 自行核对。
+ * @param filePath 轨迹文件路径
+ * @returns 终态列表（按各 agent 首次到达终态的顺序；文件不存在返回空列表，
+ *   读取中途异常返回已扫描部分）
+ */
+export async function readAgentOutcomes(filePath: string): Promise<AgentOutcome[]> {
+  const last = new Map<string, AgentOutcome>();
+  try {
+    for await (const line of TraceReader.lines(filePath)) {
+      if (line.kind !== "event") continue;
+      if (line.event !== "AgentCompleted" && line.event !== "AgentInterrupted") continue;
+      // 负载可能整段缺失（手改/旧版本/评测后处理产物）：跳过该行不中断扫描
+      //（与模块「宁丢一行不拖垮整体」的容错口径一致）
+      const data = (line.data ?? {}) as Record<string, unknown>;
+      const path = data.path;
+      if (typeof path !== "string") continue;
+      if (line.event === "AgentInterrupted") {
+        last.set(path, { path, outcome: "interrupted" });
+        continue;
+      }
+      last.set(path, {
+        path,
+        outcome: data.failed === true ? "failed" : "completed",
+        ...(typeof data.conclusion === "string" ? { conclusion: data.conclusion } : {}),
+        ...(typeof data.mergeResult === "string" ? { mergeResult: data.mergeResult } : {}),
+      });
+    }
+  } catch {
+    // 文件不存在等读取失败：返回已扫描部分（首行即失败则为空）
+  }
+  return [...last.values()];
 }
 
 /**

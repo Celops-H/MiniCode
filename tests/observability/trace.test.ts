@@ -11,6 +11,7 @@ import {
   attachRecorder,
   cleanupStaleTraces,
   deleteTrace,
+  readAgentOutcomes,
   Recorder,
   TraceReader,
   TraceWriter,
@@ -476,6 +477,75 @@ describe("TraceReader：流式读取与容错", () => {
     try {
       const header = await TraceReader.readHeader(path.join(dir, "nope.jsonl"));
       expect(header).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("readAgentOutcomes 按 failed 与 AgentInterrupted 区分终态，每 agent 取最后一次终态", async () => {
+    const dir = await tmpDir();
+    try {
+      const tracesDir = path.join(dir, "traces");
+      await mkdir(tracesDir, { recursive: true });
+      const file = path.join(tracesDir, "s6.jsonl");
+      const ev = (event: string, data: Record<string, unknown>): string =>
+        JSON.stringify({ kind: "event", event, agentPath: String(data.path ?? "/root"), timestamp: "t", data });
+      await writeFile(
+        file,
+        [
+          JSON.stringify({ format: TRACE_FORMAT, formatVersion: 1, sessionId: "s6", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" }),
+          ev("AgentSpawned", { path: "/root/ok", parentPath: "/root" }),
+          ev("AgentCompleted", { path: "/root/ok", parentPath: "/root", conclusion: "任务完成", mergeResult: "已合并" }),
+          ev("AgentSpawned", { path: "/root/bad", parentPath: "/root" }),
+          // 失败终态：AgentCompleted.failed 标记（此前读取侧不读，失败被算作完成）
+          ev("AgentCompleted", { path: "/root/bad", parentPath: "/root", conclusion: "子代理 bad 失败：模型链耗尽", failed: true }),
+          ev("AgentSpawned", { path: "/root/gone", parentPath: "/root" }),
+          ev("AgentInterrupted", { path: "/root/gone", parentPath: "/root" }),
+          // followup 唤醒后再次完成：以最新终态为准
+          ev("AgentInterrupted", { path: "/root/retry", parentPath: "/root" }),
+          ev("AgentCompleted", { path: "/root/retry", parentPath: "/root", conclusion: "重跑后完成" }),
+        ].join("\n"),
+        "utf8",
+      );
+
+      const outcomes = await readAgentOutcomes(file);
+      expect(outcomes).toEqual([
+        { path: "/root/ok", outcome: "completed", conclusion: "任务完成", mergeResult: "已合并" },
+        { path: "/root/bad", outcome: "failed", conclusion: "子代理 bad 失败：模型链耗尽" },
+        { path: "/root/gone", outcome: "interrupted" },
+        { path: "/root/retry", outcome: "completed", conclusion: "重跑后完成" },
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("readAgentOutcomes：空结论的完成保留空串，负载缺失/字段残缺的行跳过不中断扫描", async () => {
+    const dir = await tmpDir();
+    try {
+      const tracesDir = path.join(dir, "traces");
+      await mkdir(tracesDir, { recursive: true });
+      const file = path.join(tracesDir, "s7.jsonl");
+      await writeFile(
+        file,
+        [
+          JSON.stringify({ format: TRACE_FORMAT, formatVersion: 1, sessionId: "s7", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" }),
+          JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/quiet", timestamp: "t", data: { path: "/root/quiet", parentPath: "/root", conclusion: "" } }),
+          // 负载整段缺失（手改/旧版本/评测后处理产物）：跳过该行，后续 agent 终态照常读出
+          JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/nodata", timestamp: "t" }),
+          // path 缺失与非法类型：同样跳过
+          JSON.stringify({ kind: "event", event: "AgentInterrupted", agentPath: "/root/nopath", timestamp: "t", data: { parentPath: "/root" } }),
+          JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/badpath", timestamp: "t", data: { path: 123 } }),
+          // conclusion 字段缺失（老轨迹）：条件展开省略该键
+          JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/after", timestamp: "t", data: { path: "/root/after", parentPath: "/root" } }),
+        ].join("\n"),
+        "utf8",
+      );
+      expect(await readAgentOutcomes(file)).toEqual([
+        { path: "/root/quiet", outcome: "completed", conclusion: "" },
+        { path: "/root/after", outcome: "completed" },
+      ]);
+      expect(await readAgentOutcomes(path.join(dir, "nope.jsonl"))).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

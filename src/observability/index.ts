@@ -10,7 +10,8 @@ import { Recorder, type RecorderOptions } from "./recorder.js";
 export { TRACE_FORMAT, TRACE_FORMAT_VERSION, buildHeaderLine } from "./format.js";
 export type { TraceHeader, TraceLine, TraceEventLine, TraceMessageLine } from "./format.js";
 export { TraceWriter } from "./trace-writer.js";
-export { TraceReader, deleteTrace, cleanupStaleTraces } from "./trace-reader.js";
+export { TraceReader, deleteTrace, cleanupStaleTraces, readAgentOutcomes } from "./trace-reader.js";
+export type { AgentOutcome } from "./trace-reader.js";
 export { Recorder } from "./recorder.js";
 export type { RecorderOptions } from "./recorder.js";
 
