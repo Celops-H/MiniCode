@@ -320,15 +320,22 @@ function CommandView(props: { b: CommandBlock }): JSX.Element {
   );
 }
 
-/** 流式尾：思考与文本增量累积（state.streaming） */
-function StreamingView(props: { s: Streaming }): JSX.Element {
+/**
+ * 流式尾：思考与文本增量累积（state.streaming）。导出供层 1 用例直接驱动「收尾当次更新
+ * 读到空 streaming」这一形态（生产路径仍只由 Messages 渲染）。
+ * props.s 按可空读取：收尾把 state.streaming 置空的那一次更新里，本组件的条件求值可能
+ * 先于外层「有流式才渲染」的移除生效，此时 props.s 已是 undefined，直接读 thinking/text
+ * 会抛 TypeError。该异常沿宿主渲染回调上抛会中断本轮收尾（assistant 不落盘、轮末 Stop
+ * 不发，界面永久停在运行中），真机恢复会话后的首条消息上出现过。
+ */
+export function StreamingView(props: { s?: Streaming }): JSX.Element {
   return (
     <box flexDirection="column">
-      <Show when={props.s.thinking}>
+      <Show when={props.s?.thinking}>
         <text fg={theme.textMuted}>思考（展开中…）</text>
       </Show>
-      <Show when={props.s.text}>
-        <text>{props.s.text}</text>
+      <Show when={props.s?.text}>
+        <text>{props.s?.text}</text>
       </Show>
     </box>
   );

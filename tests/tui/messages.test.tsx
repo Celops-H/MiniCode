@@ -4,7 +4,7 @@
 import { createSignal } from "solid-js";
 import { testRender } from "@opentui/solid";
 import { it, expect } from "vitest";
-import { Messages } from "../../src/tui/view/Messages.js";
+import { Messages, StreamingView } from "../../src/tui/view/Messages.js";
 import type { BlockView, Streaming } from "../../src/tui/state.js";
 
 const app = (blocks: BlockView[], streaming?: Streaming) =>
@@ -153,6 +153,19 @@ it("流式尾显示思考与增量文本", async () => {
   const frame = setup.captureCharFrame();
   expect(frame).toContain("正在处理");
   expect(frame).toContain("思考（展开中…）");
+});
+
+it("流式尾：收尾当帧 streaming 已置空时不抛异常（done 清空 store 节点的防御）", async () => {
+  // 收尾把 state.streaming 清为 undefined 的那一帧里，流式尾组件的条件求值可能先于
+  // 外层「有流式才渲染」的移除完成——s 拿到 undefined。旧实现在这里抛 TypeError，
+  // 异常沿宿主渲染回调上抛会中断本轮收尾（回复不落盘、界面卡「运行中」）
+  const [streaming, setStreaming] = createSignal<Streaming | undefined>({ text: "半截回复", thinking: "想" });
+  const setup = await testRender(() => <StreamingView s={streaming()} />, { width: 40, height: 6 });
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("半截回复");
+  setStreaming(undefined);
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).not.toContain("半截回复");
 });
 
 it("错误块标红警示", async () => {

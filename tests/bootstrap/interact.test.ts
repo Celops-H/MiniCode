@@ -926,6 +926,165 @@ describe("交互循环", () => {
 
     expect(events.some((e) => e.type === "error" && e.message === "流中断")).toBe(true);
   });
+
+  it("渲染回调抛错不中断本轮：后续事件照常消费、回复完整落盘、轮末 Stop 照发", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const stops: string[] = [];
+    const hooks = new HookBus();
+    hooks.on("Stop", (e) => {
+      stops.push(e.agentPath);
+    });
+    const agent = new Agent({
+      // 三段增量：首个渲染失败后仍要逐个消费后续事件，落盘正文必须是完整三段
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "第一段 " };
+          yield { type: "text_delta", text: "第二段 " };
+          yield { type: "text_delta", text: "第三段" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      hooks,
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+    // 渲染层抛错（resume 首条消息实测的 TypeError 形态）：只应算界面上的一次失败
+    const outputs: string[] = [];
+    let deltas = 0;
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+      onEvent: (event) => {
+        if (event.type === "text_delta") {
+          deltas++;
+          throw new TypeError("Cannot read properties of undefined (reading 'thinking')");
+        }
+      },
+      hooks,
+    });
+
+    // 本轮收尾未被渲染异常带走：失败后的增量照常消费，assistant 落盘且轮末 Stop 发出
+    //（界面不会永远停在运行中）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toHaveLength(2);
+    expect(loaded.getMessages()[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "第一段 第二段 第三段" }],
+    });
+    expect(stops).toEqual(["/root"]);
+    // 三个增量都送到了渲染回调（失败后不停止交付），提示只报一次不按事件刷屏
+    expect(deltas).toBe(3);
+    expect(outputs.filter((t) => t.includes("[渲染失败]")).length).toBe(1);
+  });
+
+  it("失败提示的上报通道自身抛错，也不把中断放回事件流（回复仍完整落盘）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const stops: string[] = [];
+    const hooks = new HookBus();
+    hooks.on("Stop", (e) => {
+      stops.push(e.agentPath);
+    });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复内容"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      hooks,
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      // 上报通道（TUI 的 toast 经 store 更新渲染）与刚失败的渲染同类，可能同样抛错
+      write: (text) => {
+        if (text.includes("[渲染失败]")) throw new Error("提示渲染失败");
+      },
+      onEvent: (event) => {
+        if (event.type === "text_delta") throw new TypeError("Cannot read properties of undefined (reading 'thinking')");
+      },
+      hooks,
+    });
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages()).toHaveLength(2);
+    expect(loaded.getMessages()[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "回复内容" }],
+    });
+    expect(stops).toEqual(["/root"]);
+  });
+
+  it("resume 恢复会话后首条消息：渲染异常不吞本轮，回复入历史且盘上补齐", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const created = await store.createSession({ model: "mock" });
+    // 上一轮会话：盘上留两条历史（模拟上次退出时的会话）
+    const seed = new Agent({ modelClient: mockTextClient("上一轮回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+    async function* seedInputs(): AsyncIterable<string> {
+      yield "上一轮问题";
+      yield "/exit";
+    }
+    await interact({ agent: seed, store, session: created, inputs: seedInputs(), write: () => {}, onEvent: () => {} });
+
+    // 恢复：从盘上重载会话，agent 带历史（与宿主 resume 同一路径），首条消息渲染抛错
+    const resumed = await store.loadSession(created.meta.id);
+    const stops: string[] = [];
+    const hooks = new HookBus();
+    hooks.on("Stop", (e) => {
+      stops.push(e.agentPath);
+    });
+    const agent = new Agent({
+      modelClient: mockTextClient("恢复后的回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      initialMessages: resumed.getMessages(),
+      hooks,
+    });
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+    await interact({
+      agent,
+      store,
+      session: resumed,
+      inputs: inputs(),
+      write: () => {},
+      onEvent: (event) => {
+        if (event.type === "text_delta") throw new TypeError("Cannot read properties of undefined (reading 'thinking')");
+      },
+      hooks,
+    });
+
+    // 恢复后首条消息完整跑完：历史 2 条 + 本轮 user/assistant，回复不因渲染异常丢失
+    const loaded = await store.loadSession(created.meta.id);
+    expect(loaded.getMessages()).toHaveLength(4);
+    expect(loaded.getMessages()[3]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "恢复后的回复" }],
+    });
+    expect(stops).toEqual(["/root"]);
+  });
 });
 
 describe("环境信息进系统提示词", () => {

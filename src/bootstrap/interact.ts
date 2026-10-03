@@ -19,6 +19,7 @@ export interface InteractOptions {
    */
   write: (text: string) => void;
   /** 流式事件渲染回调（必填：渲染归属调用方，TUI 结构化消费、测试注入收集回调）。
+   * 回调抛错在宿主循环内就地吞掉（每轮首个失败经 write 报一次），不中断本轮事件消费；
    * 注意与 Team.onRootEvent 配套接入：onEvent 覆盖用户输入驱动的流，onRootEvent 覆盖
    * root 后台驱动（迟到子 agent 结论）的流，两侧都要接才不遗漏。 */
   onEvent: (event: StreamEvent) => void;
@@ -119,8 +120,26 @@ export async function interact(options: InteractOptions): Promise<void> {
     // 历史被改写（压缩/裁剪/剥组）按内存整份重写，否则补落盘游标之后的新消息，与正常轮末同一套
     try {
       // 渲染流式事件：文本与思考直接输出，工具调用与错误加标记（渲染归属调用方）
+      // 渲染异常边界：渲染是宿主的事（界面/store 更新），抛出只应算界面上的一次失败，
+      // 不能中断本轮事件消费——一旦从消费循环里抛出，agent 的事件流被提前收尾，
+      // assistant 消息不落盘、轮末 Stop 不发，宿主界面停在「运行中」且再也回不来。
+      // 首个失败经 write 报一次（宿主可自行呈现），后续静默，避免每个事件都刷一条
+      let renderFailureReported = false;
       for await (const event of agent.run()) {
-        render(event);
+        try {
+          render(event);
+        } catch (err) {
+          if (!renderFailureReported) {
+            renderFailureReported = true;
+            // 上报通道自身也可能抛（TUI 的 write 经 store 更新渲染，与刚失败的渲染同类），
+            // 再兜一层，否则等于把刚挡下的中断从 catch 里放回事件流
+            try {
+              write(`\n[渲染失败] ${err instanceof Error ? err.message : String(err)}（本轮回复照常落盘）\n`);
+            } catch {
+              // 失败提示丢了不致命，本轮照常跑完
+            }
+          }
+        }
       }
     } catch (err) {
       // 会话期错误：注入 onError 时渲染后继续输入循环——单次模型链瞬时失败
