@@ -343,6 +343,26 @@ describe("parseStream：五类现象", () => {
     ]);
   });
 
+  it("content_block_start 携带思考首段内容同样不丢（思考块形态）", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "先想" } },
+        { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "再想" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "thinking_delta", thinking: "先想" },
+      { type: "thinking_delta", thinking: "再想" },
+      { type: "done", stopReason: "end_turn" },
+    ]);
+  });
+
   it("正文里的 <thinking> 标签转回思考事件", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(
@@ -359,27 +379,6 @@ describe("parseStream：五类现象", () => {
     expect(events).toEqual([
       { type: "thinking_delta", thinking: "推理" },
       { type: "text_delta", text: "答案" },
-      { type: "done", stopReason: "end_turn" },
-    ]);
-  });
-
-  it("正文累积全文下发时剥离前缀（防滚雪球重复）", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen(
-        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "第一段" } },
-        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "第一段第二段" } },
-        { type: "content_block_stop", index: 0 },
-        { type: "message_delta", delta: { stop_reason: "end_turn" } },
-        { type: "message_stop" },
-      ),
-    )) {
-      events.push(e);
-    }
-    expect(events).toEqual([
-      { type: "text_delta", text: "第一段" },
-      { type: "text_delta", text: "第二段" },
       { type: "done", stopReason: "end_turn" },
     ]);
   });

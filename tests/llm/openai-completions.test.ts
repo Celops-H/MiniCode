@@ -466,42 +466,6 @@ describe("parseStream：五类现象", () => {
     ]);
   });
 
-  it("正文累积全文下发时剥离前缀（防滚雪球重复）", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen(
-        { choices: [{ delta: { content: "第一段" }, index: 0 }] },
-        { choices: [{ delta: { content: "第一段第二段" }, index: 0 }] },
-        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
-      ),
-    )) {
-      events.push(e);
-    }
-    expect(events).toEqual([
-      { type: "text_delta", text: "第一段" },
-      { type: "text_delta", text: "第二段" },
-      { type: "done", stopReason: "stop" },
-    ]);
-  });
-
-  it("思考累积全文下发时同样剥离前缀", async () => {
-    const events: StreamEvent[] = [];
-    for await (const e of protocol.parseStream(
-      chunkGen(
-        { choices: [{ delta: { reasoning_content: "思考" }, index: 0 }] },
-        { choices: [{ delta: { reasoning_content: "思考续" }, index: 0 }] },
-        { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
-      ),
-    )) {
-      events.push(e);
-    }
-    expect(events).toEqual([
-      { type: "thinking_delta", thinking: "思考" },
-      { type: "thinking_delta", thinking: "续" },
-      { type: "done", stopReason: "stop" },
-    ]);
-  });
-
   it("正文里的 <thinking> 标签转回思考事件（模型模仿历史编码格式）", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(

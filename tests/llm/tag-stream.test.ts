@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StreamEvent } from "../../src/core/index.js";
-import { InlineTagFilter, PrefixDeltaGuard } from "../../src/llm/protocol/tag-stream.js";
+import { InlineTagFilter } from "../../src/llm/protocol/tag-stream.js";
 
 /** 依次喂入多段文本，收集全部事件 */
 function feed(filter: InlineTagFilter, ...chunks: string[]): StreamEvent[] {
@@ -114,29 +114,5 @@ describe("flush 边界：恰在开标签后零内容断流", () => {
   it("normal 态零残料 flush 仍返回空（不变量不变）", () => {
     const f = new InlineTagFilter(() => 0);
     expect(feed(f, "正文")).toEqual([{ type: "text_delta", text: "正文" }]);
-  });
-});
-
-describe("PrefixDeltaGuard（累积全文防滚雪球）", () => {
-  it("厂商发累积全文时剥离已发前缀，只发余量", () => {
-    const g = new PrefixDeltaGuard();
-    expect(g.next("AB")).toBe("AB");
-    expect(g.next("ABC")).toBe("C");
-    expect(g.next("ABCD")).toBe("D");
-    expect(g.next("ABCD")).toBe("");
-  });
-
-  it("正常增量流原样通过（不受防重复影响）", () => {
-    const g = new PrefixDeltaGuard();
-    expect(g.next("你")).toBe("你");
-    expect(g.next("好")).toBe("好");
-    expect(g.next("!")).toBe("!");
-  });
-
-  it("前缀不匹配时原样透传并续接累积", () => {
-    const g = new PrefixDeltaGuard();
-    expect(g.next("abc")).toBe("abc");
-    expect(g.next("xyz")).toBe("xyz"); // 不匹配：透传，累积变 "abcxyz"
-    expect(g.next("abcxyz!")).toBe("!"); // 后续累积全文再匹配，只发余量
   });
 });

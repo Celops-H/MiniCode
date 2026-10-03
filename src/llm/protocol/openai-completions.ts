@@ -2,7 +2,7 @@ import type { Context, Message, StreamEvent } from "../../core/index.js";
 import type { TextContent, ThinkingContent, ToolCall, ToolDefinition } from "../../core/index.js";
 import type { ModelUsage } from "../../core/index.js";
 import type { ModelInfo, Protocol } from "../types.js";
-import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
+import { InlineTagFilter } from "./tag-stream.js";
 
 /** delta 的字段形状（兜底 b：choice.message 同形，delta 缺失时回落读它） */
 interface ChoiceDelta {
@@ -110,8 +110,7 @@ export class OpenAICompletionsProtocol implements Protocol {
    * 解析 OpenAI 流式响应，转成统一事件流。
    * OpenAI 每次返回一个增量片段：可能带文本，也可能带某工具调用的参数片段。
    * 工具调用没有独立的结束标记，收 finish_reason 或流尾时统一补发结束事件。
-   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件）与
-   * 前缀剥离器（累积全文下发的厂商防滚雪球重复），见 tag-stream.ts。
+   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件），见 tag-stream.ts。
    * 逐 chunk 收集事件再统一产出（产出顺序不变）：零产出的 chunk 是诊断的记录对象，
    * 也是 error 载荷 chunk、message 兜底 chunk 的统一处理位。
    * @param stream OpenAI 原始流式 chunk（SSE data 解析后的对象）
@@ -130,8 +129,6 @@ export class OpenAICompletionsProtocol implements Protocol {
     // （厂商正常 index 从 0 起，负数空间不撞）；无 id 的续片归并最近打开的调用
     let nextSyntheticVendorIndex = -1;
     let lastOpenedVendorIndex: number | undefined;
-    const textGuard = new PrefixDeltaGuard();
-    const thinkingGuard = new PrefixDeltaGuard();
     const tagFilter = new InlineTagFilter(() => nextToolIndex++);
     let finishReason: string | undefined;
     // 真实用量：流尾 usage chunk（include_usage）的 prompt/completion tokens，
@@ -170,8 +167,7 @@ export class OpenAICompletionsProtocol implements Protocol {
             // 取首个非空（同一 chunk 多字段同内容的厂商只发一次，防重复输出）
             const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.reasoning_text;
             if (reasoning) {
-              const thinking = thinkingGuard.next(reasoning);
-              if (thinking) events.push({ type: "thinking_delta", thinking });
+              events.push({ type: "thinking_delta", thinking: reasoning });
             }
             if (delta?.content != null) {
               // 正文：字符串当单个文本块；兼容厂商（glm 等）发 content 块数组——
@@ -182,14 +178,13 @@ export class OpenAICompletionsProtocol implements Protocol {
               for (const block of blocks) {
                 const blockThinking = block.thinking ?? block.reasoning_content ?? block.reasoning;
                 if (blockThinking) {
-                  const thinking = thinkingGuard.next(blockThinking);
-                  if (thinking) events.push({ type: "thinking_delta", thinking });
+                  events.push({ type: "thinking_delta", thinking: blockThinking });
                   continue;
                 }
                 // 文本块只认 type 缺省或 text（其他类型块即使带 text 字段也不当正文，防标签泄漏）
                 if (block.type !== undefined && block.type !== "text") continue;
                 if (!block.text) continue;
-                for (const event of tagFilter.push(textGuard.next(block.text))) {
+                for (const event of tagFilter.push(block.text)) {
                   events.push(event);
                 }
               }

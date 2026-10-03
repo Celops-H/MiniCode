@@ -1,7 +1,7 @@
 import type { StreamEvent } from "../../core/index.js";
 
 /**
- * 正文流入站清洗：标签状态机 + 增量前缀剥离。
+ * 正文流入站清洗：标签状态机。
  *
  * 标签状态机的背景：请求侧把历史思考块退化为 `<thinking>...</thinking>` 文本（无
  * signature / 字段回传能力的厂商），部分模型会模仿该格式在正文里输出标签，正文里
@@ -10,11 +10,6 @@ import type { StreamEvent } from "../../core/index.js";
  * - `<tool_call>{JSON}</tool_call>` 段 → 闭合时解析 JSON 转成 toolcall_start/delta/end；
  *   JSON 解析失败把标签内原文按正文发出（内容不丢）
  * 状态机按 chunk 增量扫描，跨 chunk 拆开的标签也能识别（缓冲可能成标签前缀的尾部）。
- *
- * 前缀剥离器的背景：个别厂商把正文/思考以「累积全文」而非增量下发，逐 chunk 原样
- * 透传会滚雪球重复。chunk 恰以已发全文为前缀时只发余量，否则原样透传——正常增量流
- * 不受影响。权衡：极端巧合下（下一增量恰好重复此前全文）会误剥，概率远低于滚雪球
- * 本身的破坏。
  */
 
 /** `<tool_call>` 标签内 JSON 解析出的工具调用 */
@@ -150,28 +145,6 @@ export class InlineTagFilter {
       { type: "toolcall_delta", index, partialJson: JSON.stringify(parsed.input) },
       { type: "toolcall_end", index },
     ];
-  }
-}
-
-/**
- * 正文/思考增量的前缀剥离器：厂商发累积全文时剥离已发前缀，正常增量原样通过。
- */
-export class PrefixDeltaGuard {
-  private prev = "";
-
-  /**
-   * 处理下一段增量。
-   * @param chunk 厂商发来的原始增量
-   * @returns 应实际发出的文本（可能为空串）
-   */
-  next(chunk: string): string {
-    if (this.prev && chunk.startsWith(this.prev)) {
-      const rest = chunk.slice(this.prev.length);
-      this.prev = chunk;
-      return rest;
-    }
-    this.prev += chunk;
-    return chunk;
   }
 }
 

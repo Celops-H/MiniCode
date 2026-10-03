@@ -1,6 +1,6 @@
 import type { Context, ContentBlock, Message, ModelUsage, StreamEvent, ToolDefinition } from "../../core/index.js";
 import type { ModelInfo, Protocol } from "../types.js";
-import { InlineTagFilter, PrefixDeltaGuard } from "./tag-stream.js";
+import { InlineTagFilter } from "./tag-stream.js";
 
 interface AnthropicChunk {
   type?: string;
@@ -56,8 +56,8 @@ export class AnthropicMessagesProtocol implements Protocol {
   /**
    * 解析 Anthropic 流式响应，转成统一事件流。
    * tool_use 参数经 input_json_delta 增量到达；content_block 的 index 映射为工具调用序号。
-   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件）与前缀剥离器
-   * （累积全文下发的厂商防滚雪球重复），按 content 块生命周期各用一份，见 tag-stream.ts。
+   * 正文增量统一过标签状态机（<thinking>/<tool_call> 标签转回对应事件），按 content
+   * 块生命周期各用一份，见 tag-stream.ts。
    * @param stream Anthropic 原始流式事件对象
    * @returns 统一事件流
    */
@@ -72,45 +72,25 @@ export class AnthropicMessagesProtocol implements Protocol {
     // 缓存读/写 token：message_start 给初值，message_delta 若带累计值取最后一次
     let cacheReadTokens: number | undefined;
     let cacheWriteTokens: number | undefined;
-    // 每个 text/thinking 块各一份清洗状态（块开始新建、块结束 flush），按块 index 取用
-    const textGuards = new Map<number, PrefixDeltaGuard>();
-    const thinkingGuards = new Map<number, PrefixDeltaGuard>();
+    // text 块各一份标签清洗状态（块开始新建、块结束 flush），按块 index 取用；思考增量直发无状态
     const tagFilters = new Map<number, InlineTagFilter>();
     // 已开始且未 stop 的 text 块（流尾 flush 标签残料用）
     const openTextBlocks = new Set<number>();
 
-    /** 块的正文清洗链：前缀剥离 → 标签状态机 */
+    /** 块的正文清洗链：标签状态机 */
     const pushText = (blockIndex: number, text: string): StreamEvent[] => {
       // 登记活跃 text 块：块结束与流尾时要 flush 标签残料（含无首段内容的普通块）
       openTextBlocks.add(blockIndex);
-      let guard = textGuards.get(blockIndex);
-      if (!guard) {
-        guard = new PrefixDeltaGuard();
-        textGuards.set(blockIndex, guard);
-      }
       let filter = tagFilters.get(blockIndex);
       if (!filter) {
         filter = new InlineTagFilter(() => nextToolIndex++);
         tagFilters.set(blockIndex, filter);
       }
-      return filter.push(guard.next(text));
-    };
-
-    /** 块的思考清洗链：前缀剥离（思考里不做过标签识别） */
-    const pushThinking = (blockIndex: number, thinking: string): StreamEvent[] => {
-      let guard = thinkingGuards.get(blockIndex);
-      if (!guard) {
-        guard = new PrefixDeltaGuard();
-        thinkingGuards.set(blockIndex, guard);
-      }
-      const out = guard.next(thinking);
-      return out ? [{ type: "thinking_delta", thinking: out }] : [];
+      return filter.push(text);
     };
 
     /** 块结束后释放该块的清洗状态 */
     const releaseBlock = (blockIndex: number): void => {
-      textGuards.delete(blockIndex);
-      thinkingGuards.delete(blockIndex);
       tagFilters.delete(blockIndex);
       openTextBlocks.delete(blockIndex);
     };
@@ -143,8 +123,8 @@ export class AnthropicMessagesProtocol implements Protocol {
               break;
             }
             // text/thinking 块：start 可能已携带首段内容（部分兼容端点不放 delta）
-            if (block.type === "thinking" && block.thinking) {
-              for (const out of pushThinking(blockIndex, block.thinking)) yield out;
+            if (block.type === "thinking") {
+              if (block.thinking) yield { type: "thinking_delta", thinking: block.thinking };
             } else if (block.text) {
               for (const out of pushText(blockIndex, block.text)) yield out;
             }
@@ -159,9 +139,8 @@ export class AnthropicMessagesProtocol implements Protocol {
                 for (const out of pushText(blockIndex, delta.text)) yield out;
               }
             } else if (delta?.type === "thinking_delta") {
-              if (delta.thinking) {
-                for (const out of pushThinking(blockIndex, delta.thinking)) yield out;
-              }
+              // 字段缺失不发空事件（部分兼容端点发空 delta，全空流会产出空内容块）
+              if (delta.thinking) yield { type: "thinking_delta", thinking: delta.thinking };
             } else if (delta?.type === "input_json_delta") {
               // 映射不到块 index 的参数增量直接跳过：兜底并到工具 0 会污染它的参数流
               const toolIndex = toolIndexByBlock.get(blockIndex);
