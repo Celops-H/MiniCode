@@ -92,7 +92,11 @@ export class Recorder {
   private async record(event: HookEvent): Promise<void> {
     if (event.type === "MessageAppended") {
       const { type: _type, agentPath, message } = event;
-      this.writer.appendLine(JSON.stringify({ kind: "message", agentPath, ...message }));
+      // 注入消息自带的发送方 agentPath（多 agent 回灌）不覆盖行级归属：
+      // 行级 agentPath 语义是「消息所属 agent」，按它过滤轨迹才不漏行；
+      // 发送方在消息正文的 from 标记里。置 undefined 的键 JSON 落盘时自然省略
+      const payload = message.role === "user" ? { ...message, agentPath: undefined } : message;
+      this.writer.appendLine(JSON.stringify({ kind: "message", ...payload, agentPath }));
     } else if ("agentPath" in event) {
       const { type, agentPath, ...data } = event;
       this.writeEventLine(type, agentPath, this.dedupeSystemPrompt(type, data));

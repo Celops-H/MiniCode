@@ -2,7 +2,7 @@
  * 底栏 agent 树：`● main` 仅多 agent 启用（存在子 agent）时显示；
  * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`、失败 `(!) 名称 耗时`（中断 `(×)`），
  * 失败行整行红字（与消息区失败活动行同色，扫一眼就能看出哪个子任务挂了）；
- * 终态（完成/失败/中断）条目 10s 后从树消失；
+ * 终态（完成/失败/中断）条目 10s 后从树消失（恢复会话重建的历史条目无完成时刻，恒显示）；
  * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)`/`(!)`/`(×)` 括号中心列；
  * main 首行、子 agent 次行紧凑。
  * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。终态条目消失由本组件定时器过滤（state 保留，
@@ -128,6 +128,14 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
   return rows;
 }
 
+/** 终态条目是否可见：live 完成的条目 10s 后消失（completedAt 由 loop 注入时刻）；
+ *  completedAt 缺失的终态条目是恢复会话重建的历史条目（无时刻可计时），恒显示 */
+function isTerminalVisible(a: AgentNode, now: number): boolean {
+  if (a.status === "running") return true;
+  if (a.completedAt == null) return true;
+  return now - a.completedAt < DONE_VISIBLE_MS;
+}
+
 export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
   // 10s 消失：每秒刷新一次 now，过滤完成/中断已超时的条目（运行中恒显示）
   const [now, setNow] = createSignal(Date.now());
@@ -135,11 +143,7 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
     const t = setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => clearInterval(t));
   });
-  const visible = createMemo(() =>
-    props.agents.filter(
-      (a) => a.status === "running" || (a.completedAt != null && now() - a.completedAt < DONE_VISIBLE_MS),
-    ),
-  );
+  const visible = createMemo(() => props.agents.filter((a) => isTerminalVisible(a, now())));
   // 仅多 agent 启用（存在子 agent）时显示整棵树；只有 main 时底栏不占行（Show 响应式门控，
   // 不能组件体 if return null——store 更新后组件体不重跑，树在子 agent 派生时才出现会不显示）
   const rows = createMemo(() => {
@@ -157,13 +161,11 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
   );
 }
 
-/** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致——App 计算光标绝对位置用。
- *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行）。
- *  now 取调用时刻，与组件每秒刷新近似（1s 内完成条目消失的定位偏差可忽略）。 */
+/** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致（isTerminalVisible）——
+ *  App 计算光标绝对位置用。
+ *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行）。 */
 export function agentRowCount(agents: AgentNode[], now = Date.now()): number {
-  const visible = agents.filter(
-    (a) => a.status === "running" || (a.completedAt != null && now - a.completedAt < DONE_VISIBLE_MS),
-  );
+  const visible = agents.filter((a) => isTerminalVisible(a, now));
   if (!visible.some((a) => a.path !== "/root")) return 0;
   return renderTree(visible).length + 1; // +1 = AgentStrip 自身 paddingTop
 }

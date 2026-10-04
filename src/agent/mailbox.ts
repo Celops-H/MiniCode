@@ -60,3 +60,28 @@ export function formatMailMessage(mail: MailMessage): string {
           : "任务结论";
   return `【${header}】from ${mail.from}:\n${mail.content}`;
 }
+
+/** 头部标记 → 消息类型（parseMailText 反解用，与 formatMailMessage 的头部一一对应） */
+const MAIL_HEADER_TYPES: Array<[string, MailType]> = [
+  ["消息", "MESSAGE"],
+  ["新任务", "NEW_TASK"],
+  ["中断", "INTERRUPTED"],
+  ["任务结论", "FINAL_ANSWER"],
+];
+
+/** 注入消息全文的头部形态（正则由 MAIL_HEADER_TYPES 派生，两处永远一致） */
+const MAIL_TEXT_HEADER_RE = new RegExp(`^【(${MAIL_HEADER_TYPES.map(([h]) => h).join("|")})】from .*:\\n?`);
+
+/**
+ * 从格式化文本反解注入消息（会话恢复重演用）：头部认类型，正文取标记行之后。
+ * 只认 formatMailMessage 的固定形态，不匹配返回 undefined（普通用户消息照常走消息渲染）。
+ * @param text 注入消息的全文（UserMessage.content）
+ * @returns 消息类型与正文，非注入消息格式返回 undefined
+ */
+export function parseMailText(text: string): { type: MailType; body: string } | undefined {
+  const match = MAIL_TEXT_HEADER_RE.exec(text);
+  if (!match) return undefined;
+  // 捕获组来自 MAIL_HEADER_TYPES 派生的正则，命中必有对应类型
+  const type = MAIL_HEADER_TYPES.find(([h]) => h === match[1])![1];
+  return { type, body: text.slice(match[0].length) };
+}

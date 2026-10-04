@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent/agent.js";
 import { AgentPath } from "../../src/agent/agent-path.js";
-import { Mailbox, formatMailMessage } from "../../src/agent/mailbox.js";
+import { Mailbox, formatMailMessage, parseMailText } from "../../src/agent/mailbox.js";
 import { Team } from "../../src/agent/team.js";
 import type { ModelClient } from "../../src/agent/agent.js";
 
@@ -41,6 +41,43 @@ describe("Mailbox（agent 邮箱）", () => {
       .toBe("【新任务】from /root:\n任务");
     expect(formatMailMessage({ type: "FINAL_ANSWER", from: AgentPath.root(), content: "结论", triggerTurn: true }))
       .toBe("【任务结论】from /root:\n结论");
+  });
+
+  it("parseMailText 反解四类头部与正文；非注入消息格式返回 undefined", () => {
+    const from = AgentPath.parse("/root/task_1") as AgentPath;
+    for (const type of ["MESSAGE", "NEW_TASK", "INTERRUPTED", "FINAL_ANSWER"] as const) {
+      const text = formatMailMessage({ type, from, content: "正文第一行\n第二行", triggerTurn: false });
+      expect(parseMailText(text)).toEqual({ type, body: "正文第一行\n第二行" });
+    }
+    // 空正文（结论为空串的占位回灌）
+    expect(parseMailText(formatMailMessage({ type: "FINAL_ANSWER", from, content: "", triggerTurn: true }))).toEqual({
+      type: "FINAL_ANSWER",
+      body: "",
+    });
+    // 普通用户消息与系统注入消息不是注入邮件格式
+    expect(parseMailText("你好")).toBeUndefined();
+    expect(parseMailText("【命令】/compact")).toBeUndefined();
+  });
+
+  it("runTurn 注入的回灌消息带发送方路径（agentPath 随消息落盘，恢复会话重建 agent 树用）", async () => {
+    const agent = new Agent({
+      modelClient: mockTextClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    const from = AgentPath.parse("/root/task_1") as AgentPath;
+    agent.deliver({ type: "FINAL_ANSWER", from, content: "子任务完成", triggerTurn: true });
+    agent.start("跑");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    const injected = agent.getMessages().find((m) => m.role === "user" && m.source === "system");
+    expect(injected).toMatchObject({
+      role: "user",
+      source: "system",
+      agentPath: "/root/task_1",
+      content: "【任务结论】from /root/task_1:\n子任务完成",
+    });
   });
 });
 

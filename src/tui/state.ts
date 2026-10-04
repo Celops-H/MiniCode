@@ -5,6 +5,7 @@
  */
 import { COMMAND_MARKER, modelErrorText, type Message } from "../core/index.js";
 import { INIT_PROMPT_PREFIX } from "../context/index.js";
+import { parseMailText } from "../agent/mailbox.js";
 import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -77,8 +78,8 @@ export interface CommandBlock {
 
 export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock | CommandBlock;
 
-/** agent 树节点：路径 + 运行/完成/失败/中断状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），
- *  终态（完成/失败/中断）条目在底栏树展示 10s 后消失，耗时 = completedAt - spawnedAt */
+/** agent 树节点：路径 + 运行/完成/失败/中断状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），耗时 = completedAt - spawnedAt。
+ *  live 会话终态（完成/失败/中断）条目在底栏树展示 10s 后消失，恢复重建的历史条目无完成时刻、常驻显示 */
 export interface AgentNode {
   path: string;
   status: "running" | "completed" | "failed" | "interrupted";
@@ -413,9 +414,14 @@ export function selectedPromptText(p: PromptState): string {
  *  user/assistant 消息带创建时间戳时回填发送时间，切模型等 reconfigure
  *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示
  *  toolDurations：恢复会话按 toolCallId 从轨迹回填的工具执行耗时，轨迹不存在
- *  或该调用被中断（无 PostToolUse）时无条目、卡片不显示耗时 */
+ *  或该调用被中断（无 PostToolUse）时无条目、卡片不显示耗时
+ *  多 agent 协作历史：带 agentPath 的注入消息（子 agent 结论/中断回灌）重演为 agent 活动
+ *  行并重建 agent 树条目（路径全路径无歧义），不再以「你」消息块铺全文；终态取该路径
+ *  最后一次终态注入（先中断后结论 = 完成） */
 export function initState(messages: Message[], title = "", modelLabel = "", toolDurations?: Map<string, number>): TuiState {
   const blocks: BlockView[] = [];
+  /** 重建的 agent 树条目：路径 → 终态（按注入顺序建，/root 恒在首位） */
+  const agentNodes = new Map<string, AgentNode>();
   const msgTime = (m: Message): string | undefined => {
     if (!m.timestamp) return undefined;
     const t = new Date(m.timestamp);
@@ -424,6 +430,36 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
   };
   for (const message of messages) {
     if (message.role === "user") {
+      // 多 agent 注入消息重演：树条目按路径建（默认完成态，中断注入改判中断），
+      // 结论/中断注入重演为活动行（live 会话同样只有结论/中断有活动行，消息注入不上屏）。
+      // /root 自发自收的邮件不建树条目（root 恒在首位，不重复）；不合邮件格式的
+      // 带路径消息回落普通渲染，不静默丢内容
+      if (message.agentPath && message.agentPath !== "/root") {
+        const mail = parseMailText(message.content);
+        if (mail) {
+          const node = agentNodes.get(message.agentPath) ?? {
+            path: message.agentPath,
+            status: "completed" as const,
+            spawnedAt: null,
+            completedAt: null,
+          };
+          agentNodes.set(message.agentPath, node);
+          if (mail.type === "FINAL_ANSWER") {
+            node.status = "completed";
+            blocks.push({
+              kind: "agent",
+              event: "completed",
+              path: message.agentPath,
+              conclusion: mail.body,
+              collapsed: true,
+            });
+          } else if (mail.type === "INTERRUPTED") {
+            node.status = "interrupted";
+            blocks.push({ kind: "agent", event: "interrupted", path: message.agentPath, collapsed: true });
+          }
+          continue;
+        }
+      }
       // /init 命令派生的提示词重演弱化：还原为命令块，不铺出全文
       if (message.content.startsWith(INIT_PROMPT_PREFIX)) {
         blocks.push({ kind: "command", id: message.id, text: "/init", time: msgTime(message) });
@@ -506,7 +542,10 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
     modelLabel,
     permissionMode: "default",
     thinkingLevel: undefined,
-    agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
+    agents: [
+      { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+      ...agentNodes.values(),
+    ],
     queue: [],
     turnIndex: 0,
   };

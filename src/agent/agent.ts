@@ -467,10 +467,11 @@ export class Agent {
     if (this.stopped) return;
 
     await this.maybeCompact();
-    // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本）
+    // 消费收件箱消息：注入 source:"system"（消息即上下文，模型直接读文本）。
+    // 发送方路径随消息落盘（agentPath）：恢复会话时 TUI 据此重建 agent 树与活动行
     if (this.mailbox.hasPending()) {
       for (const mail of this.mailbox.drain()) {
-        await this.appendMessage(userMessage(formatMailMessage(mail), "system"));
+        await this.appendMessage(userMessage(formatMailMessage(mail), "system", undefined, undefined, mail.from.toString()));
       }
     }
     let context = createContext(this.systemPrompt, this.requestMessages(), this.registry.definitions(), this.contextThinkingLevel());

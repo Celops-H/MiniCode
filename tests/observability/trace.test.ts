@@ -112,6 +112,45 @@ describe("Recorder：轨迹格式与落盘", () => {
     }
   });
 
+  it("回灌注入消息自带发送方 agentPath 时行级归属不变（agentPath 语义是消息所属 agent）", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const recorder = new Recorder(bus, {
+        sessionId: "s1b",
+        cwd: "C:\\work\\proj",
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      bus.emit({
+        type: "MessageAppended",
+        agentPath: "/root",
+        message: {
+          role: "user",
+          id: "m1",
+          content: "【任务结论】from /root/task_1:\n结论",
+          agentPath: "/root/task_1",
+          timestamp: "2026-10-01T00:00:00.000Z",
+        },
+      });
+      await bus.emit({ type: "SessionEnd", reason: "exit" });
+      recorder.dispose();
+
+      const lines = await readLines(path.join(dir, "traces", "s1b.jsonl"));
+      // 消息行的 agentPath 仍是消费方（root），不被消息自身的发送方路径覆盖；消息字段原样平铺
+      expect(lines[1]).toMatchObject({
+        kind: "message",
+        agentPath: "/root",
+        role: "user",
+        content: "【任务结论】from /root/task_1:\n结论",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("生命周期事件的 path 提升为行级 agentPath（负载原样保留），按 agentPath 过滤不再丢诞生/结束行", async () => {
     const dir = await tmpDir();
     try {

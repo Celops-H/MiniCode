@@ -72,6 +72,12 @@ export interface UserMessage {
   content: string;
   /** 消息来源，缺省 human；系统注入的合成消息标 "system"，让模型区分背景信息与用户指令；命令痕迹标 "command" */
   source?: MessageSource;
+  /**
+   * 发送方 agent 全路径（如 /root/task_1）：多 agent 协作的注入消息（子 agent 结论/
+   * 消息回灌父）随消息落盘，恢复会话据此重建 agent 树与 agent 活动行；缺省无路径。
+   * 旧数据无此字段，无需迁移。
+   */
+  agentPath?: string;
   /** 消息创建时间（ISO）：会话恢复时展示用；旧数据可能缺失 */
   timestamp?: string;
 }
@@ -108,6 +114,7 @@ export type Message = UserMessage | AssistantMessage | ToolResultMessage;
  * @param source 消息来源，系统注入的合成消息标 "system"，缺省 human
  * @param id 稳定 id，缺省随机生成
  * @param timestamp 消息创建时间，缺省当前时间（会话恢复展示用）
+ * @param agentPath 发送方 agent 全路径（多 agent 注入消息），缺省无路径
  * @returns 用户消息
  */
 export function userMessage(
@@ -115,8 +122,16 @@ export function userMessage(
   source?: MessageSource,
   id: string = randomUUID(),
   timestamp = new Date().toISOString(),
+  agentPath?: string,
 ): UserMessage {
-  return { role: "user", id, content, ...(source ? { source } : {}), timestamp };
+  return {
+    role: "user",
+    id,
+    content,
+    ...(source ? { source } : {}),
+    ...(agentPath ? { agentPath } : {}),
+    timestamp,
+  };
 }
 
 /**
