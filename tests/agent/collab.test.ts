@@ -14,6 +14,7 @@ function collabTool(team: Team, name: string, agentPath?: () => AgentPath | unde
   const tools = createCollaborationTools({
     team,
     getAgentPath: agentPath ?? (() => undefined),
+    isReadOnly: () => false,
     createChildAgent: () => {
       throw new Error("该测试未走 createChildAgent 路径");
     },
@@ -1050,6 +1051,8 @@ describe("协作工具集（多 agent 环境）", () => {
     const spawn = collabTool(team, "spawn_agent");
     expect(spawn.description).toContain("原始命令");
     expect(spawn.description).toContain("绝对路径");
+    // 只读声明说明：审查/调研类任务固定只读派生
+    expect(spawn.description).toContain("readOnly");
     const followup = collabTool(team, "followup_task");
     expect(followup.description).toContain("原始命令");
     expect(followup.description).toContain("绝对路径");

@@ -26,6 +26,11 @@ export const COLLAB_SUBAGENT_PROMPT =
   "你是团队工作 agent，由协调者派生执行分派的任务。你看不到协调者的完整历史，只收到任务消息。" +
   "完成任务后用简洁文字说明结论。";
 
+/** 只读子 agent 提示词附加段（只读派生时拼在协作提示之后） */
+export const READONLY_SUBAGENT_PROMPT =
+  "你是只读 agent：不能写文件、不能执行改状态的命令（写类工具与 bash 写命令会被拒绝），" +
+  "只做读取、检索与推导，结论全部用文字回传，不要尝试落盘中间产物。";
+
 /** agent 名命名约束（与 agent-path.ts 的段名校验一致，schema 层前置拦截） */
 const AGENT_NAME_PATTERN = /^[a-z0-9_]+$/;
 
@@ -41,9 +46,12 @@ export interface CollabDeps {
   team: Team;
   /** 当前 agent 在团队中的路径（未注册时返回 undefined，按 root 处理） */
   getAgentPath: () => AgentPath | undefined;
+  /** 当前 agent 是否只读（只读派生强制继承：只读 agent 派生的子 agent 恒为只读） */
+  isReadOnly: () => boolean;
   /** 创建协作子 agent（运行时继承 + 工具集组装由 Agent 内部完成）；
-   *  worktree 为派生时的隔离选择（缺省随全局缺省，见 worktreeDefault） */
-  createChildAgent: (agentName: string, path: AgentPath, worktree?: boolean) => Agent;
+   *  worktree 为派生时的隔离选择（缺省随全局缺省，见 worktreeDefault）；
+   *  readOnly 为 spawn 只读声明 */
+  createChildAgent: (agentName: string, path: AgentPath, worktree: boolean | undefined, readOnly: boolean) => Agent;
   /** 投递消息到目标 agent（Team.sendMessage，triggerTurn 时自动后台驱动） */
   sendMessage: (target: AgentPath, mail: MailMessage) => Promise<string | undefined>;
   /** worktree 隔离的全局缺省（spawn 工具 worktree 参数缺省随它） */
@@ -70,6 +78,8 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
       "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
       "agent 名只能用小写字母、数字和下划线。" +
+      "readOnly 为 true 时子 agent 只读：写类工具与 bash 写命令会被权限层拒绝，" +
+      "审查、代码调研等不改文件的任务固定用只读派生；只读 agent 派生的子 agent 强制只读。" +
       "prompt 里写明证据要求：让子 agent 回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径，" +
       "只回摘要的结论你无法核实。" +
       "worktree 参数控制是否给子 agent 独立的 git worktree 工作区（缺省随全局设置）：会写文件的任务建议开启，" +
@@ -81,23 +91,26 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       agentName: z.string().regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线"),
       prompt: z.string(),
       worktree: z.boolean().optional(),
+      readOnly: z.boolean().optional(),
     }),
     isReadOnly: false,
     maxResultSizeChars: 500,
     execute: async (input) => {
-      const { agentName, prompt, worktree } = input as {
+      const { agentName, prompt, worktree, readOnly } = input as {
         agentName: string;
         prompt: string;
         worktree?: boolean;
+        readOnly?: boolean;
       };
       if (!prompt.trim()) return failure("任务内容不能为空");
       const parentPath = deps.getAgentPath() ?? AgentPath.root();
       const path = deps.team.reserveSpawn(parentPath, agentName);
       if (typeof path === "string") return failure(path); // 守卫失败：按失败回灌，父 agent 可据此调整
-      // 隔离缺省随全局开关，派生方可按任务性质逐次覆盖
-      const wantWorktree = worktree ?? deps.worktreeDefault();
+      // 只读子 agent 不写文件，worktree 隔离无意义（git worktree add 本身改仓库状态），强制不建
+      const wantReadOnly = readOnly === true || deps.isReadOnly();
+      const wantWorktree = wantReadOnly ? false : (worktree ?? deps.worktreeDefault());
       try {
-        const child = deps.createChildAgent(agentName, path, wantWorktree);
+        const child = deps.createChildAgent(agentName, path, wantWorktree, wantReadOnly);
         deps.team.commitSpawn(path, child);
         const error = await deps.sendMessage(path, {
           type: "NEW_TASK",
@@ -109,6 +122,11 @@ function spawnAgentTool(deps: CollabDeps): Tool {
         // 要求隔离但未生效（非 git 仓库/创建失败）：结果中注明退化，父 agent 不误以为已隔离
         if (wantWorktree && deps.team.getWorktree(path) === undefined) {
           return `已派生 ${path}，初始任务已下达；worktree 隔离未生效（当前目录不是 git 仓库或创建失败），子 agent 与你共享工作目录`;
+        }
+        // 只读派生显式带了 worktree：已忽略（见上），结果中注明防父误以为有隔离
+        if (wantReadOnly) {
+          const note = worktree === true ? "；worktree 隔离已忽略（只读任务不写文件）" : "";
+          return `已派生 ${path}（只读），初始任务已下达${note}`;
         }
         return `已派生 ${path}，初始任务已下达`;
       } catch (err) {

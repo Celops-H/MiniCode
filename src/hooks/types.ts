@@ -71,7 +71,7 @@ export type HookEvent =
   | { type: "SessionStart"; reason: "cold" | "resume" }
   /** 会话结束（宿主收尾时发；崩溃收不到本事件属预期缺口）。reason 区分本轮结束原因 */
   | { type: "SessionEnd"; reason: "exit" | "switch" | "reconfigure" }
-  | { type: "AgentSpawned"; path: string; parentPath: string }
+  | { type: "AgentSpawned"; path: string; parentPath: string; /** 只读派生（spawn_agent readOnly 声明或只读继承） */ readOnly?: boolean }
   /** failed 标记子 agent 失败终态：驱动捕获的模型流失败，或结论命中工具调用标记
    *  特征（模型失配把工具调用原文吐进正文，结论不可信）——失败不合并 worktree，
    *  conclusion 为明确失败文本；正常完成但模型未产出正文时 conclusion 为空串 */

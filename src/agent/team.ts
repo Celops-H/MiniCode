@@ -267,6 +267,7 @@ export class Team {
           type: "AgentSpawned",
           path: path.toString(),
           parentPath: parentPath.toString(),
+          ...(agent.isReadOnly() ? { readOnly: true } : {}),
         });
       }
       // root 被后台驱动（如子 agent 完成唤醒续跑）时事件无人渲染——

@@ -41,13 +41,14 @@ import {
   type Tool,
 } from "../tools/index.js";
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest, PermissionResult } from "../permission/index.js";
+import { readOnlyToolViolation } from "../permission/index.js";
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { FileState, withCwd, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 import { AgentPath } from "./agent-path.js";
-import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "../tools/index.js";
+import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT, READONLY_SUBAGENT_PROMPT } from "../tools/index.js";
 import type { Team } from "./team.js";
 
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
@@ -117,7 +118,12 @@ export interface AgentOptions {
    *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定、可取用技能 */
   subagentPromptSections?: string[];
   /**
-   * 子 agent 会话落盘的 store：传入时派生出的子 agent 各建独立会话文件
+   * 只读 agent（spawn_agent 只读派生）：写类工具与 bash 写命令在工具执行前
+   * 被权限拦截（不进审批链），适合审查、调研类任务；派生链强制继承（只读 agent
+   * 派生的子 agent 也是只读，声明只读不声明都一样），写操作无法绕道孙 agent。
+   */
+  readOnly?: boolean;
+  /** 子 agent 会话落盘的 store：传入时派生出的子 agent 各建独立会话文件
    * （懒建：首条消息才落盘，spawn 后从未跑起来的子 agent 不留空文件），
    * 逐消息记账、轮末 flush、终态写结束标记；root 会话仍由宿主落盘，不经此。
    * 派生链透传：孙 agent 同样落盘。
@@ -144,6 +150,8 @@ export class Agent {
   private readonly fileState = new FileState();
   /** 归属的团队（多 Agent 协作）；不传则本 agent 独立运行、不展示协作工具 */
   private readonly team?: Team;
+  /** 只读 agent：写类工具与 bash 写命令在执行前拦截（readOnlyWriteViolation） */
+  private readonly readOnly: boolean;
   /** 本 agent 在团队中的层级路径；注册进团队时由 Team 设置 */
   agentPath?: AgentPath;
   /** 工具输出超限的落盘目录 */
@@ -212,6 +220,7 @@ export class Agent {
     this.sessionId = options.sessionId;
     this.cwd = options.cwd ?? process.cwd();
     this.team = options.team;
+    this.readOnly = options.readOnly ?? false;
     this.checkpoint = options.checkpoint;
     this.subagentStore = options.subagentStore;
     this.memoryEnabled = options.memory ?? false;
@@ -224,9 +233,11 @@ export class Agent {
       for (const tool of createCollaborationTools({
         team: this.team,
         getAgentPath: () => this.agentPath,
-        createChildAgent: (agentName, path, worktree) => this.createChildAgent(agentName, path, worktree),
+        createChildAgent: (agentName, path, worktree, childReadOnly) =>
+          this.createChildAgent(agentName, path, worktree, childReadOnly),
         sendMessage: (target, mail) => this.team!.sendMessage(target, mail),
         worktreeDefault: () => this.team!.worktreeDefault,
+        isReadOnly: () => this.readOnly,
       })) {
         this.registry.register(tool);
       }
@@ -250,17 +261,21 @@ export class Agent {
    * @param path 子 agent 在团队中的路径
    * @param worktree 是否给子 agent 独立 git worktree 工作区（spawn 派生时的逐次选择，
    *  缺省随 Team 全局缺省）；不可用（非 git 仓库/创建失败）时自动继承父 cwd
+   * @param childReadOnly spawn 只读声明：子 agent 拦截写操作；父本只读时强制继承
    * @returns 子 agent 实例（路径已设置，待 commitSpawn 登记）
    */
-  private createChildAgent(agentName: string, path: AgentPath, worktree?: boolean): Agent {
+  private createChildAgent(agentName: string, path: AgentPath, worktree?: boolean, childReadOnly?: boolean): Agent {
     // Git Worktree 隔离：开启且父在 git 仓库内时，子 agent 绑定独立工作区（cwd），
     // 文件写与父物理隔离；不可用时继承父 cwd
     const worktreeInfo = this.team?.createChildWorktree(path, worktree);
     const childCwd = worktreeInfo?.dir ?? this.cwd;
-    // 子 agent 提示词：固定协作提示 + 装配段（项目指令/可用技能，
+    // 只读随链强制继承：父只读则子无论声明与否都只读，写操作无法绕道孙 agent
+    const childIsReadOnly = this.readOnly || childReadOnly === true;
+    // 子 agent 提示词：固定协作提示 + 只读约束段（只读派生时）+ 装配段（项目指令/可用技能，
     // 宿主传入）+ 环境段（按子 agent 实际 cwd 生成，worktree 隔离时是子工作区路径）
     const childPrompt = [
       COLLAB_SUBAGENT_PROMPT,
+      ...(childIsReadOnly ? [READONLY_SUBAGENT_PROMPT] : []),
       ...this.subagentPromptSections.filter((section) => section.length > 0),
       environmentPrompt(childCwd),
     ].join("\n");
@@ -275,6 +290,8 @@ export class Agent {
       outputDir: this.outputDir,
       sessionId: this.sessionId,
       cwd: childCwd,
+      // 只读约束随链继承（强制，见上）
+      readOnly: childIsReadOnly,
       // 思考等级随父继承（会话级偏好，子 agent 与 root 一致）
       thinkingLevelRef: this.thinkingLevelRef,
       // 装配段随链传递：孙 agent 派生时同样注入
@@ -434,6 +451,11 @@ export class Agent {
   /** 是否被中断（interrupt 置位，通知完成判定用） */
   isInterrupted(): boolean {
     return this.interrupted;
+  }
+
+  /** 是否只读 agent（AgentSpawned 事件负载与轨迹观测用） */
+  isReadOnly(): boolean {
+    return this.readOnly;
   }
 
   /**
@@ -1232,6 +1254,25 @@ export class Agent {
       });
       return { message: toolResultMessage(call.id, call.name, error, true) };
     }
+    // 只读 agent 写拦截（spawn_agent 只读派生）：按工具元数据与 bash 命令内容判定，
+    // 拒绝不进审批链（只读约束自动生效，不打扰用户审批）；拒绝理由带原因，
+    // 模型改走只读路径（读文件、只读命令）完成任务
+    if (this.readOnly) {
+      const violation = readOnlyToolViolation(call.name, tool.isReadOnly, request.content);
+      if (violation) {
+        const reason = `只读 agent 不允许写操作：${violation}`;
+        await this.emitPermissionDecision(call.id, call.name, "deny", "rule");
+        await this.safeEmit({
+          type: "PostToolUseFailure",
+          toolCallId: call.id,
+          toolName: call.name,
+          input: call.input,
+          error: `权限拒绝：${reason}`,
+          agentPath,
+        });
+        return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true) };
+      }
+    }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
     // 有权限管线时裁决并入 ask 决策链（规则层 deny 优先，Hook 只在 ask 时介入）；
     // 无权限管线时 hookVerdict 直接生效（上面工具逻辑已按 hookRejects 处理未知工具/参数失败，
@@ -1407,7 +1448,7 @@ function hashText(text: string): string {
 /**
  * PermissionResult.source → PermissionDecision 事件 source 的三分口径（hook/规则/用户）：
  * hook=钩子裁决；user=用户审批与会话缓存（cache 是用户「允许会话全部」的会话内记忆）；
- * rule=规则层与危险命令/模式/免审批等硬性判定
+ * rule=规则层与危险命令/模式/免审批/只读约束等硬性判定（不经用户审批链的拒绝都归此桶）
  */
 function permissionEventSource(source: PermissionResult["source"]): "hook" | "rule" | "user" {
   if (source === "hook") return "hook";

@@ -23,7 +23,7 @@ export { editTool } from "./builtin/edit.js";
 export { readTool } from "./builtin/read.js";
 export { writeTool } from "./builtin/write.js";
 export { createTodoTool } from "./builtin/todo.js";
-export { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "./builtin/collab.js";
+export { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT, READONLY_SUBAGENT_PROMPT } from "./builtin/collab.js";
 export { partitionByConcurrency, runBatches } from "./partition.js";
 export type {
   ConcurrencyItem,

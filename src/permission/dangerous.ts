@@ -25,7 +25,7 @@ const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; reason: string; quoteStripped
 
 /** 剔除引号段（单/双，双引号容忍转义），供引号内不生效的模式匹配用：
  *  引号不配对时残段留在原文里照常参与匹配，不会漏检 */
-function stripQuotedSpans(command: string): string {
+export function stripQuotedSpans(command: string): string {
   return command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, " ");
 }
 
