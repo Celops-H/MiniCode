@@ -15,6 +15,7 @@ import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills
 import type { Tool } from "../tools/index.js";
 import type { Message, ThinkingLevel, StreamEvent } from "../core/index.js";
 import type { PermissionPipeline } from "../permission/index.js";
+import type { SessionStore } from "../storage/index.js";
 import { DEFAULT_CONTEXT_WINDOW, type Models } from "../llm/index.js";
 
 /** 系统提示词（单一出处，TUI 侧从本模块引用）：终端纯文本不渲染 Markdown 是产品约定 */
@@ -204,6 +205,8 @@ export function createSessionAgent(options: {
   /** 协作子 agent 的提示词附加段（项目指令段 + 可用技能段，装配时传入；
    *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定） */
   subagentPromptSections?: string[];
+  /** 子 agent 会话落盘的 store（派生出的子 agent 各建独立会话文件并随轮落盘） */
+  subagentStore?: SessionStore;
 }): { agent: Agent; team?: Team } {
   const envPrompt = environmentPrompt();
   if (options.agents === false) {

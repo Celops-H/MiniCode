@@ -1339,6 +1339,12 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       // 结束原因：切换会话 / 重装配（/connect、/model）由挂起的信号判定，其余为退出
       const endReason = pendingReconfigure ? "reconfigure" : pendingSwitch ? "switch" : "exit";
       await hooks?.emit({ type: "SessionEnd", reason: endReason });
+      // 主会话写结束标记（会话级汇总随 meta 落盘）：从未落盘的草稿会话自动跳过
+      try {
+        await store.finalizeSession(session, endReason);
+      } catch {
+        // 结束标记写失败不阻断退出
+      }
     } catch {
       // 会话结束事件处理失败不阻断退出
     }

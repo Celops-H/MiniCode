@@ -202,6 +202,12 @@ export class Team {
    */
   clear(): void {
     this.interruptAll();
+    // 子 agent 会话补结束标记（中断收尾）：收尾后注册表即清空，member 终态回调查不到成员
+    // 不再触发（E147 缺口），这里在清理前补写；已写过终态标记的不覆盖（防把已完成错改成中断）。
+    // 异步不等完成，失败只丢标记不丢消息
+    for (const member of this.members.values()) {
+      member.agent?.finalizeOwnSession("interrupted", { onlyIfUnended: true }).catch(() => undefined);
+    }
     // 先按 releaseSpawn 同款清理各成员挂的 worktree（避免 clear 绕过清理变孤儿目录），再清注册表
     for (const member of [...this.members.values()]) {
       if (member.worktree) this.abortChildWorktree(member.path);
@@ -303,6 +309,18 @@ export class Team {
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
     const name = agentNameOf(path);
+    // 子 agent 会话收尾：按终态写结束标记（结论不可信按失败记，与回灌口径一致）。
+    // 收尾失败不阻断结论回灌（落盘故障只丢标记不丢消息，消息已随轮 flush）
+    const endReason = agent.isInterrupted()
+      ? "interrupted"
+      : failure !== undefined || looksLikeRawToolCallMarkup(agent.conclusionText())
+        ? "failed"
+        : "completed";
+    try {
+      await agent.finalizeOwnSession(endReason);
+    } catch {
+      // 落盘故障静默：结论回灌与观测事件不受影响
+    }
     if (agent.isInterrupted()) {
       // 被中断：显式动作，不投中途文本当结论，只回灌「已中断」标记让父知晓任务未完成。
       // 用 INTERRUPTED 类型只排队不唤醒、不参与父的续跑判定：中断多来自 Esc 级联

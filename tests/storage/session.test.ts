@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { assistantMessage, userMessage } from "../../src/core/index.js";
-import { SessionStore, type SessionMeta } from "../../src/storage/index.js";
+import { Session, SessionStore, type SessionMeta } from "../../src/storage/index.js";
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -367,5 +368,212 @@ describe("会话按启动工作目录隔离", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("子 agent 会话与会话级汇总", () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function setup(): SessionStore {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-subsession-"));
+    return new SessionStore(dir);
+  }
+
+  it("createSubagentSession：meta 带 kind/父会话/agent 路径，列表不展示子会话", async () => {
+    const store = setup();
+    const main = await store.createSession({ model: "mock", title: "主会话" });
+    const child = await store.createSubagentSession({
+      parentSessionId: main.meta.id,
+      agentPath: "/root/task_1",
+      model: "mock",
+    });
+    expect(child.meta.kind).toBe("subagent");
+    expect(child.meta.parentSessionId).toBe(main.meta.id);
+    expect(child.meta.agentPath).toBe("/root/task_1");
+
+    const list = await store.listSessions();
+    expect(list.map((s) => s.id)).toEqual([main.meta.id]);
+    // 子会话文件照常落盘，可直接加载
+    const loaded = await store.loadSession(child.meta.id);
+    expect(loaded.meta.agentPath).toBe("/root/task_1");
+  });
+
+  it("会话级汇总：flush 时把消息数、累计用量与最新停因写进 meta", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("第一问"));
+    await store.appendMessage(
+      session,
+      assistantMessage([{ type: "text", text: "答" }], {
+        usage: { inputTokens: 100, outputTokens: 10, promptTokens: 120 },
+        stopReason: "tool_calls",
+      }),
+    );
+    await store.flush();
+    // 第二轮用量并入累计，停因更新为最新
+    await store.appendMessage(session, userMessage("第二问"));
+    await store.appendMessage(
+      session,
+      assistantMessage([{ type: "text", text: "答毕" }], {
+        usage: { inputTokens: 50, outputTokens: 20, promptTokens: 90 },
+        stopReason: "end_turn",
+      }),
+    );
+    await store.flush();
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.summary).toMatchObject({
+      messageCount: 4,
+      usage: { inputTokens: 150, outputTokens: 30, promptTokens: 210 },
+      lastStopReason: "end_turn",
+    });
+  });
+
+  it("压缩重写后汇总：消息数收缩，累计用量保留", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(
+      session,
+      assistantMessage([{ type: "text", text: "旧回复" }], {
+        usage: { inputTokens: 500, outputTokens: 100 },
+        stopReason: "end_turn",
+      }),
+    );
+    await store.flush();
+    // 压缩：整份历史替换为一条摘要消息
+    await store.rewriteMessages(session, [userMessage("【摘要】压缩后的会话摘要", "system")]);
+    await store.flush();
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.summary).toMatchObject({
+      messageCount: 1,
+      usage: { inputTokens: 500, outputTokens: 100 },
+    });
+  });
+
+  it("finalizeSession：写结束标记，重复 flush 不丢标记；草稿会话跳过不建文件", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("你好"));
+    await store.flush();
+    await store.finalizeSession(session, "exit");
+
+    let loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.summary?.endedReason).toBe("exit");
+    expect(loaded.meta.summary?.endedAt).toBeTruthy();
+    expect(loaded.meta.summary?.messageCount).toBe(1);
+
+    // 已收尾会话再 flush：结束标记保留
+    await store.appendMessage(session, userMessage("又一条"));
+    await store.flush();
+    loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.summary?.endedReason).toBe("exit");
+    expect(loaded.meta.summary?.messageCount).toBe(2);
+
+    // 草稿会话（内存构造、从未落盘）：finalize 跳过不建文件
+    const draft = new Session(
+      {
+        id: randomUUID(),
+        title: "草稿",
+        model: "mock",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        formatVersion: 1,
+      },
+      [userMessage("还没落盘的消息")],
+    );
+    await store.finalizeSession(draft, "exit");
+    expect(existsSync(path.join(dir, `${draft.meta.id}.meta.json`))).toBe(false);
+
+    // onlyIfUnended：已有结束标记时不覆盖
+    const finished = await store.createSession({ model: "mock" });
+    await store.appendMessage(finished, userMessage("干完"));
+    await store.flush();
+    await store.finalizeSession(finished, "completed");
+    await store.finalizeSession(finished, "interrupted", { onlyIfUnended: true });
+    loaded = await store.loadSession(finished.meta.id);
+    expect(loaded.meta.summary?.endedReason).toBe("completed");
+  });
+
+  it("deleteSession 级联删除名下全部子 agent 会话，不波及其他主会话的子会话", async () => {
+    const store = setup();
+    const mainA = await store.createSession({ model: "mock", title: "A" });
+    const mainB = await store.createSession({ model: "mock", title: "B" });
+    const childA1 = await store.createSubagentSession({
+      parentSessionId: mainA.meta.id,
+      agentPath: "/root/task_1",
+      model: "mock",
+    });
+    const childA2 = await store.createSubagentSession({
+      parentSessionId: mainA.meta.id,
+      agentPath: "/root/task_2",
+      model: "mock",
+    });
+    const childB1 = await store.createSubagentSession({
+      parentSessionId: mainB.meta.id,
+      agentPath: "/root/other",
+      model: "mock",
+    });
+    await store.deleteSession(mainA.meta.id);
+
+    // A 的主会话与两个子会话全部消失
+    for (const id of [mainA.meta.id, childA1.meta.id, childA2.meta.id]) {
+      expect(existsSync(path.join(dir, `${id}.jsonl`))).toBe(false);
+      expect(existsSync(path.join(dir, `${id}.meta.json`))).toBe(false);
+    }
+    // B 的主会话与其子会话不受影响
+    expect(existsSync(path.join(dir, `${mainB.meta.id}.meta.json`))).toBe(true);
+    expect(existsSync(path.join(dir, `${childB1.meta.id}.meta.json`))).toBe(true);
+  });
+
+  it("并发 flush 串行执行：多个会话同时触发不重复追加，落盘间隙新增的消息不丢", async () => {
+    const store = setup();
+    const sessions = [
+      await store.createSession({ model: "mock" }),
+      await store.createSession({ model: "mock" }),
+      await store.createSession({ model: "mock" }),
+    ];
+    for (const session of sessions) {
+      await store.appendMessage(session, userMessage("并发写"));
+    }
+    // 子 agent 并发收尾的真实形态：多个 flush 同时发起，且 flush 落盘 await
+    // 间隙有并发 appendMessage（共享 store 下跨会话交错的常态）
+    const flushing = Promise.all([store.flush(), store.flush()]);
+    await store.appendMessage(sessions[0]!, userMessage("落盘间隙新增"));
+    await flushing;
+    await store.flush();
+
+    const expected = [2, 1, 1];
+    for (let i = 0; i < sessions.length; i++) {
+      const loaded = await store.loadSession(sessions[i]!.meta.id);
+      expect(loaded.getMessages()).toHaveLength(expected[i]!);
+      const raw = await import("node:fs/promises").then((fs) =>
+        fs.readFile(path.join(dir, `${sessions[i]!.meta.id}.jsonl`), "utf8"),
+      );
+      expect(raw.trim().split("\n")).toHaveLength(expected[i]!);
+    }
+    // 汇总的消息数与盘上一致（间隙新增也入账）
+    const reloaded = await store.loadSession(sessions[0]!.meta.id);
+    expect(reloaded.meta.summary?.messageCount).toBe(2);
+  });
+
+  it("复活再收尾：已标记的会话续跑后再次 finalize，标记覆盖为最新终态", async () => {
+    const store = setup();
+    const session = await store.createSession({ model: "mock" });
+    await store.appendMessage(session, userMessage("第一段"));
+    await store.flush();
+    await store.finalizeSession(session, "interrupted");
+    // 复活续跑：继续追加消息后再次收尾
+    await store.appendMessage(session, userMessage("复活后续跑"));
+    await store.flush();
+    await store.finalizeSession(session, "completed");
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.summary?.endedReason).toBe("completed");
+    expect(loaded.meta.summary?.messageCount).toBe(2);
   });
 });

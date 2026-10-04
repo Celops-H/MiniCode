@@ -44,6 +44,7 @@ import type { PermissionBehavior, PermissionPipeline, PermissionRequest, Permiss
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { FileState, withCwd, withFileState } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
+import type { Session, SessionStore } from "../storage/index.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 import { AgentPath } from "./agent-path.js";
 import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT } from "../tools/index.js";
@@ -115,6 +116,13 @@ export interface AgentOptions {
   /** 协作子 agent 的提示词附加段（项目指令段 + 可用技能段，宿主装配时传入）；
    *  派生时拼在协作提示之后、环境段之前，子 agent 与 root 同守项目约定、可取用技能 */
   subagentPromptSections?: string[];
+  /**
+   * 子 agent 会话落盘的 store：传入时派生出的子 agent 各建独立会话文件
+   * （懒建：首条消息才落盘，spawn 后从未跑起来的子 agent 不留空文件），
+   * 逐消息记账、轮末 flush、终态写结束标记；root 会话仍由宿主落盘，不经此。
+   * 派生链透传：孙 agent 同样落盘。
+   */
+  subagentStore?: SessionStore;
 }
 
 /** Agent 主循环：显式步骤序列，驱动模型对话与工具执行 */
@@ -184,6 +192,10 @@ export class Agent {
   /** 崩溃恢复补孤儿的合成消息（待发射）：构造同步无法发射事件，待首次驱动时补发
    *  MessageAppended 补齐轨迹——否则压缩重写落盘后这些消息在任何记录里都无迹可查 */
   private pendingRepairMirrors: Message[] = [];
+  /** 子 agent 会话落盘的 store（createChildAgent 透传给子 agent） */
+  private readonly subagentStore?: SessionStore;
+  /** 本 agent 自己的子会话（仅 spawn 出来的 agent 持有；懒建于首条消息，root 恒为空） */
+  private ownSession?: { store: SessionStore; session: Session };
 
   constructor(options: AgentOptions) {
     this.modelClient = options.modelClient;
@@ -201,6 +213,7 @@ export class Agent {
     this.cwd = options.cwd ?? process.cwd();
     this.team = options.team;
     this.checkpoint = options.checkpoint;
+    this.subagentStore = options.subagentStore;
     this.memoryEnabled = options.memory ?? false;
     this.registry = new ToolRegistry();
     for (const tool of options.tools ?? []) {
@@ -266,6 +279,8 @@ export class Agent {
       thinkingLevelRef: this.thinkingLevelRef,
       // 装配段随链传递：孙 agent 派生时同样注入
       subagentPromptSections: this.subagentPromptSections,
+      // 子 agent 会话落盘随链传递：孙 agent 同样建独立会话文件
+      subagentStore: this.subagentStore,
     });
     child.agentPath = path;
     return child;
@@ -605,6 +620,7 @@ export class Agent {
         }
       }
       this.stopped = true;
+      await this.flushOwnSession();
       return;
     }
     await this.appendMessage(assistant);
@@ -616,6 +632,7 @@ export class Agent {
       //（子 agent 轮次结束不应把主界面打成空闲）
       this.stopped = true;
       await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+      await this.flushOwnSession();
       // 会话记忆：回合收尾后台增量维护记忆——回合完整收尾后触发，
       // 更新 fire-and-forget 不阻塞回合结束，更新跑动中再触发合并为尾随一次
       if (this.memoryEnabled) {
@@ -625,8 +642,10 @@ export class Agent {
     }
 
     // checkpoint：工具副作用不可逆，执行前让宿主把本轮已产生的
-    // 消息（用户输入 + 含工具调用的回复）落盘，崩溃时历史可恢复续跑
+    // 消息（用户输入 + 含工具调用的回复）落盘，崩溃时历史可恢复续跑；
+    // 子 agent 会话同步 flush（记账已随 appendMessage 入队）
     await this.checkpoint?.(this.messages);
+    await this.flushOwnSession();
 
     // 并发分区执行：并发安全调用并行、不安全调用串行；结果回灌后模型在下一轮看到
     const batches = partitionByConcurrency(
@@ -645,6 +664,7 @@ export class Agent {
     for (const message of results) {
       await this.appendMessage(message);
     }
+    await this.flushOwnSession();
   }
 
   /**
@@ -996,7 +1016,47 @@ export class Agent {
   /** 追加消息并镜像 MessageAppended（异步上下文的消息追加统一走这里） */
   private async appendMessage(message: Message): Promise<void> {
     this.messages.push(message);
+    await this.persistMessage(message);
     await this.emitMessageAppended(message);
+  }
+
+  /**
+   * 子 agent 会话记账：spawn 出来的 agent（subagentStore 已传且本 agent 非 root）
+   * 把每条消息记进自己的子会话（write-behind 攒批，flush 在轮末与终态）。
+   * root 的会话由宿主落盘，不经此（避免同一份消息双写）；
+   * 无主会话 id 时不落（子会话靠 parentSessionId 级联管理，缺父会话即孤儿）。
+   */
+  private async persistMessage(message: Message): Promise<void> {
+    if (!this.subagentStore || !this.sessionId || !this.agentPath || this.agentPath.isRoot()) return;
+    if (!this.ownSession) {
+      // 懒建：首条消息才建子会话文件，spawn 后从未跑起来的子 agent 不留空文件
+      const session = await this.subagentStore.createSubagentSession({
+        parentSessionId: this.sessionId,
+        agentPath: this.agentPath.toString(),
+        model: this.modelId,
+      });
+      this.ownSession = { store: this.subagentStore, session };
+    }
+    await this.ownSession.store.appendMessage(this.ownSession.session, message);
+  }
+
+  /** 子 agent 会话落盘（轮末 flush 屏障；无子会话时空操作） */
+  private flushOwnSession(): Promise<void> {
+    return this.ownSession ? this.ownSession.store.flush() : Promise.resolve();
+  }
+
+  /**
+   * 子 agent 会话收尾（Team 终态回调调用）：flush 后写结束标记。
+   * 从未产出消息的子 agent 无子会话，跳过。
+   * @param reason 终态口径（completed/failed/interrupted，与回灌父的口径一致）
+   * @param opts.onlyIfUnended 已有结束标记时不覆盖（clear 兜底收尾用，防把已完成错改成中断）
+   */
+  async finalizeOwnSession(
+    reason: "completed" | "failed" | "interrupted",
+    opts: { onlyIfUnended?: boolean } = {},
+  ): Promise<void> {
+    if (!this.ownSession) return;
+    await this.ownSession.store.finalizeSession(this.ownSession.session, reason, opts);
   }
 
   /**
