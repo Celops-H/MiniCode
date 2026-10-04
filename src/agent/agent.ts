@@ -305,8 +305,8 @@ export class Agent {
 
   /**
    * 追加一条命令消息（命令痕迹）：/init /compact 等命令的持久化记录，退出/切换
-   * 会话再回来时据此重演「命令 + 其后对话」。消息带 source: "command"，回灌模型时
-   * 作为普通 user 消息（模型可感知命令发生过），不触发回合。
+   * 会话再回来时据此重演「命令 + 其后对话」。消息带 source: "command"，只落持久化
+   * 供界面重演，不回灌模型（requestMessages 会剥掉；发给模型会被当成新的用户请求）。
    * @param text 命令原文（如 "/compact 侧重保留命令输出"）
    */
   appendCommand(text: string): void {
@@ -865,13 +865,18 @@ export class Agent {
    * 且改写点之后的请求前缀本已变化，此时剥块保持此后请求前缀稳定；
    * 未改写时原样回传（同模型思考块带签名，续跑校验必需）。切模型不做隐式压缩，
    * 改写与否只看本标记，与目标模型无关。
+   * 命令痕迹（source:"command"）不回灌：痕迹只落持久化供界面重演，发给模型会被
+   * 当成新的用户请求（实测 /compact 痕迹让模型再跑一遍压缩、跑偏内容混入历史）；
+   * 「命令发生过」由摘要元信息（压缩全量读历史，命令痕迹在列）自然带出。
    * @returns 请求用消息数组（未改写时为内部数组的原引用）
    */
   private requestMessages(): Message[] {
-    if (!this.historyRewritten) return this.messages;
-    return this.messages.map((m) =>
-      m.role === "assistant" ? { ...m, content: m.content.filter((b) => b.type !== "thinking") } : m,
-    );
+    const base = this.historyRewritten
+      ? this.messages.map((m) =>
+          m.role === "assistant" ? { ...m, content: m.content.filter((b) => b.type !== "thinking") } : m,
+        )
+      : this.messages;
+    return base.filter((m) => !(m.role === "user" && m.source === "command"));
   }
 
   /**
