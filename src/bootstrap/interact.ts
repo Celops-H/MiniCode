@@ -1,7 +1,7 @@
 import { readInstructionFile, buildInitPrompt } from "../context/index.js";
 import path from "node:path";
 import type { Agent } from "../agent/index.js";
-import type { Session, SessionStore } from "../storage/index.js";
+import { DEFAULT_SESSION_TITLE, sessionTitleFromInput, type Session, type SessionStore } from "../storage/index.js";
 import type { HookBus } from "../hooks/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { modelErrorText } from "../core/index.js";
@@ -33,6 +33,11 @@ export interface InteractOptions {
    * 缺省不注入（TUI 宿主）：错误原样上抛，由 TUI 主循环 catch 渲染错误块（现状不变）。
    */
   onError?: (message: string) => void;
+  /**
+   * 首轮结束自动起名回调：标题派生自用户输入（截断），宿主同步界面标题显示
+   * （TUI 状态行）。缺省不注入（无界面的测试宿主无需同步）。
+   */
+  onTitleAutoNamed?: (title: string) => void;
 }
 
 /**
@@ -152,6 +157,15 @@ export async function interact(options: InteractOptions): Promise<void> {
       const error = err instanceof Error ? err.message : String(err);
       options.onError(modelErrorText(error));
     } finally {
+      // 首轮结束自动起名：标题仍是默认值（用户 /rename 改过则不等于默认值，不覆盖）
+      // 且本轮是真实用户输入（/init /compact 等命令轮不起名，留给下一条真实消息）时，
+      // 取输入派生标题并回调宿主同步界面；下面的落盘把新标题随 meta 一并写盘。
+      // 已知边界：改名恰好改成默认值、或输入恰好是「新会话」时按同一判定处理，
+      // 不为区分再加持久化改名标记
+      if (session.meta.title === DEFAULT_SESSION_TITLE && !input.startsWith("/")) {
+        session.meta.title = sessionTitleFromInput(prompt);
+        options.onTitleAutoNamed?.(session.meta.title);
+      }
       const agentMessages = agent.getMessages();
       if (agent.consumeHistoryRewritten()) {
         await store.rewriteMessages(session, agentMessages);

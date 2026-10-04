@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Message, ModelUsage } from "../core/index.js";
 import { appendJsonlBatch, readJsonl } from "./jsonl.js";
-import { Session, type SessionMeta, type SessionListItem } from "./session.js";
+import { Session, DEFAULT_SESSION_TITLE, type SessionMeta, type SessionListItem } from "./session.js";
 
 /**
  * 会话存储：消息以 JSONL 一行一条落盘（唯一数据源），元数据独立成文件便于索引。
@@ -51,7 +51,7 @@ export class SessionStore {
     const now = new Date().toISOString();
     const meta: SessionMeta = {
       id: randomUUID(),
-      title: options.title ?? "新会话",
+      title: options.title ?? DEFAULT_SESSION_TITLE,
       model: options.model,
       createdAt: now,
       updatedAt: now,

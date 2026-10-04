@@ -843,6 +843,91 @@ describe("交互循环", () => {
     expect(loaded.getMessages()[0]).toEqual({ role: "user", id: expect.any(String), content: "你好", timestamp: expect.any(String) });
   });
 
+  it("首轮结束自动起名：标题取用户输入，随 meta 落盘并回调宿主同步界面", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+    const named: string[] = [];
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "帮我修复登录超时的 bug";
+      yield "/exit";
+    }
+
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {}, onTitleAutoNamed: (t) => named.push(t) });
+
+    expect(session.meta.title).toBe("帮我修复登录超时的 bug");
+    expect(named).toEqual(["帮我修复登录超时的 bug"]);
+    // 标题随轮末落盘写进 meta 文件（/session 列表与 minicode list 直接可读）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.title).toBe("帮我修复登录超时的 bug");
+  });
+
+  it("多轮对话标题保持首轮派生值；命令轮不起名，留给下一条真实消息", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "/compact"; // 命令轮：不起名（未配置压缩，反馈未压缩后继续）
+      yield "第一轮的真实主题";
+      yield "第二轮别的话题";
+      yield "/exit";
+    }
+
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+
+    expect(session.meta.title).toBe("第一轮的真实主题");
+  });
+
+  it("/init 命令轮走完整回合也不起名：标题不取 init 提示词，下一条真实消息起名", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    writeFileSync(path.join(dir, "AGENTS.md"), "项目说明");
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "/init";
+      yield "真实主题";
+      yield "/exit";
+    }
+
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: () => {},
+      onEvent: () => {},
+      projectAgentsFile: path.join(dir, "AGENTS.md"),
+    });
+
+    // /init 轮的轮次输入是生成的 init 提示词（命令痕迹另落 /init 命令消息），标题不取它
+    expect(session.meta.title).toBe("真实主题");
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.meta.title).toBe("真实主题");
+  });
+
+  it("用户改过标题（/rename）后不再自动覆盖", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    session.meta.title = "我起的名字";
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+
+    expect(session.meta.title).toBe("我起的名字");
+  });
+
   it("渲染思考、工具调用与工具结果", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);

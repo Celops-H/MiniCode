@@ -1298,7 +1298,17 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   try {
     while (runningLoop) {
       try {
-        await interact({ agent, store, session, inputs: inputSource(), write, onEvent, hooks });
+        await interact({
+          agent,
+          store,
+          session,
+          inputs: inputSource(),
+          write,
+          onEvent,
+          hooks,
+          // 首轮结束自动起名：状态行会话名随标题同步（/rename 同款同步路径）
+          onTitleAutoNamed: (title) => commit({ ...state, title }),
+        });
         break;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);

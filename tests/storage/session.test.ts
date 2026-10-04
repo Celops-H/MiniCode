@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { assistantMessage, userMessage } from "../../src/core/index.js";
-import { Session, SessionStore, type SessionMeta } from "../../src/storage/index.js";
+import { Session, SessionStore, sessionTitleFromInput, type SessionMeta } from "../../src/storage/index.js";
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -575,5 +575,20 @@ describe("子 agent 会话与会话级汇总", () => {
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.meta.summary?.endedReason).toBe("completed");
     expect(loaded.meta.summary?.messageCount).toBe(2);
+  });
+});
+
+describe("sessionTitleFromInput（首轮自动起名标题派生）", () => {
+  it("连续空白（含换行）压成单空格，去首尾空白", () => {
+    expect(sessionTitleFromInput("  修复   登录\n\n超时 bug \n")).toBe("修复 登录 超时 bug");
+  });
+
+  it("超长按码点截断补省略号（emoji 不切乱）；不超长原样返回", () => {
+    const long = "修".repeat(30) + "😀后续";
+    const title = sessionTitleFromInput(long);
+    expect(Array.from(title)).toHaveLength(31);
+    expect(title.endsWith("…")).toBe(true);
+    expect(title.startsWith("修".repeat(30))).toBe(true);
+    expect(sessionTitleFromInput("短标题")).toBe("短标题");
   });
 });

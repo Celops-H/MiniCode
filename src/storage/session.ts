@@ -21,6 +21,25 @@ export interface SessionSummary {
   endedReason?: string;
 }
 
+/** 新会话默认标题：所有创建点共用；自动起名以「标题仍是默认值」判定未起过名 */
+export const DEFAULT_SESSION_TITLE = "新会话";
+
+/** 自动起名的标题长度上限（按码点截，emoji 代理对不切成乱码） */
+const TITLE_MAX_CODEPOINTS = 30;
+
+/**
+ * 从用户输入派生会话标题（首轮结束后自动起名用）：
+ * 连续空白（含换行）压成单空格，超长按码点截断补省略号。
+ * @param input 用户输入原文
+ * @returns 派生的标题
+ */
+export function sessionTitleFromInput(input: string): string {
+  const collapsed = input.replace(/\s+/g, " ").trim();
+  const codepoints = Array.from(collapsed);
+  if (codepoints.length <= TITLE_MAX_CODEPOINTS) return collapsed;
+  return `${codepoints.slice(0, TITLE_MAX_CODEPOINTS).join("")}…`;
+}
+
 /** 会话元数据：独立于消息存储，用于会话列表与索引 */
 export interface SessionMeta {
   id: string;

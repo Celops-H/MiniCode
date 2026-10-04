@@ -7,7 +7,7 @@ import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir, re
 import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { Session, SessionStore } from "../storage/index.js";
+import { Session, SessionStore, DEFAULT_SESSION_TITLE } from "../storage/index.js";
 import { HookBus, type HookEvent } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
 import { createBuiltinTools } from "../tools/index.js";
@@ -90,7 +90,7 @@ export async function resolveInitialSession(
   return {
     session: new Session({
       id: randomUUID(),
-      title: "新会话",
+      title: DEFAULT_SESSION_TITLE,
       model: modelId,
       createdAt: now,
       updatedAt: now,
