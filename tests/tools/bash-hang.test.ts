@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { bashTool } from "../../src/tools/index.js";
+
+// 起真实 shell/node 子进程，用例自带最长 4s 的命令超时窗口，受整机负载影响大：
+// 按自身耗时设独立超时，不用全局默认 5s，避免高负载下被误报为功能回归
+vi.setConfig({ testTimeout: 20_000 });
 
 /**
  * 复现「命令进程已退出，但 stdio 管道被别的进程持有」导致工具长时间无返回：

@@ -9,6 +9,10 @@ import {
   killBackgroundTask,
 } from "../../src/tools/index.js";
 
+// 起真实 shell/node 子进程，用例自带最长 4s 的命令超时窗口，受整机负载影响大：
+// 按自身耗时设独立超时，不用全局默认 5s，避免高负载下被误报为功能回归
+vi.setConfig({ testTimeout: 20_000 });
+
 afterEach(() => {
   killAllBackgroundTasks();
 });

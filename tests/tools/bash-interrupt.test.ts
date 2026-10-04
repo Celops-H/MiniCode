@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { bashTool } from "../../src/tools/index.js";
+
+// 起真实 shell/node 子进程，受整机负载影响大：按自身耗时设独立超时，不用全局默认 5s
+vi.setConfig({ testTimeout: 20_000 });
 
 const delay = (ms: number): Promise<string> => new Promise((resolve) => setTimeout(() => resolve("RUNNING"), ms));
 

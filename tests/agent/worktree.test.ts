@@ -3,10 +3,14 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent, AgentPath, Team, type ModelClient } from "../../src/agent/index.js";
 import { completeWorktree, createWorktree } from "../../src/agent/worktree.js";
+
+// 真实 git 子进程用例受整机负载影响大，且内部含最长 10s 的轮询等待：
+// 按自身耗时设独立超时，不用全局默认 5s，避免高负载下被误报为功能回归
+vi.setConfig({ testTimeout: 30_000 });
 
 /** 初始化一个 git 仓库并提交初始文件 */
 function initGitRepo(dir: string): void {

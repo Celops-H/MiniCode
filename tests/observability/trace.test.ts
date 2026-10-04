@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -19,6 +19,9 @@ import {
   TRACE_FORMAT_VERSION,
 } from "../../src/observability/index.js";
 import { resolveSessionsDir } from "../../src/config/paths.js";
+
+// 攒批落盘依赖定时器与磁盘写入，受整机负载影响大：按自身耗时设独立超时，不用全局默认 5s
+vi.setConfig({ testTimeout: 15_000 });
 
 /** 建临时目录（每个用例独立） */
 async function tmpDir(): Promise<string> {

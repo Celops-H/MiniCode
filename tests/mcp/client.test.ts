@@ -1,7 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpClient } from "../../src/mcp/client.js";
 import type { McpServerConfig } from "../../src/config/index.js";
 import { writeFakeServer } from "./helpers.js";
+
+// 起真实 stdio server 子进程，受整机负载影响大：按自身耗时设独立超时，不用全局默认 5s
+vi.setConfig({ testTimeout: 20_000 });
 
 let serverFile: string;
 
