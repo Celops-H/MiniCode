@@ -117,6 +117,9 @@ describe("多 Agent 组装", () => {
     expect(toolsSeen).toContain("spawn_agent");
     expect(toolsSeen).toContain("wait_agent");
     expect(systemPrompt).toContain("团队协调者");
+    // 协调者提示词带委派证据要求：原始命令、关键输出、绝对路径
+    expect(systemPrompt).toContain("原始命令");
+    expect(systemPrompt).toContain("绝对路径");
   });
 
   it("省略 agents：默认启用多 Agent 协作（与显式 true 一致，防默认值被误改回 off）", async () => {

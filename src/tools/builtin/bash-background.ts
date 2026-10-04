@@ -13,6 +13,8 @@ export interface BackgroundTask {
   exitCode?: number;
   /** 累积输出（stdout + stderr），超上限截断 */
   output: string;
+  /** status 查询游标：上次查询已返回到的输出长度，bash_task 据此切出新增输出 */
+  readMark: number;
   /** 进程启动错误（如 spawn 失败） */
   error?: string;
   startedAt: number;
@@ -43,6 +45,7 @@ export function startBackgroundTask(command: string): BackgroundTask {
     command,
     status: "running",
     output: "",
+    readMark: 0,
     startedAt: Date.now(),
   };
   // Unix 用 detached 让子进程独立成进程组，便于按进程树终止；

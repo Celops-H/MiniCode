@@ -70,6 +70,8 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
       "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
       "agent 名只能用小写字母、数字和下划线。" +
+      "prompt 里写明证据要求：让子 agent 回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径，" +
+      "只回摘要的结论你无法核实。" +
       "worktree 参数控制是否给子 agent 独立的 git worktree 工作区（缺省随全局设置）：会写文件的任务建议开启，" +
       "避免并行写冲突；纯只读任务不必。隔离不可用时子 agent 与你共享工作目录，结果中会注明。" +
       "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
@@ -152,7 +154,8 @@ function followupTaskTool(deps: CollabDeps): Tool {
   return {
     name: "followup_task",
     description:
-      "给指定 agent 投递新任务（投递并唤醒对方开始执行）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）",
+      "给指定 agent 投递新任务（投递并唤醒对方开始执行）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）。" +
+      "消息里写明证据要求：回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径",
     inputSchema: z.object({
       target: z.string(),
       message: z.string(),
@@ -211,6 +214,7 @@ function waitAgentTool(deps: CollabDeps): Tool {
     name: "wait_agent",
     description:
       "挂起等待目标 agent 完成当前任务（空闲且收件箱无消息），或超时返回；" +
+      "返回区分「调用前已空闲」与「等待后完成」，目标被中断时明确告知未完成；" +
       "目标结论由完成通知自动回灌，本工具只返回等待结果",
     inputSchema: z.object({
       target: z.string(),
@@ -227,12 +231,24 @@ function waitAgentTool(deps: CollabDeps): Tool {
       }
       const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
       if (!targetAgent) return failure(`目标 agent ${targetPath} 不存在`);
-      const deadline = Date.now() + (timeoutMs ?? 30_000);
+      // 调用时的忙碌状态决定返回口径：调用前就空闲要和等待后完成分开说，
+      // 模型才不会把 0ms 返回的「已完成」当成刚等完的同步完成而反复再等
+      const wasBusy = targetAgent.isActive() || targetAgent.hasPendingMail();
+      const startedAt = Date.now();
       while (targetAgent.isActive() || targetAgent.hasPendingMail()) {
-        if (Date.now() >= deadline) return failure(`等待 ${targetPath} 超时`);
+        if (Date.now() >= startedAt + (timeoutMs ?? 30_000)) {
+          return failure(`等待 ${targetPath} 超时，目标仍未完成或收件箱仍有待处理消息`);
+        }
         await sleep(50);
       }
-      return `${targetPath} 已完成当前任务`;
+      if (targetAgent.isInterrupted()) {
+        return `${targetPath} 已被中断，当前任务未完成，结论不会回灌；需要续做可用 followup_task 重新分派`;
+      }
+      if (!wasBusy) {
+        return `${targetPath} 在本次等待前已空闲（当前任务早已结束），结论由完成通知自动回灌，无需再等待`;
+      }
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      return `${targetPath} 已完成当前任务（等待 ${seconds} 秒后结束），结论由完成通知自动回灌`;
     },
   };
 }

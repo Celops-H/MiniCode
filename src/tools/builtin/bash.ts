@@ -62,7 +62,10 @@ export function isReadOnlyBashCommand(command: string): boolean {
 /** 执行 shell 命令，返回标准输出与错误输出；非零退出或超时返回错误信息 */
 export const bashTool: Tool = {
   name: "bash",
-  description: "在系统 shell 中执行命令，返回标准输出与错误输出",
+  description:
+    "在系统 shell 中执行命令，返回标准输出与错误输出。" +
+    "默认 30 秒超时，到点终止并返回失败；预计更久的命令传更大的 timeoutMs（毫秒）。" +
+    "background 为 true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止",
   inputSchema: schema,
   isReadOnly: false,
   isConcurrencySafe(input) {
@@ -169,7 +172,10 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
         return;
       }
       if (timedOut) {
-        resolve({ output: `${details ? `${details}\n` : ""}（命令执行超时，已终止）`, isError: true });
+        resolve({
+          output: `${details ? `${details}\n` : ""}（命令执行超时，已终止；长命令可传更大的 timeoutMs 参数重试）`,
+          isError: true,
+        });
         return;
       }
       if (exitCode !== 0) {
