@@ -1,4 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
@@ -28,8 +29,16 @@ export const readTool: Tool = {
     }>(readTool, input);
     const file = resolvePath(path); // 相对路径基于工具执行上下文 cwd
     // 目录目标先识别：readFile 打在目录上只会抛 EISDIR 裸系统错误，模型无从纠偏。
-    // 列出条目并提示读文件给具体路径、按模式找文件用 glob，按正常结果返回
-    const target = await stat(file);
+    // 列出条目并提示读文件给具体路径、按模式找文件用 glob，按正常结果返回。
+    // stat 失败时不抛裸系统错误：不存在与无法访问分开提示（口径同 grep）
+    let target: Stats;
+    try {
+      target = await stat(file);
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") return `读取路径不存在：${path}`;
+      return `读取路径无法访问：${path}（${e.message ?? "未知错误"}）`;
+    }
     if (target.isDirectory()) {
       const entries = await readdir(file, { withFileTypes: true });
       const names = entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).sort();
@@ -40,15 +49,20 @@ export const readTool: Tool = {
       ].join("\n");
     }
     const content = await readFile(file, "utf8");
-    // 记录版本令牌：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size
+    // 记录版本令牌：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size。
+    // 记版本的 stat 在读与 stat 之间文件被删时同样会抛裸 ENOENT，失败即跳过记版本
     const fileState = currentFileState();
     if (fileState) {
-      const disk = await stat(file);
-      fileState.setVersion(file, {
-        mtimeMs: disk.mtimeMs,
-        size: disk.size,
-        contentHash: limit === undefined ? hashContent(content) : undefined,
-      });
+      try {
+        const disk = await stat(file);
+        fileState.setVersion(file, {
+          mtimeMs: disk.mtimeMs,
+          size: disk.size,
+          contentHash: limit === undefined ? hashContent(content) : undefined,
+        });
+      } catch {
+        // 文件在读取后立即被删：内容已拿到，正常返回，不记版本
+      }
     }
     const lines = content.split("\n");
     const end = limit !== undefined ? offset + limit : lines.length;

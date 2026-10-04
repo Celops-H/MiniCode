@@ -70,6 +70,14 @@ describe("文件类内置工具", () => {
     expect(out).toContain("glob");
   });
 
+  it("read 打在不存在的路径上返回可读提示，不抛 ENOENT 裸系统错误（口径同 grep）", async () => {
+    const dir = setup();
+    const out = await tool("read").execute({ path: path.join(dir, "没有这个文件.txt") });
+    expect(out).toContain("读取路径不存在");
+    expect(out).toContain("没有这个文件.txt");
+    expect(out).not.toContain("ENOENT");
+  });
+
   it("write 写入文件并自动创建父目录", async () => {
     const dir = setup();
     const file = path.join(dir, "sub", "b.txt");
