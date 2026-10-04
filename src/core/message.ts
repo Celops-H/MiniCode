@@ -40,6 +40,13 @@ export interface ModelUsage {
   cacheReadTokens?: number;
   /** 缓存写入 token：anthropic 取 cache_creation_input_tokens；openai 无写缓存概念不携带 */
   cacheWriteTokens?: number;
+  /**
+   * 本次请求占用的上下文全量（prompt 侧 token 总数，含系统提示词与工具定义）。
+   * 协议归一：openai 即 prompt_tokens（厂商口径已含缓存段）；
+   * anthropic 为 input_tokens + cache_read + cache_creation（厂商各字段互不相含，
+   * 相加才是请求真实占用的窗口量）。水位显示与压缩触发按它回填真实值。
+   */
+  promptTokens?: number;
 }
 
 /** AssistantMessage 的调用元数据（供观测 / 续跑） */

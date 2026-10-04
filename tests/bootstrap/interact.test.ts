@@ -647,7 +647,7 @@ describe("interact /compact 命令", () => {
 });
 
 describe("buildCompactConfig 装配", () => {
-  it("三级 fallback：config > 模型定义 > 默认 128000；未配置 compact 返回 undefined", () => {
+  it("三级 fallback：config > 模型定义 > 默认 204800；未配置 compact 返回 undefined", () => {
     const modelsWithWindow = { resolve: () => ({ model: { contextWindow: 64000 } }) } as unknown as Models;
     // config 显式 contextWindow 优先
     expect(
@@ -655,9 +655,9 @@ describe("buildCompactConfig 装配", () => {
     ).toEqual({ contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3 });
     // 无 contextWindow：取模型定义值
     expect(buildCompactConfig(configSchema.parse({ compact: {} }), "m", modelsWithWindow)?.contextWindow).toBe(64000);
-    // 模型也没有：默认 128000，其余字段用 schema 默认值
+    // 模型也没有：默认 204800（200k 兜底常量），其余字段用 schema 默认值
     const defaults = buildCompactConfig(configSchema.parse({ compact: {} }), "m");
-    expect(defaults).toEqual({ contextWindow: 128000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 });
+    expect(defaults).toEqual({ contextWindow: 204800, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 });
     // 未配置 compact：不启用
     expect(buildCompactConfig(configSchema.parse({}), "m")).toBeUndefined();
   });

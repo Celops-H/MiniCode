@@ -42,10 +42,13 @@ describe("ensureGlobalConfigSeed（全局配置播种）", () => {
     expect(byId.get("openai")).toMatchObject({ reasoningEffort: true });
     expect(byId.get("qwen")).toMatchObject({ enableThinking: true });
     expect(byId.get("deepseek")?.models).toEqual([
-      { id: "deepseek-v4-pro", reasoning: true },
-      { id: "deepseek-v4-flash", reasoning: true },
+      { id: "deepseek-v4-pro", contextWindow: 1_000_000, maxTokens: 393_216, reasoning: true },
+      { id: "deepseek-v4-flash", contextWindow: 1_000_000, maxTokens: 393_216, reasoning: true },
     ]);
-    expect(byId.get("openai")?.models).toEqual([{ id: "gpt-4o" }, { id: "gpt-4o-mini" }]);
+    expect(byId.get("openai")?.models).toEqual([
+      { id: "gpt-4o", contextWindow: 128_000, maxTokens: 16_384 },
+      { id: "gpt-4o-mini", contextWindow: 128_000, maxTokens: 16_384 },
+    ]);
     // 种子必须能过配置 schema（播种即合法，loadConfig 不因种子报错）
     expect(() => configSchema.parse(raw)).not.toThrow();
   });

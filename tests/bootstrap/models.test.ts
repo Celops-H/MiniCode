@@ -80,6 +80,55 @@ describe("buildModelClient（按配置构建模型客户端）", () => {
     expect(models.resolve("a-1")?.provider.id).toBe("a");
     expect(models.resolve("b-1")?.provider.id).toBe("b");
   });
+
+  it("窗口/输出上限：配置手写优先，缺字段按模型目录代查（E132 来源链）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "deepseek",
+          baseUrl: "https://a.example.com",
+          apiKeyEnv: "A_API_KEY",
+          models: [
+            { id: "m-handwritten", contextWindow: 123_456, maxTokens: 6_789 },
+            { id: "m-cataloged" }, // 目录收录：按目录值代查
+            { id: "m-unknown" }, // 目录未收录：无值，消费方按兜底常量处理
+          ],
+        },
+      ],
+    };
+    // 注入目录替身（不依赖真实快照内容：快照随目录刷新，测试断言不得与其耦合）
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      catalog: (providerId, modelId) =>
+        providerId === "deepseek" && modelId === "m-cataloged"
+          ? { contextWindow: 777_777, maxTokens: 8_888 }
+          : undefined,
+    });
+    expect(models.resolve("m-handwritten")?.model).toMatchObject({ contextWindow: 123_456, maxTokens: 6_789 });
+    expect(models.resolve("m-cataloged")?.model).toMatchObject({ contextWindow: 777_777, maxTokens: 8_888 });
+    expect(models.resolve("m-unknown")?.model.contextWindow).toBeUndefined();
+  });
+
+  it("目录查询按预设 catalogId 映射厂商键（moonshot → moonshotai）", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        {
+          id: "moonshot",
+          baseUrl: "https://a.example.com",
+          apiKeyEnv: "A_API_KEY",
+          models: [{ id: "m-1" }],
+        },
+      ],
+    };
+    const models = buildModelClient(config, undefined, {
+      env: KEYS,
+      catalog: (providerId) => (providerId === "moonshotai" ? { contextWindow: 3_000 } : undefined),
+    });
+    // 查询用目录侧键（catalogId）而非 provider id：对不上映射就查不到值
+    expect(models.resolve("m-1")?.model.contextWindow).toBe(3_000);
+  });
 });
 
 describe("resolveMainModel（主模型解析）", () => {

@@ -29,9 +29,11 @@ export async function ensureGlobalConfigSeed(paths?: ConfigPaths): Promise<void>
       ...(p.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(p.enableThinking ? { enableThinking: true } : {}),
       ...(p.includeUsage ? { includeUsage: true } : {}),
-      models: p.models.map((id) => ({
-        id,
-        ...(p.reasoningModels?.includes(id) ? { reasoning: true } : {}),
+      models: p.models.map((m) => ({
+        id: m.id,
+        ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+        ...(m.maxTokens !== undefined ? { maxTokens: m.maxTokens } : {}),
+        ...(p.reasoningModels?.includes(m.id) ? { reasoning: true } : {}),
       })),
     })),
   };

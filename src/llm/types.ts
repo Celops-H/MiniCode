@@ -7,6 +7,9 @@ export type ProtocolType =
   | "openai-responses"
   | "gemini";
 
+/** 上下文窗口兜底（200k token）：配置未写、厂商未报、目录也未收录时的最后兜底 */
+export const DEFAULT_CONTEXT_WINDOW = 204_800;
+
 /** 认证状态 */
 export interface ProviderAuth {
   configured: boolean;

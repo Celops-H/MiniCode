@@ -15,7 +15,7 @@ import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills
 import type { Tool } from "../tools/index.js";
 import type { Message, ThinkingLevel, StreamEvent } from "../core/index.js";
 import type { PermissionPipeline } from "../permission/index.js";
-import type { Models } from "../llm/index.js";
+import { DEFAULT_CONTEXT_WINDOW, type Models } from "../llm/index.js";
 
 /** 系统提示词（单一出处，TUI 侧从本模块引用）：终端纯文本不渲染 Markdown 是产品约定 */
 export const SYSTEM_PROMPT = [
@@ -138,7 +138,9 @@ export function buildHookBus(
 }
 
 /**
- * 按 config.compact 装配压缩配置：contextWindow 缺省取模型定义值（再缺省 128000）。
+ * 按 config.compact 装配压缩配置：contextWindow 缺省取模型定义值
+ * （模型定义已按 配置手写 > 厂商抓取 > 模型目录 的优先级装配，
+ * 再缺省按 200k 兜底常量）。
  * 未配置 compact 时返回 undefined（压缩不启用）。
  */
 export function buildCompactConfig(
@@ -150,7 +152,7 @@ export function buildCompactConfig(
   if (!compact) return undefined;
   const model = models?.resolve(modelId)?.model;
   return {
-    contextWindow: compact.contextWindow ?? model?.contextWindow ?? 128_000,
+    contextWindow: compact.contextWindow ?? model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     // 其余三项 schema 已 default（8192/4096/5），这里再兜底：非 zod 解析路径（测试/手拼 config）缺省时不 undefined
     maxOutputTokens: compact.maxOutputTokens ?? 8192,
     safetyMargin: compact.safetyMargin ?? 4096,

@@ -24,7 +24,7 @@ import {
 import { attachRecorder, deleteTrace } from "../observability/index.js";
 import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../bootstrap/models.js";
-import { Models } from "../llm/index.js";
+import { DEFAULT_CONTEXT_WINDOW, Models } from "../llm/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
 import { rebuildUsageFromTrace, usageFromMessages } from "./usage.js";
 import { createStore } from "solid-js/store";
@@ -286,9 +286,10 @@ async function runTuiSession(opts: {
   // 流水日志埋点：模型请求/fallback/压缩/工具失败/权限拒绝随事件入日志（行带会话归属）
   attachHookLogging(hooks, logger, session.meta.id);
   // /compact 开箱可用：config.compact 未配置时给默认压缩配置（对齐 schema 缺省值），
-  // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）
+  // 否则 compactNow 直接返回 false 提示「未配置压缩」（后端 buildCompactConfig 的兜底在 main 同步）；
+  // contextWindow 兜底与压缩触发同源（模型定义已按目录代查装配，仍缺按 200k 常量兜底）
   const compactConfig = buildCompactConfig(config, modelId, models) ?? {
-    contextWindow: models?.resolve(modelId)?.model?.contextWindow ?? 128_000,
+    contextWindow: models?.resolve(modelId)?.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
     maxOutputTokens: 8192,
     safetyMargin: 4096,
     keepRecentToolResults: 5,

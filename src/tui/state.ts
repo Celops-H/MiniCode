@@ -92,8 +92,8 @@ export type AgentEventMeta = HookEvent & {
   completedAt?: number;
   /** LlmCallEnd 附带：实际产出模型的协议（归一口径按协议区分） */
   modelApi?: string;
-  /** MessageAppended / Compact 附带：root 上下文的估算 token（agent.estimateContextTokens 就地计算，
-   *  用户看到的水位就是压缩判断用的水位） */
+  /** MessageAppended / Compact 附带：root 上下文 token（agent.contextTokens 就地计算，
+   *  真实用量回填优先，与压缩判断同口径） */
   contextTokens?: number;
 };
 
@@ -889,7 +889,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, usage: accumulateUsage(state.usage, { usage: event.usage, modelApi: event.modelApi }) };
     case "MessageAppended":
     case "Compact":
-      // root 上下文水位刷新：loop 就地计算注入（agent.estimateContextTokens，
+      // root 上下文水位刷新：loop 就地计算注入（agent.contextTokens，
       // 与压缩触发同口径——用户看到的水位就是压缩判断用的水位）；未注入（子 agent 事件/直调）不动
       if (event.contextTokens === undefined) return state;
       return { ...state, contextTokens: event.contextTokens };

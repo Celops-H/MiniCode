@@ -4,10 +4,11 @@
  * 观感：一行内分布；窄屏右侧溢出被截（自然右缘裁切）：溢出先截右侧
  * 运行状态/操作提示，继而左盒靠右的用量段依次被顶出，模型名/会话标题/模式最后被截。
  * 用量三段：↑↓ 为会话累计（含全部 agent，归一口径见
- * UsageSummary）；缓存命中率 = cacheRead/input；上下文水位 = 上下文估算/窗口（与压缩触发
- * 同一估算，到达压缩线变警示色），无数据不显示对应段。
+ * UsageSummary）；缓存命中率 = cacheRead/input；上下文水位 = 上下文 token/窗口（与压缩触发
+ * 同一口径，到达压缩线变警示色），无数据不显示对应段。
  */
 import type { JSX } from "@opentui/solid";
+import { DEFAULT_CONTEXT_WINDOW } from "../../llm/index.js";
 import { theme } from "./theme.js";
 import { permissionModeLabel, formatTokens } from "../state.js";
 import { fitWidth } from "./fit.js";
@@ -54,12 +55,13 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
             · 缓存 {Math.min(100, Math.round((props.usage.cacheReadTokens / props.usage.inputTokens) * 100))}%
           </text>
         ) : null}
-        {props.contextTokens !== undefined && props.contextWindow !== undefined && props.contextWindow > 0 ? (
+        {/* 水位段：分母经装配层来源链（配置 > 厂商抓取 > 模型目录 > 兜底常量）必可得，
+            只看分子是否有数据；到达压缩线（needsCompact 的同一判定值）警示 */}
+        {props.contextTokens !== undefined ? (
           <text
-            // 到达压缩线（needsCompact 的同一判定值）警示：再聊就要压缩了
             fg={props.compactThreshold !== undefined && props.contextTokens >= props.compactThreshold ? theme.warning : theme.textMuted}
           >
-            · 上下文 {Math.min(100, Math.round((props.contextTokens / props.contextWindow) * 100))}%
+            · 上下文 {Math.min(100, Math.round((props.contextTokens / (props.contextWindow ?? DEFAULT_CONTEXT_WINDOW)) * 100))}%
           </text>
         ) : null}
       </box>

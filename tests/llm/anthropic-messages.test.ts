@@ -506,7 +506,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
-      usage: { inputTokens: 88, outputTokens: 27 },
+      usage: { inputTokens: 88, outputTokens: 27, promptTokens: 88 },
     });
   });
 
@@ -529,7 +529,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
-      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 9500, cacheWriteTokens: 500 },
+      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 9500, cacheWriteTokens: 500, promptTokens: 10100 },
     });
   });
 
@@ -550,7 +550,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
-      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 2000, cacheWriteTokens: 300 },
+      usage: { inputTokens: 100, outputTokens: 27, cacheReadTokens: 2000, cacheWriteTokens: 300, promptTokens: 2400 },
     });
   });
 
@@ -571,7 +571,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
-      usage: { inputTokens: 88, outputTokens: 5 },
+      usage: { inputTokens: 88, outputTokens: 5, promptTokens: 88 },
     });
   });
 
@@ -591,7 +591,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "end_turn",
-      usage: { inputTokens: 10, outputTokens: 3 },
+      usage: { inputTokens: 10, outputTokens: 3, promptTokens: 10 },
     });
   });
 

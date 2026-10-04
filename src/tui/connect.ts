@@ -31,8 +31,14 @@ async function readGlobalConfigRaw(file: string): Promise<Record<string, unknown
  * @param file 全局配置文件路径
  * @param preset 供应商预设
  * @param apiKey 落盘 API key（写进 provider 的 apiKey 字段；可省略仅更新端点/模型）
+ * @param models 模型列表（缺省用预设列表）：/models 拉取的全量列表（含窗口/输出上限）
  */
-export async function writeGlobalConfig(file: string, preset: ProviderPreset, apiKey?: string): Promise<void> {
+export async function writeGlobalConfig(
+  file: string,
+  preset: ProviderPreset,
+  apiKey?: string,
+  models: ModelListEntry[] = preset.models,
+): Promise<void> {
   const raw = await readGlobalConfigRaw(file);
   const providers: Config["providers"] = (raw.providers as unknown as Config["providers"]) ?? [];
   const kept = (providers ?? []).filter((p) => p.id !== preset.id);
@@ -49,10 +55,12 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
       ...(preset.reasoningEffort ? { reasoningEffort: true } : {}),
       ...(preset.enableThinking ? { enableThinking: true } : {}),
       ...(preset.includeUsage ? { includeUsage: true } : {}),
-      // /models 拉取替换后的列表没有能力位信息，reasoning 标记只对预设内模型保留
-      models: preset.models.map((id) => ({
-        id,
-        ...(preset.reasoningModels?.includes(id) ? { reasoning: true } : {}),
+      models: models.map((m) => ({
+        id: m.id,
+        ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
+        ...(m.maxTokens !== undefined ? { maxTokens: m.maxTokens } : {}),
+        // 拉取列表没有能力位信息，reasoning 标记只对预设内模型保留
+        ...(preset.reasoningModels?.includes(m.id) ? { reasoning: true } : {}),
       })),
     },
   ];
@@ -73,23 +81,48 @@ export async function writeGlobalConfig(file: string, preset: ProviderPreset, ap
 /** /models 拉取超时（ms）：厂商慢响应时不让连接卡住 */
 export const FETCH_MODELS_TIMEOUT_MS = 10_000;
 
+/** 模型列表条目（写配置用）：id + 可选的窗口与输出上限 */
+export interface ModelListEntry {
+  id: string;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
 /**
  * 用 API Key 调厂商 /models 端点拉全量模型列表（OpenAI 兼容格式 { data: [{id}] }）。
  * 连接供应商时调用：写入 config 的 models 用真实列表而非手维护的预设占位，
  * 厂商上新模型即时可用。失败（key 无效/网络不通/非 JSON）抛错由调用方兜底。
+ * 窗口与输出上限：一并取条目上的 context_window / context_length 与
+ * max_output_tokens（OpenRouter 类网关放在 top_provider.max_completion_tokens），
+ * 数值原样落配置不做单位换算；字段缺失或不为数字的忽略，由调用方回落预设值。
  * @param baseUrl 厂商 OpenAI 兼容端点
  * @param apiKey 用户输入的 API Key
  * @param timeoutMs 超时 ms（缺省 FETCH_MODELS_TIMEOUT_MS）
- * @returns 模型 id 列表
+ * @returns 模型列表（含可得的窗口/输出上限）
  */
-export async function fetchProviderModels(baseUrl: string, apiKey: string, timeoutMs = FETCH_MODELS_TIMEOUT_MS): Promise<string[]> {
+export async function fetchProviderModels(baseUrl: string, apiKey: string, timeoutMs = FETCH_MODELS_TIMEOUT_MS): Promise<ModelListEntry[]> {
   const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = (await res.json()) as { data?: Array<{ id?: string }> };
-  return (json.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+  const json = (await res.json()) as { data?: Array<Record<string, unknown>> };
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+  return (json.data ?? [])
+    .map((m) => {
+      const id = typeof m.id === "string" ? m.id : "";
+      if (!id) return undefined;
+      const topProvider = m.top_provider as { max_completion_tokens?: unknown } | undefined;
+      const contextWindow = num(m.context_window) ?? num(m.context_length);
+      const maxTokens = num(m.max_output_tokens) ?? num(topProvider?.max_completion_tokens);
+      return {
+        id,
+        ...(contextWindow !== undefined ? { contextWindow } : {}),
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
+      };
+    })
+    .filter((m): m is ModelListEntry => m !== undefined);
 }
 
 /** 连接供应商：key 写全局 config 的 provider apiKey 字段（项目目录不落 .env）；成功返回 { ok:true, fetchedModels? }，失败 { ok:false, error }。paths 可注入（测试）。 */
@@ -107,14 +140,23 @@ export async function connectProvider(
     // anthropic 协议端点无 OpenAI /models 拉取约定（Bearer + {data:[{id}]}），直接用
     // 预设占位，不空耗一次注定失败的请求。
     // 拉取用固定 Bearer 认证，不带 provider 配置的 headers（api-key 头类厂商
-    // 拉取会失败，静默回落预设占位，连接本身不受影响）
-    let models = preset.models;
+    // 拉取会失败，静默回落预设占位，连接本身不受影响）。
+    // 窗口/输出上限：厂商抓取值优先，条目未带的回落预设值。
+    let models: ModelListEntry[] = preset.models;
     let fetchedModels: number | undefined;
     if (preset.protocol !== "anthropic-messages") {
       try {
         const fetched = await (opts.fetchImpl ?? fetchProviderModels)(preset.baseUrl, trimmed);
         if (fetched.length > 0) {
-          models = fetched;
+          const presetById = new Map(preset.models.map((m) => [m.id, m]));
+          models = fetched.map((m) => {
+            const baked = presetById.get(m.id);
+            return {
+              id: m.id,
+              contextWindow: m.contextWindow ?? baked?.contextWindow,
+              maxTokens: m.maxTokens ?? baked?.maxTokens,
+            };
+          });
           fetchedModels = fetched.length;
         }
       } catch {

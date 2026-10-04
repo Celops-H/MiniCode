@@ -842,7 +842,7 @@ describe("parseStream：真实用量挂 done", () => {
     }
     expect(events).toEqual([
       { type: "text_delta", text: "hi" },
-      { type: "done", stopReason: "stop", usage: { inputTokens: 120, outputTokens: 45 } },
+      { type: "done", stopReason: "stop", usage: { inputTokens: 120, outputTokens: 45, promptTokens: 120 } },
     ]);
   });
 
@@ -860,7 +860,7 @@ describe("parseStream：真实用量挂 done", () => {
     expect(events.at(-1)).toEqual({
       type: "done",
       stopReason: "stop",
-      usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 80 },
+      usage: { inputTokens: 120, outputTokens: 45, cacheReadTokens: 80, promptTokens: 120 },
     });
   });
 
@@ -901,7 +901,7 @@ describe("parseStream：真实用量挂 done", () => {
     )) {
       events.push(e);
     }
-    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop", usage: { inputTokens: 7 } });
+    expect(events.at(-1)).toEqual({ type: "done", stopReason: "stop", usage: { inputTokens: 7, promptTokens: 7 } });
   });
 
   it("usage chunk 不计入零产出诊断（解析用量即有产出意义）", async () => {

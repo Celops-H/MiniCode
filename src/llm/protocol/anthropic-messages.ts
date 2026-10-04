@@ -379,12 +379,19 @@ function anthropicUsage(
   ) {
     return {};
   }
+  // 请求上下文全量：anthropic 各输入字段互不相含，相加才是真实占用
+  // （input_tokens 不含缓存段；缓存读/写 token 同样占窗口）
+  const promptTokens =
+    inputTokens !== undefined || cacheReadTokens !== undefined || cacheWriteTokens !== undefined
+      ? (inputTokens ?? 0) + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0)
+      : undefined;
   return {
     usage: {
       ...(inputTokens !== undefined ? { inputTokens } : {}),
       ...(outputTokens !== undefined ? { outputTokens } : {}),
       ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
       ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+      ...(promptTokens !== undefined ? { promptTokens } : {}),
     },
   };
 }

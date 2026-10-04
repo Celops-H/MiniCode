@@ -1215,7 +1215,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   // 窗口与压缩线为会话常量，随此一并写入）
   commit({
     ...state,
-    contextTokens: agent.estimateContextTokens(),
+    contextTokens: agent.contextTokens(),
     contextWindow: options.contextWindow,
     compactThreshold: options.compactThreshold,
   });
@@ -1245,15 +1245,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     hooks.on("LlmCallEnd", (e) => {
       commit(reduceHook(state, { ...e, modelApi: options.modelApi?.(e.model) }));
     }),
-    // root 上下文水位：随 /root 消息追加与压缩刷新，agent.estimateContextTokens
+    // root 上下文水位：随 /root 消息追加与压缩刷新，agent.contextTokens
     // 就地计算（与压缩触发同口径）；子 agent 消息不影响 root 水位
     hooks.on("MessageAppended", (e) => {
       if (e.agentPath !== "/root") return;
-      commit(reduceHook(state, { ...e, contextTokens: agent.estimateContextTokens() }));
+      commit(reduceHook(state, { ...e, contextTokens: agent.contextTokens() }));
     }),
     hooks.on("Compact", (e) => {
       if (e.agentPath !== "/root") return;
-      commit(reduceHook(state, { ...e, contextTokens: agent.estimateContextTokens() }));
+      commit(reduceHook(state, { ...e, contextTokens: agent.contextTokens() }));
     }),
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
     hooks.on("AgentCompleted", (e) => {

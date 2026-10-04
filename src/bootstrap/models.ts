@@ -1,6 +1,7 @@
 import type { Config } from "../config/index.js";
 import { PROVIDER_PRESETS } from "../config/presets.js";
 import { resolveAuth } from "../llm/auth.js";
+import { lookupModelLimits, type CatalogLookup } from "../llm/catalog.js";
 import {
   AnthropicCompatibleProvider,
   ModelRouter,
@@ -31,6 +32,8 @@ const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
  * @param opts.env 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
  * @param opts.createOpenAIClient / opts.createAnthropicClient client 工厂注入（测试用；
  *   缺省用各 Provider 的默认 SDK 工厂），可端到端断言配置 → 请求体的能力位接线
+ * @param opts.catalog 模型目录查询注入（测试用；缺省查 models.dev 目录）：
+ *   配置未写窗口/输出上限的模型按目录代查，仍未命中由消费方按兜底常量处理
  * @param opts.onWarning 装配告警回调（modelChain 死条目等非致命问题）；缺省输出到 stderr，
  *   TUI 宿主注入收集器转为界面提示（console 直写在全屏界面下会花屏）
  * @returns 注册了 Provider 的 Models 集合
@@ -42,6 +45,7 @@ export function buildModelClient(
     env?: NodeJS.ProcessEnv;
     createOpenAIClient?: ChatCompletionsClientFactory;
     createAnthropicClient?: AnthropicMessagesClientFactory;
+    catalog?: CatalogLookup;
     onWarning?: (message: string) => void;
   } = {},
 ): Models {
@@ -75,17 +79,26 @@ export function buildModelClient(
     const reasoningEffort = provider.reasoningEffort ?? preset?.reasoningEffort;
     const enableThinking = provider.enableThinking ?? preset?.enableThinking;
     const includeUsage = provider.includeUsage ?? preset?.includeUsage;
+    // 模型目录按目录侧厂商键查（预设 id 与目录键不一致的经 catalogId 映射；
+    // 自建 provider 用 id 直查，目录键对不上的自然查空）
+    const catalog = opts.catalog ?? lookupModelLimits;
+    const catalogProviderId = preset?.catalogId ?? provider.id;
     const modelInfos = provider.models.map((m) => {
       const qualified = seenModelIds.has(m.id) ? `${m.id}@${provider.id}` : undefined;
       seenModelIds.add(m.id);
+      // 窗口/输出上限来源优先级：配置手写 > 厂商 /models 抓取（连接时已写回配置，
+      // 同样落在 m 上）> models.dev 目录代查 > 兜底常量（消费方处理）
+      const limits = m.contextWindow === undefined || m.maxTokens === undefined
+        ? catalog(catalogProviderId, m.id)
+        : undefined;
       return {
         id: qualified ?? m.id,
         vendorId: qualified ? m.id : undefined,
         name: m.name ?? m.id,
         api: protocol,
         providerId: provider.id,
-        contextWindow: m.contextWindow,
-        maxTokens: m.maxTokens,
+        contextWindow: m.contextWindow ?? limits?.contextWindow,
+        maxTokens: m.maxTokens ?? limits?.maxTokens,
         // 推理系列模型能力位：思考类请求参数仅对推理系列模型下发；
         // 未标记的模型按预设的推理系列名单回填
         reasoning: m.reasoning ?? preset?.reasoningModels?.includes(m.id),

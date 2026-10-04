@@ -156,6 +156,12 @@ export class Agent {
   /** agent 邮箱：其他 agent 投递的消息队列，注入上下文供模型读取 */
   private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
+  /**
+   * 最近一次模型调用回填的真实请求占用（usage.promptTokens，含系统提示词与工具定义），
+   * messageCount 记该次请求时的消息数——其后追加的消息按估算补增量。
+   * 历史被改写（压缩/裁剪/剥组/清盘）后作废，回退到纯估算。
+   */
+  private promptTokensAt?: { messageCount: number; tokens: number };
   /** 摘要压缩失败后置位，停止后续压缩尝试（失败保护） */
   private compactDisabled = false;
   /** 历史被改写标记（压缩/裁剪/超窗剥组改过已落盘消息）：宿主据此重写持久化，防落盘与内存错位 */
@@ -297,6 +303,8 @@ export class Agent {
     this.messages = [];
     // 清盘即丢弃未发射的待镜像消息：消息已不在上下文，补发只会让轨迹多出不存在的消息
     this.pendingRepairMirrors = [];
+    // 历史已清空，真实用量回填随之作废（旧值对应的是清盘前的请求）
+    this.promptTokensAt = undefined;
     // 记忆一并清空（/clear 语义是回会话新建态）：旧会话的记忆文本不跨会话残留，
     // 覆盖点也归零——它指旧会话下标会让新会话的消息永远进不了记忆、压缩时被当已覆盖替换
     this.memory = "";
@@ -500,6 +508,11 @@ export class Agent {
           if (event.type === "done") {
             attemptStopReason = event.stopReason;
             attemptUsage = event.usage;
+            // 真实水位回填：本请求的上下文占用（此后追加的消息由 contextTokens 按估算补增量）；
+            // 剥组重试/切换备选时后续尝试的 done 覆盖前值，最终以实际成功那次为准
+            if (event.usage?.promptTokens !== undefined) {
+              this.promptTokensAt = { messageCount: this.messages.length, tokens: event.usage.promptTokens };
+            }
           } else if (event.type === "error") {
             attemptError = event.message;
           }
@@ -563,6 +576,7 @@ export class Agent {
           error: "上下文超限，剥组重试",
         });
         this.messages = peeled;
+        this.promptTokensAt = undefined; // 历史被剥组，真实用量回填作废
         this.historyRewritten = true; // 已落盘的工具回合被剥除
         // 覆盖点钳制：剥组保留组间游离消息、旧消息下标会前移，极端情况下剩余长度
         // 小于覆盖点即越界——收回到新数组长度内兜底；剩余长度仍覆盖点的场景下
@@ -689,14 +703,29 @@ export class Agent {
    */
   private async maybeCompact(): Promise<void> {
     if (!this.compactConfig || !this.autoCompact || this.compactDisabled) return;
-    if (!needsCompact(this.estimateContextTokens(), this.compactConfig)) return;
+    if (!needsCompact(this.contextTokens(), this.compactConfig)) return;
     await this.doCompact("auto");
+  }
+
+  /**
+   * 当前上下文 token（水位口径）：优先用最近一次模型调用回填的真实请求占用
+   * （usage.promptTokens，含系统提示词与工具定义，比字符估算准），其后追加的
+   * 消息按估算补增量；从未拿到真实用量或历史被改写后按纯估算。
+   * 公开给宿主：TUI 状态行的上下文水位与压缩触发共用同一口径——用户看到的水位
+   * 就是压缩判断用的水位。
+   */
+  contextTokens(): number {
+    const at = this.promptTokensAt;
+    if (at && at.messageCount <= this.messages.length) {
+      return at.tokens + estimateTokens(this.messages.slice(at.messageCount));
+    }
+    return this.estimateContextTokens();
   }
 
   /**
    * 当前上下文的估算 token：消息 + 系统提示词。每次请求全量携带 systemPrompt，
    * 只按消息估算会系统性低估体积，长提示词会话（指令文件 + 技能清单）的压缩触发点明显滞后。
-   * 公开给宿主：TUI 状态行的上下文水位与压缩触发共用同一估算——用户看到的水位就是压缩判断用的水位。
+   * 仅作真实用量缺席时的回落，水位展示与压缩触发主口径是 contextTokens。
    */
   estimateContextTokens(): number {
     return estimateTokens(this.messages) + estimateTextTokens(this.systemPrompt);
@@ -728,7 +757,7 @@ export class Agent {
     this.flushPendingRepairMirrors();
     const startedAt = Date.now();
     const agentPath = this.agentPath?.toString() ?? "/root";
-    const tokensBefore = this.estimateContextTokens();
+    const tokensBefore = this.contextTokens();
     const messagesBefore = this.messages.length;
     // 收口 Compact 事件：tokensAfter/messagesAfter 按收口时刻的上下文实测
     const emitCompact = async (ok: boolean, error?: string): Promise<void> => {
@@ -737,7 +766,7 @@ export class Agent {
         agentPath,
         trigger,
         tokensBefore,
-        tokensAfter: this.estimateContextTokens(),
+        tokensAfter: this.contextTokens(),
         messagesBefore,
         messagesAfter: this.messages.length,
         durationMs: Date.now() - startedAt,
@@ -750,8 +779,9 @@ export class Agent {
     const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
     if (pruned !== this.messages) {
       this.messages = pruned;
+      this.promptTokensAt = undefined; // 历史被裁剪，真实用量回填作废
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
-      if (!instructions && !needsCompact(this.estimateContextTokens(), this.compactConfig!)) {
+      if (!instructions && !needsCompact(this.contextTokens(), this.compactConfig!)) {
         await emitCompact(true);
         return true;
       }
@@ -825,6 +855,8 @@ export class Agent {
       }
       const summaryMessages = replaceWithSummary(summary);
       this.messages = summaryMessages;
+      // 历史被摘要替换，真实用量回填作废（否则压缩后仍按压缩前的占用判断，立即再触发压缩）
+      this.promptTokensAt = undefined;
       // 非记忆分支的摘要同样捕获了全量历史：写入记忆，维持「已覆盖 ⇒ 已进记忆」——
       // 否则下次记忆分支压缩用旧记忆替换上下文，记忆没覆盖的段落被静默丢弃
       if (this.memoryEnabled && !usedMemory) {

@@ -124,7 +124,7 @@ export const configSchema = z
       /** 撞线自动压缩开关（缺省开）：false 仅关掉撞线自动触发，压缩配置照常提供给
        *  /compact 手动路径（开关与压缩配置的有无解耦，手动压缩不受限） */
       enabled: z.boolean().optional(),
-      /** 模型上下文窗口 token；缺省用模型定义值，模型也没有则默认 128000 */
+      /** 模型上下文窗口 token；缺省用模型定义值，模型也没有则按 200k 兜底常量 */
       contextWindow: z.number().optional(),
       /** 保留给模型回复输出的 token，默认 8192 */
       maxOutputTokens: z.number().default(8192),

@@ -6,7 +6,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it, expect } from "vitest";
-import { connectProvider, writeGlobalConfig, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset } from "../../src/tui/connect.js";
+import { connectProvider, writeGlobalConfig, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset, type ModelListEntry } from "../../src/tui/connect.js";
 
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
@@ -22,11 +22,11 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
     };
     expect(parsed.providers).toHaveLength(1);
     expect(parsed.providers[0]).toMatchObject({ id: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", apiKey: "sk-123" });
-    // 能力开关随预设落盘：推理厂商标记 + 预设内模型标 reasoning
+    // 能力开关随预设落盘：推理厂商标记 + 预设内模型标 reasoning + 窗口/输出上限随预设烙入
     expect(parsed.providers[0]?.reasoningContent).toBe(true);
     expect(parsed.providers[0]?.models).toEqual([
-      { id: "deepseek-v4-pro", reasoning: true },
-      { id: "deepseek-v4-flash", reasoning: true },
+      { id: "deepseek-v4-pro", contextWindow: 1_000_000, maxTokens: 393_216, reasoning: true },
+      { id: "deepseek-v4-flash", contextWindow: 1_000_000, maxTokens: 393_216, reasoning: true },
     ]);
     // 连接只把供应商加进列表，不改优先级链——当前会话与模型保持（用 /model 切模型）
     expect(parsed.modelChain).toBeUndefined();
@@ -83,7 +83,7 @@ it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预
       globalConfigFile: globalFile,
       fetchImpl: async () => {
         fetchCalls++;
-        return ["should-not-be-used"];
+        return [{ id: "should-not-be-used" }];
       },
     });
     expect(ok).toEqual({ ok: true });
@@ -92,14 +92,14 @@ it("connectProvider：anthropic 协议预设跳过 /models 拉取，直接写预
       providers: Array<{ id: string; protocol?: string; models: { id: string }[] }>;
     };
     expect(config.providers[0]).toMatchObject({ id: "moonshot-anthropic", protocol: "anthropic-messages" });
-    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(anthropicPreset.models);
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(anthropicPreset.models.map((m) => m.id));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 /** /models 拉取 mock：返回给定列表；rejected 用于模拟 key 无效/网络失败 */
-function fakeFetch(models: string[] | Error): typeof import("../../src/tui/connect.js").fetchProviderModels {
+function fakeFetch(models: ModelListEntry[] | Error): typeof import("../../src/tui/connect.js").fetchProviderModels {
   return async () => {
     if (models instanceof Error) throw models;
     return models;
@@ -132,12 +132,38 @@ it("connectProvider 拉全量模型：/models 返回的列表替换预设占位�
   try {
     const result = await connectProvider(deepseek, "sk-123", {
       globalConfigFile: globalFile,
-      fetchImpl: fakeFetch(["deepseek-v4-pro", "deepseek-v4-flash"]),
+      fetchImpl: fakeFetch([{ id: "deepseek-v4-pro" }, { id: "deepseek-v4-flash" }]),
     });
     expect(result.ok).toBe(true);
     expect(result.fetchedModels).toBe(2);
     const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { models: { id: string }[] }[] };
     expect(config.providers[0]?.models.map((m) => m.id)).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("connectProvider 拉全量模型：条目带的窗口/输出上限写回配置，未带的回落预设值", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const globalFile = path.join(dir, "config.json");
+  try {
+    const result = await connectProvider(deepseek, "sk-123", {
+      globalConfigFile: globalFile,
+      fetchImpl: fakeFetch([
+        // 厂商抓取值优先：覆盖预设值
+        { id: "deepseek-v4-pro", contextWindow: 999_999, maxTokens: 111_111 },
+        // 未带窗口/输出上限：回落预设烙入值
+        { id: "deepseek-v4-flash" },
+      ]),
+    });
+    expect(result.ok).toBe(true);
+    const config = JSON.parse(await readFile(globalFile, "utf8")) as {
+      providers: Array<{ models: Array<{ id: string; contextWindow?: number; maxTokens?: number }> }>;
+    };
+    expect(config.providers[0]?.models).toEqual([
+      { id: "deepseek-v4-pro", contextWindow: 999_999, maxTokens: 111_111, reasoning: true },
+      { id: "deepseek-v4-flash", contextWindow: 1_000_000, maxTokens: 393_216, reasoning: true },
+    ]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -155,24 +181,40 @@ it("connectProvider 拉取失败（key 无效/网络）：用预设模型兜底�
     expect(result.fetchedModels).toBeUndefined();
     const config = JSON.parse(await readFile(globalFile, "utf8")) as { providers: { models: { id: string }[] }[] };
     // 回落预设占位模型
-    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(deepseek.models);
+    expect(config.providers[0]?.models.map((m) => m.id)).toEqual(deepseek.models.map((m) => m.id));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-it("fetchProviderModels：解析 OpenAI 兼容 {data:[{id}]}、过滤空 id、baseUrl 尾斜杠归一", async () => {
+it("fetchProviderModels：解析 id 与窗口/输出上限（context_window/context_length、max_output_tokens/top_provider），过滤无效条目", async () => {
   const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
   const origFetch = globalThis.fetch;
   globalThis.fetch = (async (input: unknown, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => {
     const url = typeof input === "string" ? input : String(input);
     calls.push({ url, headers: init?.headers });
     void init?.signal; // 超时信号由 AbortSignal.timeout 注入，此处不做时钟断言
-    return new Response(JSON.stringify({ data: [{ id: "m-a" }, {}, { id: "m-b" }] }), { status: 200 });
+    return new Response(
+      JSON.stringify({
+        data: [
+          { id: "m-a", context_window: 128_000, max_output_tokens: 16_384 },
+          { id: "m-b", context_length: 1_000_000, top_provider: { max_completion_tokens: 64_000 } },
+          { id: "m-c" },
+          { id: "m-bad", context_window: "200k" }, // 非数字：不做单位换算，忽略该字段
+          {},
+        ],
+      }),
+      { status: 200 },
+    );
   }) as typeof fetch;
   try {
     const list = await fetchProviderModels("https://example.com/api/v1/", "sk-x");
-    expect(list).toEqual(["m-a", "m-b"]);
+    expect(list).toEqual([
+      { id: "m-a", contextWindow: 128_000, maxTokens: 16_384 },
+      { id: "m-b", contextWindow: 1_000_000, maxTokens: 64_000 },
+      { id: "m-c" },
+      { id: "m-bad" },
+    ]);
     expect(calls[0]?.url).toBe("https://example.com/api/v1/models");
     expect(calls[0]?.headers?.Authorization).toBe("Bearer sk-x");
   } finally {

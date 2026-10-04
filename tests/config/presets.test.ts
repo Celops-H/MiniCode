@@ -12,14 +12,23 @@ describe("PROVIDER_PRESETS（厂商预设）", () => {
       expect(p.baseUrl.startsWith("https://")).toBe(true);
       expect(p.apiKeyEnv.length).toBeGreaterThan(0);
       expect(p.models.length).toBeGreaterThan(0);
-      expect(p.models).toContain(p.defaultModel);
+      expect(p.models.map((m) => m.id)).toContain(p.defaultModel);
     }
   });
 
   it("能力位名单自洽：reasoningModels 是 models 的子集（笔误会静默丢标记）", () => {
     for (const p of PROVIDER_PRESETS) {
       for (const id of p.reasoningModels ?? []) {
-        expect(p.models, `${p.id} 的 reasoningModels 含未声明模型 ${id}`).toContain(id);
+        expect(p.models.map((m) => m.id), `${p.id} 的 reasoningModels 含未声明模型 ${id}`).toContain(id);
+      }
+    }
+  });
+
+  it("窗口与输出上限为正数（目录核实值原样烙入，笔误直接暴露）", () => {
+    for (const p of PROVIDER_PRESETS) {
+      for (const m of p.models) {
+        if (m.contextWindow !== undefined) expect(m.contextWindow).toBeGreaterThan(0);
+        if (m.maxTokens !== undefined) expect(m.maxTokens).toBeGreaterThan(0);
       }
     }
   });

@@ -369,6 +369,8 @@ function readOpenAIUsage(chunk: unknown): ModelUsage | undefined {
     ...(input !== undefined ? { inputTokens: input } : {}),
     ...(output !== undefined ? { outputTokens: output } : {}),
     ...(cached !== undefined ? { cacheReadTokens: cached } : {}),
+    // openai 的 prompt_tokens 已含缓存段：请求上下文全量即 inputTokens
+    ...(input !== undefined ? { promptTokens: input } : {}),
   };
 }
 

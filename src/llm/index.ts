@@ -8,3 +8,4 @@ export type { RouterOptions } from "./router.js";
 export { resolveAuth } from "./auth.js";
 export type { ResolveAuthOptions, ResolveAuthResult } from "./auth.js";
 export type { ProtocolType, ProviderAuth, ModelInfo, Protocol, Provider } from "./types.js";
+export { DEFAULT_CONTEXT_WINDOW } from "./types.js";

@@ -126,3 +126,16 @@ export function resolveLogsDir(opts: ResolvePathsOptions = {}): string {
   const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
   return path.join(globalDir, "logs");
 }
+
+/**
+ * 解析模型目录缓存目录：默认用户级 `~/.minicode/cache/`（无配置项）。
+ * 存放 models.dev 目录的运行时拉取缓存，与配置、会话等用户数据分开。
+ * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
+ * @returns 缓存目录
+ */
+export function resolveCacheDir(opts: ResolvePathsOptions = {}): string {
+  const home = opts.homedir ?? os.homedir();
+  const xdg = opts.xdgConfigHome;
+  const globalDir = xdg ? path.join(xdg, "minicode") : path.join(home, ".minicode");
+  return path.join(globalDir, "cache");
+}
