@@ -202,9 +202,9 @@ export class Team {
    */
   clear(): void {
     this.interruptAll();
-    // 子 agent 会话补结束标记（中断收尾）：收尾后注册表即清空，member 终态回调查不到成员
-    // 不再触发（E147 缺口），这里在清理前补写；已写过终态标记的不覆盖（防把已完成错改成中断）。
-    // 异步不等完成，失败只丢标记不丢消息
+    // 子 agent 会话补结束标记（中断收尾）：收尾后注册表即清空，终态回调只补发
+    // 中断事件、不再写子会话标记（见 notifyCompletion），这里在清理前补写；
+    // 已写过终态标记的不覆盖（防把已完成错改成中断）。异步不等完成，失败只丢标记不丢消息
     for (const member of this.members.values()) {
       member.agent?.finalizeOwnSession("interrupted", { onlyIfUnended: true }).catch(() => undefined);
     }
@@ -305,7 +305,23 @@ export class Team {
     const path = agent.agentPath;
     if (!path) return;
     const member = this.members.get(path.toString());
-    const parentPath = member?.parentPath;
+    if (!member) {
+      // 会话收尾（clear 清空注册表）后在途驱动才收尾：成员与父记录已查不到。
+      // 终态事件仍要发，否则轨迹里该子 agent 只有 AgentSpawned 无终态行，
+      // 按 agent 统计终态出现缺口。收尾窗口内无法区分真实终态：interruptAll
+      // 已把成员的中断标记置位，中断引发的流中止错误也表现为驱动失败，
+      // 刚自然完成、回调尚未跑到的窄窗口同样不可分辨——统一按中断口径补发；
+      // 父多半也已清空，不投递标记消息（sendMessage 只会报目标不存在）；
+      // 子会话结束标记已由 clear 兜底写过，这里不重复收尾
+      if (path.isRoot()) return;
+      await this.safeEmit({
+        type: "AgentInterrupted",
+        path: path.toString(),
+        parentPath: path.parent().toString(),
+      });
+      return;
+    }
+    const parentPath = member.parentPath;
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
     const name = agentNameOf(path);

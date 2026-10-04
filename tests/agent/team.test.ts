@@ -354,6 +354,60 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(completed).toHaveLength(0);
   });
 
+  it("clear 后在途驱动才收尾：终态事件按中断补发，轨迹终态不缺口", async () => {
+    const hooks = new HookBus();
+    const events: Array<{ type: string; path?: string; parentPath?: string }> = [];
+    hooks.on("AgentSpawned", (e) => {
+      events.push({ type: "AgentSpawned", path: e.path, parentPath: e.parentPath });
+    });
+    hooks.on("AgentCompleted", (e) => {
+      events.push({ type: "AgentCompleted", path: e.path });
+    });
+    hooks.on("AgentInterrupted", (e) => {
+      events.push({ type: "AgentInterrupted", path: e.path, parentPath: e.parentPath });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: {
+        async *stream(_modelId, _context, options) {
+          yield { type: "text_delta", text: "半截文本" };
+          await new Promise<void>((_, reject) => {
+            options?.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(100);
+    // 会话收尾：先中断全部成员再同步清空注册表，此时子 agent 的驱动循环仍在途
+    team.clear();
+    await sleep(300);
+
+    // 迟到的终态回调查不到成员：仍按中断补发终态事件（父路径由路径结构推出），
+    // 轨迹里 AgentSpawned 与 AgentInterrupted 成对，不再出现无终态行的缺口
+    expect(events.some((e) => e.type === "AgentSpawned" && e.path === "/root/worker")).toBe(true);
+    const interrupted = events.find((e) => e.type === "AgentInterrupted");
+    expect(interrupted).toBeDefined();
+    expect(interrupted!.path).toBe("/root/worker");
+    expect(interrupted!.parentPath).toBe("/root");
+    expect(events.some((e) => e.type === "AgentCompleted")).toBe(false);
+    // 注册表已清空：不向父投递中断标记（父收件箱保持空，进程不被回灌吊住）
+    expect(root.hasPendingMail()).toBe(false);
+  });
+
   it("中断标记不顶着打断重启父：父 unwind 窗口内到达只排队，轮末不再续跑", async () => {
     let rootCalls = 0;
     // 慢工具（不响应中断，模拟 bash 收尾排水窗口）：父的轮次要等它收尾才结束

@@ -17,6 +17,14 @@ describe("AgentPath（agent 层级路径）", () => {
     expect((child as AgentPath).isRoot()).toBe(false);
   });
 
+  it("parent 取父路径：一层与嵌套路径均正确，root 的父是自身", () => {
+    const child = AgentPath.parse("/root/task_1") as AgentPath;
+    expect(child.parent().toString()).toBe("/root");
+    const grand = AgentPath.parse("/root/task_1/worker") as AgentPath;
+    expect(grand.parent().toString()).toBe("/root/task_1");
+    expect(AgentPath.root().parent().isRoot()).toBe(true);
+  });
+
   it("resolve 支持相对与绝对引用", () => {
     const current = AgentPath.parse("/root/researcher");
     const worker = (current as AgentPath).resolve("worker");
