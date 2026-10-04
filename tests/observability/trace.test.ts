@@ -47,7 +47,7 @@ describe("Recorder：轨迹格式与落盘", () => {
         dir: path.join(dir, "traces"),
         batchSize: 1000, // 不自动攒批触发，靠 SessionEnd 冲刷
       });
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       bus.emit({ type: "UserPromptSubmit", input: "你好" });
       bus.emit({
         type: "MessageAppended",
@@ -62,7 +62,7 @@ describe("Recorder：轨迹格式与落盘", () => {
         usage: { inputTokens: 12000, outputTokens: 800, cacheReadTokens: 9500 },
         stopReason: "tool_use",
       });
-      await bus.emit({ type: "SessionEnd" });
+      await bus.emit({ type: "SessionEnd", reason: "exit" });
       recorder.dispose();
 
       const lines = await readLines(path.join(dir, "traces", "s1.jsonl"));
@@ -128,7 +128,7 @@ describe("Recorder：轨迹格式与落盘", () => {
         parentPath: "/root",
         conclusion: "完成",
       });
-      await bus.emit({ type: "SessionEnd" });
+      await bus.emit({ type: "SessionEnd", reason: "exit" });
       recorder.dispose();
 
       const lines = (await readLines(path.join(dir, "traces", "s2.jsonl"))).filter(
@@ -174,7 +174,7 @@ describe("Recorder：轨迹格式与落盘", () => {
       call("h1", "root 的全文提示词"); // 子 agent 实例再次附全文（同 hash）：剥掉
       call("h2", "worker 的全文提示词"); // 不同 hash：落全文
       call("h2"); // 只带 hash：原样保留
-      await bus.emit({ type: "SessionEnd" });
+      await bus.emit({ type: "SessionEnd", reason: "exit" });
       recorder.dispose();
 
       const lines = (await readLines(path.join(dir, "traces", "s3.jsonl"))).filter(
@@ -203,7 +203,7 @@ describe("Recorder：轨迹格式与落盘", () => {
         batchSize: 1000,
         metadata: { dataset: "swe-bench", taskId: "t-1", run: "r-9", attempt: 2 },
       });
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       await recorder.flush();
       recorder.dispose();
 
@@ -257,12 +257,12 @@ describe("Recorder：轨迹格式与落盘", () => {
           },
         ],
       });
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       agent.start("读文件");
       for await (const _ of agent.run()) {
         // 消费事件流
       }
-      await bus.emit({ type: "SessionEnd" });
+      await bus.emit({ type: "SessionEnd", reason: "exit" });
       recorder.dispose();
 
       const lines = await readLines(path.join(dir, "traces", "s2.jsonl"));
@@ -304,7 +304,7 @@ describe("TraceWriter：攒批与冲刷", () => {
         dir: path.join(dir, "traces"),
         batchSize: 1000,
       });
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       bus.emit({ type: "Stop", agentPath: "/root" });
       // 未冲刷：文件尚不存在（攒批中）
       expect(existsSync(path.join(dir, "traces", "s3.jsonl"))).toBe(false);
@@ -330,7 +330,7 @@ describe("TraceWriter：攒批与冲刷", () => {
         dir: path.join(dir, "traces"),
         batchSize: 2, // header + 1 条事件即触发
       });
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       await new Promise((resolve) => setTimeout(resolve, 20)); // 等异步 flush
       const lines = await readLines(path.join(dir, "traces", "s4.jsonl"));
       expect(lines).toHaveLength(2);
@@ -376,7 +376,7 @@ describe("TraceWriter：攒批与冲刷", () => {
       expect(process.listenerCount("SIGTERM")).toBe(termCount);
 
       // flush：未达阈值留在缓冲的行被写入（收尾冲刷路径；flushSync 为其同步形态，direct 测试见下）
-      bus.emit({ type: "SessionStart" });
+      bus.emit({ type: "SessionStart", reason: "cold" });
       bus.emit({ type: "Stop", agentPath: "/root" });
       expect(existsSync(path.join(dir, "traces", "s-signal.jsonl"))).toBe(false);
       await recorder.flush();

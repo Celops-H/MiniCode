@@ -23,7 +23,7 @@ afterEach(() => {
 
 it("无 sessionId/-c：构造内存草稿会话（新会话/模型传入），不落盘（目录无文件）", async () => {
   const store = makeStore();
-  const session = await resolveInitialSession({}, store, "mock-model");
+  const { session } = await resolveInitialSession({}, store, "mock-model");
   expect(session.meta.title).toBe("新会话");
   expect(session.meta.model).toBe("mock-model");
   expect(session.getMessages()).toEqual([]);
@@ -34,7 +34,7 @@ it("无 sessionId/-c：构造内存草稿会话（新会话/模型传入），�
 it("sessionId：加载指定会话（minicode -c <id> 继续）", async () => {
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "指定会话" });
-  const session = await resolveInitialSession({ sessionId: created.meta.id }, store, "m2");
+  const { session } = await resolveInitialSession({ sessionId: created.meta.id }, store, "m2");
   expect(session.meta.id).toBe(created.meta.id);
   expect(session.meta.title).toBe("指定会话");
   expect(session.meta.model).toBe("m1"); // 会话自身模型优先于入口默认
@@ -45,14 +45,14 @@ it("continueRecent：继续最近活跃会话（listSessions 倒序首个）", a
   await store.createSession({ model: "m1" });
   await new Promise((r) => setTimeout(r, 5));
   const latest = await store.createSession({ model: "m2", title: "最新会话" });
-  const session = await resolveInitialSession({ continueRecent: true }, store, "m3");
+  const { session } = await resolveInitialSession({ continueRecent: true }, store, "m3");
   expect(session.meta.id).toBe(latest.meta.id);
   expect(session.meta.title).toBe("最新会话");
 });
 
 it("continueRecent 无历史会话：回落启动草稿态（不报错、不落盘）", async () => {
   const store = makeStore();
-  const session = await resolveInitialSession({ continueRecent: true }, store, "mock-model");
+  const { session } = await resolveInitialSession({ continueRecent: true }, store, "mock-model");
   expect(session.meta.title).toBe("新会话");
   expect(readdirSync(dir)).toHaveLength(0);
 });
@@ -66,7 +66,7 @@ it("sessionId 短前缀：命中唯一会话加载（面板显示 id 前 6 位�
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "目标会话" });
   // 与 /session 面板展示口径一致：id 前 6 位
-  const session = await resolveInitialSession({ sessionId: created.meta.id.slice(0, 6) }, store, "m2");
+  const { session } = await resolveInitialSession({ sessionId: created.meta.id.slice(0, 6) }, store, "m2");
   expect(session.meta.id).toBe(created.meta.id);
   expect(session.meta.title).toBe("目标会话");
 });
@@ -83,7 +83,7 @@ it("sessionId 短前缀撞多个会话：取最近活跃的一个", async () => 
   const prefix = "ffff01";
   writeMeta(`${prefix}aaaa-old`, "旧会话", "2026-08-26T00:00:00.000Z");
   writeMeta(`${prefix}bbbb-new`, "新会话", "2026-08-27T00:00:00.000Z");
-  const session = await resolveInitialSession({ sessionId: prefix }, store, "m2");
+  const { session } = await resolveInitialSession({ sessionId: prefix }, store, "m2");
   expect(session.meta.title).toBe("新会话"); // listSessions 按更新时间倒序，撞前缀取首个
 });
 
@@ -106,16 +106,18 @@ it("reloadOrDraftSession：已落盘会话读盘续跑（含 /model 改过的模
   const store = makeStore();
   const created = await store.createSession({ model: "m1", title: "已落盘" });
   const reloaded = await reloadOrDraftSession(store, created, "m3");
-  expect(reloaded.meta.id).toBe(created.meta.id);
-  expect(reloaded.meta.title).toBe("已落盘");
+  expect(reloaded.session.meta.id).toBe(created.meta.id);
+  expect(reloaded.session.meta.title).toBe("已落盘");
+  expect(reloaded.resumed).toBe(true); // 载入既有会话：启动形态 resume
 });
 
 it("reloadOrDraftSession：草稿未落盘（ENOENT）重建草稿不报错", async () => {
   const store = makeStore();
   const draft = await resolveInitialSession({}, store, "m2");
-  const reloaded = await reloadOrDraftSession(store, draft, "m2");
-  expect(reloaded.meta.title).toBe("新会话");
-  expect(reloaded.meta.model).toBe("m2");
+  const reloaded = await reloadOrDraftSession(store, draft.session, "m2");
+  expect(reloaded.session.meta.title).toBe("新会话");
+  expect(reloaded.session.meta.model).toBe("m2");
+  expect(reloaded.resumed).toBe(false); // 重建草稿：启动形态 cold
   expect(readdirSync(dir)).toHaveLength(0); // 重建仍是草稿，不落盘
 });
 

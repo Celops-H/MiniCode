@@ -84,6 +84,9 @@ export interface TuiLoopOptions {
   store: SessionStore;
   session: Session;
   hooks?: HookBusType;
+  /** 会话启动形态（SessionStart 事件的 reason）：cold=新会话，resume=载入既有会话。
+   *  必传：宿主漏传会让轨迹把 resume 伪装成冷启动，编译期暴露优于静默兜底 */
+  sessionStartReason: "cold" | "resume";
   /** 状态行模型名 */
   modelLabel: string;
   /** 权限模式的可变盒子（装配层用它把模式回灌 PermissionPipeline；Shift+Tab 在这里同步） */
@@ -1288,8 +1291,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }),
   ];
 
-  // 会话级事件由宿主触发：全部订阅就绪后发会话开始
-  await hooks?.emit({ type: "SessionStart" });
+  // 会话级事件由宿主触发：全部订阅就绪后发会话开始（启动形态由入口层按会话来源判定）
+  await hooks?.emit({ type: "SessionStart", reason: options.sessionStartReason });
 
   // 交互主循环：运行错误渲染进消息区并重建输入循环（错误不退出进程）
   try {
@@ -1333,7 +1336,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     // 会话结束事件：防 SessionEnd handler 的 stdout 写进 raw/备用屏
     ownTerminal?.dispose();
     try {
-      await hooks?.emit({ type: "SessionEnd" });
+      // 结束原因：切换会话 / 重装配（/connect、/model）由挂起的信号判定，其余为退出
+      const endReason = pendingReconfigure ? "reconfigure" : pendingSwitch ? "switch" : "exit";
+      await hooks?.emit({ type: "SessionEnd", reason: endReason });
     } catch {
       // 会话结束事件处理失败不阻断退出
     }

@@ -63,8 +63,14 @@ export type HookEvent =
   /** 回合结束（模型回复无工具调用时发）；中断收尾不发本事件，由界面收尾与
    *  AgentInterrupted 承担 */
   | { type: "Stop"; agentPath: string }
-  | { type: "SessionStart" }
-  | { type: "SessionEnd" }
+  /**
+   * 会话开始（宿主在装配完成后发）。reason 区分启动形态：cold=新会话（内存草稿或刚创建），
+   * resume=载入既有会话（-c 续跑、/session 切换到已有会话）。同一轨迹文件因续跑与
+   * reconfigure 会出现多段 SessionStart/SessionEnd，评测据此切分运行段
+   */
+  | { type: "SessionStart"; reason: "cold" | "resume" }
+  /** 会话结束（宿主收尾时发；崩溃收不到本事件属预期缺口）。reason 区分本轮结束原因 */
+  | { type: "SessionEnd"; reason: "exit" | "switch" | "reconfigure" }
   | { type: "AgentSpawned"; path: string; parentPath: string }
   /** failed 标记子 agent 失败终态：驱动捕获的模型流失败，或结论命中工具调用标记
    *  特征（模型失配把工具调用原文吐进正文，结论不可信）——失败不合并 worktree，
@@ -87,6 +93,7 @@ export type HookEvent =
       type: "LlmCallEnd";
       agentPath: string;
       model: string;
+      /** 本次尝试实际走到的厂商 id（按尝试的模型 id 反查注册表；测试 mock 客户端无反查能力时缺省） */
       provider?: string;
       durationMs: number;
       /** 首事件延迟 ms（区分网络慢与生成慢）；未收到任何事件即结束（如冷却跳过后无调用）不带 */
@@ -109,11 +116,17 @@ export type HookEvent =
       decision: "allow" | "deny";
       source: "hook" | "rule" | "user";
     }
-  /** 压缩动作：doCompact 执行后发（成功与失败都发）；trigger 区分撞线自动与用户 /compact */
+  /**
+   * 压缩动作：doCompact 执行后发（成功与失败都发）；trigger 区分撞线自动与用户 /compact，
+   * method 区分分层手段（裁剪/摘要/先裁剪再摘要）——评测据此统计两种手段的触发频率与收益
+   */
   | {
       type: "Compact";
       agentPath: string;
       trigger: "auto" | "manual";
+      /** 本次压缩实际经过的分层：prune 只做历史裁剪、summary 直接摘要替换（未裁剪或无可裁剪）、
+       *  both 先裁剪仍超限再摘要；失败时表示已执行到的层（失败原因见 error） */
+      method: "prune" | "summary" | "both";
       tokensBefore: number;
       tokensAfter: number;
       messagesBefore: number;

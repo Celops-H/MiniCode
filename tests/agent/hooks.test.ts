@@ -119,7 +119,7 @@ describe("Agent 接入 Hook 事件", () => {
       hooks,
     });
     // 会话级 Hook 由宿主触发：会话开始（首次驱动前）一次
-    await hooks.emit({ type: "SessionStart" });
+    await hooks.emit({ type: "SessionStart", reason: "cold" });
     agent.start("第一问");
     for await (const _ of agent.run()) {
       // 消费

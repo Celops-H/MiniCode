@@ -5,7 +5,7 @@ import type { ModelClient } from "../../src/agent/index.js";
 import type { HookEvent } from "../../src/hooks/index.js";
 import { HookBus } from "../../src/hooks/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
-import { assistantMessage, userMessage, type Message } from "../../src/core/index.js";
+import { assistantMessage, toolResultMessage, userMessage, type Message } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
 /** 收集某类事件的处理器：记录全部负载供断言 */
@@ -792,5 +792,134 @@ describe("PostToolUse durationMs：执行耗时测量", () => {
     await drain(agent);
     expect(failures.events).toHaveLength(1);
     expect(failures.events[0]!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("LlmCallEnd 事件的 provider 厂商归属", () => {
+  it("按本次尝试的模型 id 反查厂商：切换备选时两次尝试各记各的", async () => {
+    const hooks = new HookBus();
+    const ends = collector(hooks, "LlmCallEnd");
+    const agent = new Agent({
+      modelClient: {
+        providerOf: (modelId) => (modelId === "main" ? "prov-a" : "prov-b"),
+        async *stream() {
+          yield { type: "model_fallback", from: "main", to: "backup", reason: "error" };
+          yield { type: "text_delta", text: "备选回复" };
+          yield { type: "done", stopReason: "end_turn", usage: { inputTokens: 50, outputTokens: 10 } };
+        },
+      },
+      modelId: "main",
+      systemPrompt: "助手",
+      hooks,
+    });
+    agent.start("问题");
+    await drain(agent);
+
+    expect(ends.events).toHaveLength(2);
+    expect(ends.events[0]).toMatchObject({ model: "main", provider: "prov-a", error: "模型调用失败，已切换备选" });
+    expect(ends.events[1]).toMatchObject({ model: "backup", provider: "prov-b", stopReason: "end_turn" });
+  });
+
+  it("客户端无反查能力（测试 mock）：provider 缺省不发射", async () => {
+    const hooks = new HookBus();
+    const ends = collector(hooks, "LlmCallEnd");
+    const agent = new Agent({
+      modelClient: textClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+    });
+    agent.start("问题");
+    await drain(agent);
+
+    expect(ends.events).toHaveLength(1);
+    expect(ends.events[0]!.provider).toBeUndefined();
+  });
+});
+
+describe("Compact 事件的 method 分层手段", () => {
+  /** 摘要调用（tools 为空）返回摘要文本；其余场景用不到正常调用分支 */
+  const summaryClient: ModelClient = {
+    async *stream(_modelId, context) {
+      if (context.tools.length === 0) {
+        yield { type: "text_delta", text: "摘要内容" };
+        yield { type: "done", stopReason: "end_turn" };
+        return;
+      }
+      yield { type: "text_delta", text: "正常回复" };
+      yield { type: "done", stopReason: "end_turn" };
+    },
+  };
+  /** 空摘要客户端：摘要结果为空的失败路径 */
+  const emptySummaryClient: ModelClient = {
+    async *stream() {
+      yield { type: "text_delta", text: "" };
+      yield { type: "done", stopReason: "end_turn" };
+    },
+  };
+  const longResults: Message[] = Array.from({ length: 10 }, (_, i) =>
+    toolResultMessage(`c${i}`, "read", "x".repeat(100)),
+  );
+
+  it("裁剪达标短路：method=prune（裁剪后低于可用窗口，不进摘要层）", async () => {
+    const hooks = new HookBus();
+    const compacts = collector(hooks, "Compact");
+    const agent = new Agent({
+      modelClient: summaryClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: longResults,
+      // 与「撞线时历史裁剪优先于摘要」同参：10 条裁剪标记的估算低于可用窗口
+      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+    expect(await agent.compactNow()).toBe(true);
+    expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "prune" });
+  });
+
+  it("裁剪后仍超限走摘要：method=both", async () => {
+    const hooks = new HookBus();
+    const compacts = collector(hooks, "Compact");
+    const agent = new Agent({
+      modelClient: summaryClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: longResults,
+      // 窗口极小：裁剪只剩标记也超限，继续摘要替换
+      compactConfig: { contextWindow: 60, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+    expect(await agent.compactNow()).toBe(true);
+    expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "both" });
+  });
+
+  it("无可裁剪直接摘要：method=summary", async () => {
+    const hooks = new HookBus();
+    const compacts = collector(hooks, "Compact");
+    const agent = new Agent({
+      modelClient: summaryClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: [userMessage("第一问"), { role: "assistant", id: "a1", content: [{ type: "text", text: "回答" }] }],
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+    });
+    expect(await agent.compactNow()).toBe(true);
+    expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "summary" });
+  });
+
+  it("摘要失败：method 记已执行到的层（无可裁剪时为 summary）", async () => {
+    const hooks = new HookBus();
+    const compacts = collector(hooks, "Compact");
+    const agent = new Agent({
+      modelClient: emptySummaryClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      initialMessages: [userMessage("第一问")],
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+    });
+    expect(await agent.compactNow()).toBe(false);
+    expect(compacts.events[0]).toMatchObject({ ok: false, method: "summary", error: "摘要结果为空" });
   });
 });

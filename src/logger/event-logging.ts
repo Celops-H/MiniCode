@@ -15,6 +15,13 @@ const DECISION_SOURCES: Record<string, string> = {
   user: "用户",
 };
 
+/** 压缩分层手段的可读文案（事件里的 method 为机器值） */
+const COMPACT_METHODS: Record<string, string> = {
+  prune: "裁剪",
+  summary: "摘要",
+  both: "先裁剪再摘要",
+};
+
 /**
  * 把 hook 事件流水接到日志（埋点）：
  * 模型请求耗时与结果、token 用量（debug）、fallback 决策、压缩动作、工具失败详情、
@@ -52,7 +59,8 @@ export function attachHookLogging(bus: HookBus, logger: Logger, sessionId?: stri
       const outcome = e.ok
         ? `完成：消息 ${e.messagesBefore} → ${e.messagesAfter} 条`
         : `失败${e.error ? `（${e.error}）` : ""}`;
-      emit(e.ok ? "info" : "warn", `压缩${e.trigger === "auto" ? "（撞线自动）" : ""}${outcome}`);
+      const method = COMPACT_METHODS[e.method] ?? e.method;
+      emit(e.ok ? "info" : "warn", `压缩${e.trigger === "auto" ? "（撞线自动）" : ""}（${method}）${outcome}`);
     }),
     bus.on("PostToolUseFailure", (e) => {
       emit("warn", `工具失败 ${e.toolName}：${e.error}`);

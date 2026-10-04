@@ -93,6 +93,7 @@ describe("reduceHook：用量累计与水位刷新", () => {
       type: "Compact",
       agentPath: "/root",
       trigger: "manual",
+      method: "both",
       tokensBefore: 1234,
       tokensAfter: 100,
       messagesBefore: 10,

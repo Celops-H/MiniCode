@@ -49,3 +49,20 @@ describe("pruneToolResults（历史裁剪）", () => {
     expect(messages[0]!.content).toBe("输出1");
   });
 });
+
+describe("pruneToolResults：重复裁剪幂等", () => {
+  it("已是裁剪标记的条目跳过，无新变化时返回原数组引用", () => {
+    const messages = [result("1", "输出1"), result("2", "输出2")];
+    const first = pruneToolResults(messages, 0);
+    expect(first[0]!.content).toBe(PRUNED_MARKER);
+    // 第二次裁剪：全部条目已是标记，无变化，返回原引用（压缩记账据此不重复计裁剪收益）
+    expect(pruneToolResults(first, 0)).toBe(first);
+  });
+
+  it("部分条目已裁剪：只补齐未裁剪的，产生变化时返回新数组", () => {
+    const messages = [result("1", "输出1"), { ...result("2", PRUNED_MARKER) }];
+    const pruned = pruneToolResults(messages, 0);
+    expect(pruned).not.toBe(messages);
+    expect(pruned.map((m) => m.content)).toEqual([PRUNED_MARKER, PRUNED_MARKER]);
+  });
+});

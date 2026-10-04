@@ -50,7 +50,7 @@ describe("HookBus 事件总线", () => {
   it("观测型处理器返回 void 不影响 emit", async () => {
     const bus = new HookBus();
     bus.on("SessionStart", () => {});
-    const results = await bus.emit({ type: "SessionStart" });
+    const results = await bus.emit({ type: "SessionStart", reason: "cold" });
 
     expect(results).toEqual([undefined]);
   });
@@ -59,7 +59,7 @@ describe("HookBus 事件总线", () => {
     const bus = new HookBus();
     const handler = vi.fn();
     bus.on("PostToolUse", handler);
-    const results = await bus.emit({ type: "SessionEnd" });
+    const results = await bus.emit({ type: "SessionEnd", reason: "exit" });
 
     expect(handler).not.toHaveBeenCalled();
     expect(results).toEqual([]);

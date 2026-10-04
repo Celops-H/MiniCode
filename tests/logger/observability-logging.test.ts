@@ -146,6 +146,7 @@ describe("attachHookLogging：事件流水埋点", () => {
       type: "Compact",
       agentPath: "/root",
       trigger: "auto",
+      method: "both",
       tokensBefore: 90000,
       tokensAfter: 30000,
       messagesBefore: 30,
@@ -158,7 +159,7 @@ describe("attachHookLogging：事件流水埋点", () => {
 
     const messages = lines.filter((l) => l.level === "info").map((l) => l.message);
     expect(messages[0]).toContain("模型切换：m1 → m2（调用失败）");
-    expect(messages[1]).toContain("压缩（撞线自动）完成：消息 30 → 4 条");
+    expect(messages[1]).toContain("压缩（撞线自动）（先裁剪再摘要）完成：消息 30 → 4 条");
     expect(messages).toHaveLength(2); // 失败与拒绝记 warn，allow 不记日志
     // 失败类事件走 warn 级（按级别可筛出问题行），行首带会话归属
     const warns = lines.filter((l) => l.level === "warn").map((l) => l.message);
@@ -175,6 +176,7 @@ describe("attachHookLogging：事件流水埋点", () => {
       type: "Compact",
       agentPath: "/root",
       trigger: "manual",
+      method: "summary",
       tokensBefore: 100,
       tokensAfter: 100,
       messagesBefore: 2,
@@ -194,7 +196,7 @@ describe("attachHookLogging：事件流水埋点", () => {
     });
 
     const warns = lines.filter((l) => l.level === "warn").map((l) => l.message);
-    expect(warns[0]).toContain("压缩失败（摘要结果为空）");
+    expect(warns[0]).toContain("压缩（摘要）失败（摘要结果为空）");
     expect(warns[1]).toContain("工具失败 bash：命令执行失败：目录不存在");
     expect(warns.join("\n")).not.toContain("rm -rf"); // 参数全文不进 warn（隐私口径）
     const debugs = lines.filter((l) => l.level === "debug").map((l) => l.message);

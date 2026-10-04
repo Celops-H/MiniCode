@@ -52,6 +52,8 @@ import type { Team } from "./team.js";
 /** 模型客户端：主循环通过它调用模型（Models 集合或测试 mock 均满足） */
 export interface ModelClient {
   stream(modelId: string, context: Context, options?: { signal?: AbortSignal }): AsyncIterable<StreamEvent>;
+  /** 按模型 id 反查所属厂商 id（LlmCallEnd 的 provider 用）；测试 mock 可不实现 */
+  providerOf?(modelId: string): string | undefined;
 }
 
 /** 上下文压缩配置：触发判断的窗口参数与裁剪保留数 */
@@ -759,12 +761,17 @@ export class Agent {
     const agentPath = this.agentPath?.toString() ?? "/root";
     const tokensBefore = this.contextTokens();
     const messagesBefore = this.messages.length;
+    // 分层手段记账：pruned=裁剪真实生效（有旧工具输出被替换为裁剪标记），
+    // reachedSummary=进入摘要替换层。method 记录实际经过的分层，失败时表示已执行到的层
+    let pruned = false;
+    let reachedSummary = false;
     // 收口 Compact 事件：tokensAfter/messagesAfter 按收口时刻的上下文实测
     const emitCompact = async (ok: boolean, error?: string): Promise<void> => {
       await this.safeEmit({
         type: "Compact",
         agentPath,
         trigger,
+        method: pruned ? (reachedSummary ? "both" : "prune") : "summary",
         tokensBefore,
         tokensAfter: this.contextTokens(),
         messagesBefore,
@@ -776,9 +783,10 @@ export class Agent {
     };
     // ① 历史裁剪：最便宜，先释放旧工具输出；裁剪后仍超限再走摘要。
     // 带压缩指导时不短路：指导必须经现场摘要生效，裁剪达标也继续摘要
-    const pruned = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
-    if (pruned !== this.messages) {
-      this.messages = pruned;
+    const prunedMessages = pruneToolResults(this.messages, this.compactConfig!.keepRecentToolResults);
+    if (prunedMessages !== this.messages) {
+      pruned = true;
+      this.messages = prunedMessages;
       this.promptTokensAt = undefined; // 历史被裁剪，真实用量回填作废
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
       if (!instructions && !needsCompact(this.contextTokens(), this.compactConfig!)) {
@@ -788,6 +796,7 @@ export class Agent {
     }
     // ② 压缩：带指导走现场摘要；无指导且有会话记忆时用记忆替代
     // 现场摘要（省压缩时模型调用）；否则增量合并（已有旧摘要）或全量总结
+    reachedSummary = true;
     try {
       const recovery = buildRecoveryText(extractRecoveryContext(this.messages));
       let summary: string;
@@ -1012,6 +1021,8 @@ export class Agent {
       type: "LlmCallEnd",
       agentPath: this.agentPath?.toString() ?? "/root",
       ...fields,
+      // 厂商链路归属：按本次尝试的模型 id 反查（切换备选/剥组重试各尝试各记各的）
+      ...(fields.model ? { provider: this.modelClient.providerOf?.(fields.model) } : {}),
       systemPrompt,
     });
   }

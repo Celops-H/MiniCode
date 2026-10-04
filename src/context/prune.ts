@@ -7,9 +7,11 @@ export const PRUNED_MARKER = "[工具输出已裁剪]";
  * 历史裁剪：把最旧的工具输出替换为裁剪标记，保留最近若干条完整输出。
  * 只替换内容不删消息，保持工具回合结构完整（assistant tool_call 与 tool_result 配对不破坏），
  * 模型仍能读到回合骨架，只是旧结果详情不再占用上下文。
+ * 已是裁剪标记的条目跳过：重复裁剪不产生变化，返回原引用（压缩事件的分层
+ * 手段记账据此区分「裁剪真实生效」与「无可裁剪的空转」）。
  * @param messages 消息数组
  * @param keepRecent 保留最近的工具结果条数
- * @returns 裁剪后的新数组（原数组不变）
+ * @returns 裁剪后的新数组（无变化时返回原数组）
  */
 export function pruneToolResults(messages: Message[], keepRecent: number): Message[] {
   const resultIndices = messages
@@ -19,10 +21,13 @@ export function pruneToolResults(messages: Message[], keepRecent: number): Messa
   if (pruneCount === 0) return messages;
 
   const copy = [...messages];
+  let changed = false;
   // resultIndices 由构造保证指向 tool_result 消息，断言类型后直接替换内容
   for (const index of resultIndices.slice(0, pruneCount)) {
     const message = copy[index]! as ToolResultMessage;
+    if (message.content === PRUNED_MARKER) continue;
     copy[index] = { ...message, content: PRUNED_MARKER, isError: false };
+    changed = true;
   }
-  return copy;
+  return changed ? copy : messages;
 }

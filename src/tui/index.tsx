@@ -52,6 +52,13 @@ export interface RunTuiEntryOptions {
   projectAgentsFile?: string;
 }
 
+/** 初始会话解析结果：resumed 标记是否载入既有会话（SessionStart 的启动形态：
+ *  resume=显式 id / -c 最近命中并加载；cold=回落草稿态） */
+export interface InitialSession {
+  session: Session;
+  resumed: boolean;
+}
+
 /** 初始会话解析：显式 id 加载；-c 继续最近活跃；否则构造内存草稿会话（不落盘）。
  *  启动不发消息不创建会话：草稿不带 meta 文件，第一条用户消息经 interact 轮末 flush 才写盘，
  *  启动不开会走人不在 sessions 目录留空会话。显式 id 支持短前缀——/session 面板展示 id 前 6 位
@@ -62,43 +69,50 @@ export async function resolveInitialSession(
   options: { sessionId?: string; continueRecent?: boolean },
   store: SessionStore,
   modelId: string,
-): Promise<Session> {
+): Promise<InitialSession> {
   const wanted = options.sessionId;
   if (wanted) {
     try {
-      return await store.loadSession(wanted);
+      return { session: await store.loadSession(wanted), resumed: true };
     } catch (err) {
       // 仅「文件不存在」走前缀匹配；meta 损坏等读盘错误原样上抛，不静默吞数据
       if ((err as { code?: string }).code !== "ENOENT") throw err;
       const hit = (await store.listSessions()).find((s) => s.id.startsWith(wanted));
       if (!hit) throw err;
-      return await store.loadSession(hit.id);
+      return { session: await store.loadSession(hit.id), resumed: true };
     }
   }
   if (options.continueRecent) {
     const recent = (await store.listSessions())[0];
-    if (recent) return await store.loadSession(recent.id);
+    if (recent) return { session: await store.loadSession(recent.id), resumed: true };
   }
   const now = new Date().toISOString();
-  return new Session({
-    id: randomUUID(),
-    title: "新会话",
-    model: modelId,
-    createdAt: now,
-    updatedAt: now,
-    formatVersion: 1,
-  });
+  return {
+    session: new Session({
+      id: randomUUID(),
+      title: "新会话",
+      model: modelId,
+      createdAt: now,
+      updatedAt: now,
+      formatVersion: 1,
+    }),
+    resumed: false,
+  };
 }
 
 /** reconfigure（/connect、/model）后恢复当前会话：读盘成功续跑（含 /model 改过的模型）；
  *  仅「草稿未落盘」（ENOENT）重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据。
- *  纯函数便于层 1 测试。 */
-export async function reloadOrDraftSession(store: SessionStore, current: Session, modelId: string): Promise<Session> {
+ *  resumed 同步标记载入/重建（SessionStart 启动形态）。纯函数便于层 1 测试。 */
+export async function reloadOrDraftSession(
+  store: SessionStore,
+  current: Session,
+  modelId: string,
+): Promise<InitialSession> {
   try {
-    return await store.loadSession(current.meta.id);
+    return { session: await store.loadSession(current.meta.id), resumed: true };
   } catch (err) {
     if ((err as { code?: string }).code !== "ENOENT") throw err;
-    return await resolveInitialSession({}, store, modelId);
+    return resolveInitialSession({}, store, modelId);
   }
 }
 
@@ -151,7 +165,10 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 装配告警（modelChain 死条目等）：每个会话轮经 startupNotices 提示一次，
   // reconfigure 重建模型客户端时重置重收
   let modelWarnings: string[] = startup.warnings;
-  let session = await resolveInitialSession(options, store, modelId);
+  // 会话启动形态（SessionStart.reason）：新建/草稿 cold，载入既有会话 resume
+  const initial = await resolveInitialSession(options, store, modelId);
+  let session = initial.session;
+  let sessionStartReason: "cold" | "resume" = initial.resumed ? "resume" : "cold";
   // 思考等级盒子跨 reconfigure 持久：/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
   // 权限模式盒子上提到入口层：carry 续接的 UI 权限模式与管线实际值一致
@@ -173,6 +190,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         models,
         config,
         session,
+        sessionStartReason,
         // 多 Agent 协作生效判定：CLI 旗标（--no-agents）与 config.agents 合取；
         // config 随 reconfigure 重读，协作开关改配置后重装配即生效
         agents: resolveAgentsEnabled(options.agents, config.agents),
@@ -202,12 +220,16 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // switchTo===NEW_SESSION_ID 分支实际不可达（reconfigure 不带 switchTo），保留作防御
         if (result.switchTo === NEW_SESSION_ID) {
           session = await store.createSession({ model: modelId });
+          sessionStartReason = "cold";
           resetView = true;
         } else if (result.switchTo) {
           session = await store.loadSession(result.switchTo);
+          sessionStartReason = "resume";
           resetView = true;
         } else {
-          session = await reloadOrDraftSession(store, session, modelId);
+          const reloaded = await reloadOrDraftSession(store, session, modelId);
+          session = reloaded.session;
+          sessionStartReason = reloaded.resumed ? "resume" : "cold";
           // 引导态先发消息后连接：草稿可能以空模型落盘，
           // 载入的会话模型在新配置里不可解析时归位为当前主模型，免得已连接仍报「未知模型」；
           // 内存归位即可，下一轮落盘自然纠正盘上 meta
@@ -227,6 +249,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         result.switchTo === NEW_SESSION_ID
           ? await store.createSession({ model: modelId })
           : await store.loadSession(result.switchTo);
+      sessionStartReason = result.switchTo === NEW_SESSION_ID ? "cold" : "resume";
       resetView = true;
     }
   } finally {
@@ -240,6 +263,8 @@ async function runTuiSession(opts: {
   models: Models;
   config: Config;
   session: Session;
+  /** 会话启动形态（SessionStart.reason，透传给 runTui） */
+  sessionStartReason: "cold" | "resume";
   agents: boolean;
   thinkingLevelBox: { value: ThinkingLevel | undefined };
   /** 权限模式盒子（入口层持有，跨会话持久，与 carry 续接的 UI 一致） */
@@ -314,6 +339,7 @@ async function runTuiSession(opts: {
       store,
       session,
       hooks,
+      sessionStartReason: opts.sessionStartReason,
       modelLabel: modelId,
       permissionMode: permissionModeBox,
       thinkingLevel: thinkingLevelBox,
