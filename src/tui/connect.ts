@@ -12,19 +12,10 @@ import path from "node:path";
 import { configSchema, type Config } from "../config/types.js";
 import { resolveConfigPaths } from "../config/paths.js";
 import { PROVIDER_PRESETS, type ProviderPreset } from "../config/presets.js";
+import { readConfigRaw } from "./extensions.js";
 
 export { PROVIDER_PRESETS };
 export type { ProviderPreset };
-
-/** 读取全局 config 原始对象；文件不存在返回 {} */
-async function readGlobalConfigRaw(file: string): Promise<Record<string, unknown>> {
-  try {
-    const raw = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
-    return raw;
-  } catch {
-    return {};
-  }
-}
 
 /**
  * 写入全局 config：合并 provider（按 id 追加/替换，不写 modelChain——模型切换归 /model 命令）+ strict 校验。
@@ -39,7 +30,9 @@ export async function writeGlobalConfig(
   apiKey?: string,
   models: ModelListEntry[] = preset.models,
 ): Promise<void> {
-  const raw = await readGlobalConfigRaw(file);
+  // 家族同款读盘口径（readConfigRaw）：坏 JSON 抛错不静默重置——否则坏配置会被
+  // 本次写入整体替换成只剩本次内容（providers/modelChain 全丢）
+  const raw = await readConfigRaw(file);
   const providers: Config["providers"] = (raw.providers as unknown as Config["providers"]) ?? [];
   const kept = (providers ?? []).filter((p) => p.id !== preset.id);
   const updated: Config["providers"] = [
@@ -81,7 +74,7 @@ export async function writeGlobalConfig(
  * @param modelId 设为默认的模型 id
  */
 export async function writeGlobalDefaultModel(file: string, modelId: string): Promise<void> {
-  const raw = await readGlobalConfigRaw(file);
+  const raw = await readConfigRaw(file);
   await writeValidatedConfig(file, { ...raw, defaultModel: modelId });
 }
 

@@ -2,7 +2,7 @@
  * /connect 写配置逻辑测试：全局 config 合并 provider（不写 modelChain——模型归 /model 管）
  * + key 落 provider 的 apiKey 字段（项目目录不落 .env）。
  */
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it, expect } from "vitest";
@@ -35,8 +35,7 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
   }
 });
 
-it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复写入按新值替换", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复写入按新值替换", async () => {  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const file = path.join(dir, "config.json");
   try {
     await writeGlobalConfig(file, deepseek, "sk-123");
@@ -49,6 +48,21 @@ it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复
     parsed = JSON.parse(await readFile(file, "utf8")) as { defaultModel?: string; providers?: unknown[] };
     expect(parsed.defaultModel).toBe("qwen-max");
     expect(parsed.providers).toHaveLength(1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("坏 JSON 全局配置：写默认模型与连接写盘都抛错，不静默重置配置", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const file = path.join(dir, "config.json");
+  try {
+    await writeFile(file, "{ not-json", "utf8");
+    // 静默吞错会把整份全局配置替换成只剩本次内容（providers/modelChain 全丢），
+    // 与 settings/extensions 家族「坏配置抛错不静默重置」同口径
+    await expect(writeGlobalDefaultModel(file, "m-1")).rejects.toThrow();
+    await expect(writeGlobalConfig(file, deepseek, "sk-123")).rejects.toThrow();
+    expect(await readFile(file, "utf8")).toBe("{ not-json");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
