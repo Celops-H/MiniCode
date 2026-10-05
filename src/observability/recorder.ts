@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { HOOK_EVENT_TYPES } from "../hooks/index.js";
@@ -38,8 +39,8 @@ export class Recorder {
   private readonly sessionId: string;
   private readonly sessionsRoot: string;
   private readonly subscriptions: Array<() => void> = [];
-  /** 已落过全文的 systemPrompt hash（文件级去重，见 dedupeSystemPrompt） */
-  private readonly seenSystemPromptHashes = new Set<string>();
+  /** 已落过全文的 systemPrompt hash（文件级去重，见 dedupeSystemPrompt；构造时从既有轨迹文件回填） */
+  private readonly seenSystemPromptHashes: Set<string>;
 
   /**
    * @param bus hook 事件总线（唯一采集通道）
@@ -58,11 +59,11 @@ export class Recorder {
       startedAt: new Date().toISOString(),
       ...(options.metadata ? { metadata: options.metadata } : {}),
     };
-    this.writer = new TraceWriter(
-      path.join(this.tracesDir, `${options.sessionId}.jsonl`),
-      buildHeaderLine(header),
-      options.batchSize,
-    );
+    const filePath = path.join(this.tracesDir, `${options.sessionId}.jsonl`);
+    this.writer = new TraceWriter(filePath, buildHeaderLine(header), options.batchSize);
+    // 续跑回填：TUI 的 /connect、/model 等 reconfigure 每轮重建 Recorder，去重表随实例清空
+    // 会把同一 hash 的全文重复落进同会话轨迹；从既有文件回填后文件级去重跨装配保持
+    this.seenSystemPromptHashes = loadRecordedSystemPromptHashes(filePath);
     for (const type of HOOK_EVENT_TYPES) {
       this.subscriptions.push(bus.on(type, (event) => this.record(event)));
     }
@@ -136,6 +137,8 @@ export class Recorder {
    * LlmCallEnd 的 systemPrompt 全文按 hash 文件级只落一次：Agent 侧的去重是实例级的
    * （每个子 agent 实例首次调用各附一份全文），同一 hash 会在轨迹里重复多份；
    * 去重上移到 Recorder 后同一 hash 只有首次出现的行带全文，后续行只留 hash。
+   * 去重表在构造时从续写的既有轨迹文件回填（loadRecordedSystemPromptHashes），
+   * 跨装配保持。
    */
   private dedupeSystemPrompt(type: string, data: Record<string, unknown>): Record<string, unknown> {
     if (type !== "LlmCallEnd") return data;
@@ -147,4 +150,35 @@ export class Recorder {
     this.seenSystemPromptHashes.add(systemPrompt.hash);
     return data;
   }
+}
+
+/**
+ * 从续写的既有轨迹文件回填已落过全文的 systemPrompt hash：Recorder 随装配重建
+ * （TUI 的 /connect、/model 等 reconfigure 每轮新建实例），实例级去重表随之清空，
+ * 同一会话轨迹会重复落同一 hash 的全文；构造时扫一遍既有文件回填 hash 集合，
+ * 文件级去重（dedupeSystemPrompt）跨装配保持。文件不存在（新会话）返回空集；
+ * 读取失败同样退回空集——回填是去重优化，不阻塞记录。
+ */
+function loadRecordedSystemPromptHashes(file: string): Set<string> {
+  const hashes = new Set<string>();
+  if (!existsSync(file)) return hashes;
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return hashes;
+  }
+  for (const line of text.split("\n")) {
+    // 预筛：绝大多数行不含该键，免去逐行 JSON.parse；行内出现该字样的消息行
+    // 解析后取不到 data.systemPrompt.hash，自然跳过
+    if (!line.includes("systemPrompt")) continue;
+    try {
+      const hash = (JSON.parse(line) as { data?: { systemPrompt?: { hash?: string } } }).data?.systemPrompt
+        ?.hash;
+      if (typeof hash === "string") hashes.add(hash);
+    } catch {
+      // 单行损坏跳过（append-only 下崩溃可能留下半行），不影响其余行回填
+    }
+  }
+  return hashes;
 }

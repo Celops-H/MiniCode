@@ -232,6 +232,70 @@ describe("Recorder：轨迹格式与落盘", () => {
     }
   });
 
+  it("systemPrompt 去重跨装配生效：重装配后同 hash 不再重复落全文（从既有文件回填）", async () => {
+    const dir = await tmpDir();
+    try {
+      // 第一段装配：Recorder A 落 h1 全文（reconfigure 前的会话期）
+      const busA = new HookBus();
+      const recorderA = new Recorder(busA, {
+        sessionId: "s-reassemble",
+        cwd: os.tmpdir(),
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      busA.emit({
+        type: "LlmCallEnd",
+        agentPath: "/root",
+        model: "m",
+        durationMs: 10,
+        systemPrompt: { hash: "h1", content: "会话的系统提示词" },
+      });
+      await busA.emit({ type: "SessionEnd", reason: "reconfigure" });
+      recorderA.dispose();
+
+      // 重装配：Recorder B 同 sessionId 续写同一文件，同 hash 只留 hash，新 hash 落全文
+      const busB = new HookBus();
+      const recorderB = new Recorder(busB, {
+        sessionId: "s-reassemble",
+        cwd: os.tmpdir(),
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      busB.emit({
+        type: "LlmCallEnd",
+        agentPath: "/root",
+        model: "m",
+        durationMs: 10,
+        systemPrompt: { hash: "h1", content: "会话的系统提示词" },
+      });
+      busB.emit({
+        type: "LlmCallEnd",
+        agentPath: "/root",
+        model: "m2",
+        durationMs: 10,
+        systemPrompt: { hash: "h9", content: "换模型后的系统提示词" },
+      });
+      await busB.emit({ type: "SessionEnd", reason: "exit" });
+      recorderB.dispose();
+
+      const lines = (await readLines(path.join(dir, "traces", "s-reassemble.jsonl"))).filter(
+        (l) => l.kind === "event" && (l as { event?: string }).event === "LlmCallEnd",
+      ) as Array<{ data: { systemPrompt?: { hash?: string; content?: string } } }>;
+      expect(lines).toHaveLength(3);
+      expect(lines[0]!.data.systemPrompt).toEqual({ hash: "h1", content: "会话的系统提示词" });
+      // 重装配后同 hash：全文不再重复
+      expect(lines[1]!.data.systemPrompt).toEqual({ hash: "h1" });
+      // 变更后的新 hash：落全文
+      expect(lines[2]!.data.systemPrompt).toEqual({ hash: "h9", content: "换模型后的系统提示词" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("header.metadata 原样落盘（评测宿主注入任务身份）", async () => {
     const dir = await tmpDir();
     try {
