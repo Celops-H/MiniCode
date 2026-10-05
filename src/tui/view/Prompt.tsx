@@ -7,8 +7,8 @@
  * 选区高亮段随 curLine/curCol/sel 移动。
  * 光标：渲染进文本、常亮不闪、随帧即时跟随——光标所在字符整字反色（bg 文字色 / fg 面板底色，
  * opentui 无 reverse 属性用 bg/fg 互换等效），行尾时追加一个反色空格块；选区并存时光标段样式
- * 优先。硬件光标恒隐藏，位置仍每帧写入（tuiCursor，loop postProcessFn setCursorPosition）
- * 供输入法候选窗跟随。
+ * 优先。定位每帧写入 tuiCursor（见 cursor.ts 的 attachCursorPositioning），硬件光标由帧末补发
+ * 隐藏转义，输入法候选窗按写入的光标格摆放。
  */
 import { createMemo, createRenderEffect } from "solid-js";
 import { useTerminalDimensions } from "@opentui/solid";
@@ -137,8 +137,8 @@ export function PromptView(props: {
 }): JSX.Element {
   const dims = useTerminalDimensions();
   // 每次渲染更新终端光标状态（组件体顶层不随 props 重跑，必须 createRenderEffect 建立响应式订阅）：
-  // showCursor 时定位硬件光标应处行列（loop postProcessFn 每帧隐藏写入，输入法候选窗跟随）；
-  // 隐藏态（connect key 弹窗输入）不更新——光标视觉呈现在弹窗内 key 输入区
+  // showCursor 时写入硬件光标应处行列（cursor.ts 的 attachCursorPositioning 每帧写出定位，
+  // 输入法候选窗跟随）；隐藏态（connect key 弹窗输入）不更新——光标视觉呈现在弹窗内 key 输入区
   createRenderEffect(() => {
     if (props.showCursor !== false) {
       const pos = promptCursorPosition(props.prompt, dims().height ?? 20, props.bottomRows ?? 2);

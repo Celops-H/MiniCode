@@ -28,7 +28,7 @@ import { App } from "./view/App.js";
 import { interact } from "../bootstrap/interact.js";
 import { deleteTrace } from "../observability/index.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
-import { tuiCursor } from "./cursor.js";
+import { attachCursorPositioning } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
@@ -167,7 +167,10 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
   // Windows 终端输入初始化：清输入缓冲在进 TUI 前，PROCESSED_INPUT
   // 必须在 createCliRenderer 之后清——原生 setupTerminal 会重设控制台模式，先清会被盖回
   win32FlushInputBuffer();
+  // 终端输出流显式传入：光标隐藏转义直接写同一流（见下方 attachCursorPositioning）
+  const stdout = process.stdout;
   const renderer = await createCliRenderer({
+    stdout,
     exitOnCtrlC: false,
     // 强制 JS 渲染（useThread false）：与测试/headless 路径一致，渲染输出经 stdout.write 直达终端
     // （headless 下已实测：store 更新后的帧内容确实写出，含输入字符）。原生线程路径此前在真机
@@ -183,10 +186,10 @@ export async function createTuiTerminal(): Promise<TuiTerminal> {
   });
   win32DisableProcessedInput();
 
-  // 光标定位：每帧把硬件光标写到输入框光标处、恒隐藏——光标的视觉呈现由 Prompt 渲染进
-  // 文本（反色块，常亮不闪，随帧即时跟随）；硬件光标位置仍每帧写入，供输入法候选窗跟随
-  renderer.addPostProcessFn(() => {
-    renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, false);
+  // 光标定位与隐藏：每帧把硬件光标写到输入框光标处（输入法候选窗按光标格摆放），
+  // 再于帧末补发隐藏转义——光标的视觉呈现由 Prompt 渲染进文本（反色块，常亮不闪）
+  attachCursorPositioning(renderer, (chunk) => {
+    stdout.write(chunk);
   });
   return {
     renderer,

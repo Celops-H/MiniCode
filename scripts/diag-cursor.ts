@@ -3,16 +3,13 @@
  * 每个阶段在独立子进程里跑（同一进程内连续创建渲染器会互相干扰：后一个
  * 渲染器每帧全量重绘，空闲帧读数失真）。
  *
- * 阶段一（diff 帧）：setCursorPosition 是否让帧输出多出目标定位转义；
- * 阶段二（空闲帧）：内容不变连续渲染，逐帧核对是否有字节写出——
- *   空闲不写即硬件光标停留在上一帧写入结束点，是输入法候选窗错位的根源候选。
+ * 阶段一（diff 帧）：setCursorPosition 与参数 visible 各组合下，帧输出是否多出目标定位转义；
+ * 阶段二（空闲帧）：内容不变连续渲染，逐帧核对是否有字节写出。
  *
- * 已实证（headless 测试渲染器，2026-10-05，见 request.md E134/E135 条目）：
+ * 已实证（headless 测试渲染器，2026-10-05，见 request.md E134 条目）：
  * - 空闲帧（无内容 diff）不向终端写任何字节；
- * - 本环境（headless）定位转义不写出：调用 setCursorPosition 只让帧尾的
- *   「回 (1;1)」归位转义消失，目标位置转义本身不发（能力位探测为 native 侧行为，
- *   JS 侧 setRendererCapabilities 置位无效）——真机（Windows Terminal）的
- *   实际输出待按本脚本思路核实。
+ * - 目标定位转义只在 visible=true 时写出；visible=false 只发隐藏转义、不写位置。
+ *   与能力位无关：JS 侧 setRendererCapabilities 置位对输出无影响。
  * 字节到达比 renderOnce 迟一拍，读数前留沉降窗（150-200ms）。
  *
  * 运行方式：pnpm diag:cursor
@@ -54,34 +51,40 @@ async function makeRenderer(): Promise<{ setup: Setup; read: () => string }> {
   const setup = await createTestRenderer({
     width: 40,
     height: 10,
-    stdin: new PassThrough() as never,
-    stdout: stream as never,
+    stdin: new PassThrough() as unknown as NodeJS.ReadStream,
+    stdout: stream as unknown as NodeJS.WriteStream,
     // 自定义 stdout 经 NativeSpanFeed 回放原始字节（"memory" 只留内存缓冲，捕获不到）
-    bufferedOutput: "stdout" as never,
+    bufferedOutput: "stdout",
   });
   return { setup, read };
 }
 
-/** 挂内容与可选的光标定位，跑若干帧 */
+/** 挂内容与可选的光标定位，跑若干帧；visible 为 setCursorPosition 的第三参 */
 async function buildScene(
   explicitCursor: boolean,
   useSetCursor: boolean,
+  visible = false,
 ): Promise<{ setup: Setup; read: () => string }> {
   const { setup, read } = await makeRenderer();
   setRendererCapabilities(setup.renderer, { explicit_cursor_positioning: explicitCursor });
   if (useSetCursor) {
     setup.renderer.addPostProcessFn(() => {
-      setup.renderer.setCursorPosition(10, 5, false);
+      setup.renderer.setCursorPosition(10, 5, visible);
     });
   }
-  const ctx = (setup.renderer.root as unknown as { ctx: unknown }).ctx;
-  setup.renderer.root.add(new TextRenderable(ctx as never, { content: "x" }));
+  const ctx = setup.renderer.root.ctx;
+  setup.renderer.root.add(new TextRenderable(ctx, { content: "x" }));
   return { setup, read };
 }
 
 /** 阶段一：内容帧写出与转义清单 */
-async function phaseDiff(label: string, explicitCursor: boolean, useSetCursor: boolean): Promise<void> {
-  const { setup, read } = await buildScene(explicitCursor, useSetCursor);
+async function phaseDiff(
+  label: string,
+  explicitCursor: boolean,
+  useSetCursor: boolean,
+  visible = false,
+): Promise<void> {
+  const { setup, read } = await buildScene(explicitCursor, useSetCursor, visible);
   for (let i = 0; i < 3; i++) {
     await setup.renderOnce();
     await sleep(200);
@@ -119,9 +122,11 @@ type Phase = () => Promise<void>;
 
 const PHASES: Record<string, Phase> = {
   "diff-base-on": () => phaseDiff("①基线(cap on)", true, false),
-  "diff-set-on": () => phaseDiff("①定位(cap on)", true, true),
+  "diff-set-on": () => phaseDiff("①定位 visible=false(cap on)", true, true),
+  "diff-set-visible-on": () => phaseDiff("①定位 visible=true(cap on)", true, true, true),
   "diff-base-off": () => phaseDiff("①基线(cap off)", false, false),
-  "diff-set-off": () => phaseDiff("①定位(cap off)", false, true),
+  "diff-set-off": () => phaseDiff("①定位 visible=false(cap off)", false, true),
+  "diff-set-visible-off": () => phaseDiff("①定位 visible=true(cap off)", false, true, true),
   "idle-on": () => phaseIdle("②空闲(cap on)", true),
   "idle-off": () => phaseIdle("②空闲(cap off)", false),
 };
