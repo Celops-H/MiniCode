@@ -336,6 +336,9 @@ export interface TuiState {
   prompt: PromptState;
   streaming: Streaming | undefined;
   status: "idle" | "running";
+  /** 手动压缩执行中（/compact）：状态行显示压缩中，其余按运行中对待——
+   *  期间新消息进排队条等压缩结束，Esc 打断的是压缩本身 */
+  compacting: boolean;
   /** 会话标题（状态行显示；/rename 时同步，/session 重建时由装配层传入；空显示「新会话」） */
   title: string;
   /** 状态行/消息署名用的当前模型名（共享挂载下由 runTui 每轮同步，App 无 model prop 时读它） */
@@ -538,6 +541,7 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
     prompt: emptyPrompt([]),
     streaming: undefined,
     status: "idle",
+    compacting: false,
     title,
     modelLabel,
     permissionMode: "default",
@@ -808,6 +812,18 @@ export function interruptTurn(state: TuiState): TuiState {
     }
   }
   return { ...state, blocks, streaming: undefined, status: "idle", activeModel: undefined };
+}
+
+/**
+ * 置位/复位「手动压缩执行中」（/compact 起止各调一次）。
+ * 压缩期间状态行显示压缩中（StatusBar 按 compacting 分支），其余按运行中对待：
+ * 期间发出的消息进排队条等压缩结束，Esc 先打断压缩本身。
+ * @param state 当前状态
+ * @param compacting true=压缩开始，false=压缩收尾
+ * @returns 新状态
+ */
+export function setCompacting(state: TuiState, compacting: boolean): TuiState {
+  return { ...state, compacting, status: compacting ? "running" : "idle" };
 }
 
 /** 是否有运行中的子 agent：主 agent 等子 agent 结论时主状态非 running，

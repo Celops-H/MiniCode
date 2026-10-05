@@ -289,13 +289,20 @@ function mapCandidateKey(key: Key): TuiAction {
   }
 }
 
-/** Esc 按键的落地判定（纯函数，loop 层调用）：运行中打断；空闲双击退出 */
+/** Esc 按键的落地判定（纯函数，loop 层调用）：压缩中打断压缩；运行中打断回合；空闲双击退出 */
 export function decideEsc(c: {
   running: boolean;
+  /** 手动压缩执行中（/compact）：Esc 打断压缩本身，不判回合打断与双击退出 */
+  compacting?: boolean;
   lastEscAt: number;
   now: number;
   windowMs?: number;
-}): "interrupt" | "arm-exit" | "exit" {
+}): "interrupt-compaction" | "interrupt" | "arm-exit" | "exit" {
+  // 压缩优先判定：压缩要调模型生成摘要，可能跑很久，用户应能放弃。
+  // 打断的代价有界：只丢弃本次摘要与消息重排，已发生的工具输出裁剪不回滚
+  //（裁剪在调摘要之前就改了内存历史，见 agent.ts 的 doCompact）。
+  // 压缩窗口内连按第二次仍按打断压缩处理，不判双击退出，退出语义留给空闲态
+  if (c.compacting) return "interrupt-compaction";
   if (c.running) return "interrupt";
   const windowMs = c.windowMs ?? 800;
   if (c.lastEscAt !== 0 && c.now - c.lastEscAt <= windowMs) return "exit";

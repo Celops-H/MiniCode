@@ -20,7 +20,7 @@ import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig, Config } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, type QueuedItem, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
@@ -439,11 +439,22 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       });
     });
 
+  /**
+   * 退出前中断在途工作：回合运行中或压缩在途（压缩期间 status 亦为 running，
+   * 见 setCompacting）都先中断。压缩在途时补置打断标记，否则压缩收尾会走
+   * 「未配置压缩或摘要不可用」分支，在退出瞬间弹出与实情不符的提示。
+   */
+  const interruptBeforeExit = (): void => {
+    if (state.status !== "running") return;
+    agent.interrupt();
+    if (compacting) compactInterrupted = true;
+  };
+
   const handleCommand = (raw: string): void => {
     const command = raw.trim();
     if (command === "/exit") {
       if (state.status === "running") {
-        agent.interrupt();
+        interruptBeforeExit();
         resolvePermission("deny");
       }
       exitLoop();
@@ -666,6 +677,9 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   const compactAsync = async (guidance?: string): Promise<void> => {
     if (compacting) return;
     compacting = true;
+    // 状态行进「压缩中」：压缩要调模型生成摘要，可能跑十几秒，
+    // 期间界面不能停在空闲（同时按运行中对待：新消息进排队条等收尾）
+    commit(setCompacting(state, true));
     try {
       const ok = await agent.compactNow(guidance);
       // 打断的压缩：不提示「未配置」（compactNow 对取消同样返回 false），Esc 已即时提示
@@ -692,6 +706,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
     } finally {
       compacting = false;
+      // 压缩收尾回空闲（压缩期间按运行中对待，见 setCompacting）
+      commit(setCompacting(state, false));
       // /compact 收尾唤醒输入泵（命令链不断流）——队首命令继续执行、队首消息跑轮次
       wake?.();
     }
@@ -1084,22 +1100,23 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "esc": {
-        // 压缩中 Esc：打断压缩本身，不走回合打断/双击退出判定
-        if (compacting) {
-          agent.interrupt();
-          compactInterrupted = true;
-          showToast("已打断压缩");
-          return;
-        }
-        // Esc：运行中或子 agent 活跃时打断；空闲第一次 arm、窗口内第二次退出。
-        // 子 agent 活跃时主状态可能非 running（主 agent 在等结论）——判定并入 agent 树运行态，
-        // 否则 Esc 会被 arm 成双击退出、按两次才打断
+        // Esc：压缩中打断压缩本身；运行中或子 agent 活跃时打断；空闲第一次 arm、
+        // 窗口内第二次退出。子 agent 活跃时主状态可能非 running（主 agent 在等结论）——
+        // 判定并入 agent 树运行态，否则 Esc 会被 arm 成双击退出、按两次才打断。
+        // 压缩优先于回合打断：打断的是压缩，历史不动（结论见 decideEsc 注释）
         const verdict = decideEsc({
+          compacting,
           running: state.status === "running" || hasRunningAgent(state.agents),
           lastEscAt,
           now: Date.now(),
           windowMs: ESC_EXIT_WINDOW_MS,
         });
+        if (verdict === "interrupt-compaction") {
+          agent.interrupt();
+          compactInterrupted = true;
+          showToast("已打断压缩");
+          return;
+        }
         if (verdict === "interrupt") {
           doInterrupt();
           return;
@@ -1114,7 +1131,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }
       case "exit": {
         if (state.status === "running") {
-          agent.interrupt();
+          interruptBeforeExit();
           resolvePermission("deny", "用户打断");
         }
         exitLoop();

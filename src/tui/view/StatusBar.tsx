@@ -1,6 +1,7 @@
 /**
  * 状态行（底部固定一行）：模型 · 会话标题 · 模式[default/plan mode/auto mode] · 用量三段 · 运行状态 · 操作提示。
  * 会话位显示标题（随 /rename 同步；长标题按列宽截断到 20 列），id 完整值在 /session 面板可见。
+ * 运行状态三段：空闲 / 运行中（Esc 打断、连按两次退出）/ 压缩中（Esc 打断压缩）。
  * 观感：一行内分布；窄屏右侧溢出被截（自然右缘裁切）：溢出先截右侧
  * 运行状态/操作提示，继而左盒靠右的用量段依次被顶出，模型名/会话标题/模式最后被截。
  * 用量三段：↑↓ 为会话累计（含全部 agent，归一口径见
@@ -20,7 +21,7 @@ export interface StatusBarProps {
   model: string;
   /** 会话标题（/rename 后同步更新；空显示「新会话」） */
   title: string;
-  status: "idle" | "running";
+  status: "idle" | "running" | "compacting";
   permissionMode?: PermissionMode;
   /** 会话级用量累计（恢复重建降级后仍无数据时不渲染用量区） */
   usage?: UsageSummary;
@@ -67,7 +68,10 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
         ) : null}
       </box>
       <text fg={theme.textMuted} flexShrink={0}>
-        {props.status === "running" ? (
+        {props.status === "compacting" ? (
+          // 压缩中 Esc 只打断压缩（连按第二次仍按打断压缩处理），提示语不带退出
+          <span style={{ fg: theme.running }}>▶ 压缩中（Esc 打断压缩）</span>
+        ) : props.status === "running" ? (
           <span style={{ fg: theme.running }}>▶ 运行中（Esc 打断 · 连按两次 Esc 退出）</span>
         ) : (
           <span>

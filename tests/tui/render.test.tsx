@@ -8,7 +8,7 @@ import { createStore } from "solid-js/store";
 import { describe, it, expect, afterEach } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
-import { initState, reduceHook, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
 import { messageScroller } from "../../src/tui/scroll.js";
 import { assistantMessage } from "../../src/core/index.js";
 
@@ -107,6 +107,26 @@ describe("view/App 渲染链", () => {
     await setup.waitForVisualIdle();
     expect(setup.captureCharFrame()).toContain("▶ 运行中");
     expect(textFgContaining(setup.captureSpans(), "运行中（Esc 打断")).toBe("#e5c07b");
+  });
+
+  it("状态行压缩中：显示压缩中与「Esc 打断压缩」，收尾回空闲", async () => {
+    const [state, setState] = createStore<TuiState>(initState([]));
+    // /compact 的真实起止组合：压缩期间 status 也是 running（见 setCompacting）
+    setState(setCompacting(state, true));
+    const setup = await testRender(
+      () => <App state={state} model="m" onAction={() => {}} />,
+      { width: 64, height: 8 },
+    );
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("▶ 压缩中");
+    // 压缩期间不显示「运行中」的退出提示：Esc 打断的是压缩，连按第二次也不退出
+    expect(setup.captureCharFrame()).not.toContain("▶ 运行中");
+    expect(textFgContaining(setup.captureSpans(), "压缩中（Esc")).toBe("#e5c07b");
+
+    setState(setCompacting(state, false));
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("● 空闲");
+    expect(setup.captureCharFrame()).not.toContain("▶ 压缩中");
   });
 
   it("状态行显示会话标题，/rename 同步更新", async () => {

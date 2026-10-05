@@ -122,7 +122,8 @@ export function App(props: AppProps): JSX.Element {
         <StatusBar
           model={props.model ?? props.state.modelLabel}
           title={props.state.title}
-          status={props.state.status}
+          // 压缩中的显示态压过回合状态：压缩期间 status 本身也是 running（见 setCompacting）
+          status={props.state.compacting ? "compacting" : props.state.status}
           permissionMode={props.state.permissionMode}
           usage={props.state.usage}
           contextTokens={props.state.contextTokens}

@@ -107,3 +107,14 @@ it("decideEsc：运行中打断 → 空闲双击退出（折叠聚焦半成品�
   // 超窗：重新 arm
   expect(decideEsc({ running: false, lastEscAt: 100, now: 1000, windowMs: 800 })).toBe("arm-exit");
 });
+
+it("decideEsc：压缩中打断压缩，优先于回合打断与双击退出", () => {
+  // 压缩中 Esc 打断的是压缩本身（压缩期间 status 也是运行中，但判定优先取压缩）
+  expect(decideEsc({ compacting: true, running: true, lastEscAt: 0, now: 0 })).toBe("interrupt-compaction");
+  // 压缩窗口内连按第二次仍按打断压缩，不判退出（否则一次误按就退出进程）
+  expect(decideEsc({ compacting: true, running: true, lastEscAt: 100, now: 400, windowMs: 800 })).toBe(
+    "interrupt-compaction",
+  );
+  // 压缩收尾后回常规判定
+  expect(decideEsc({ compacting: false, running: true, lastEscAt: 100, now: 400 })).toBe("interrupt");
+});

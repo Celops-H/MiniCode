@@ -7,8 +7,8 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, type BlockView, type TuiState } from "../../src/tui/state.js";
-import { mapKey } from "../../src/tui/keymap.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, setCompacting, hasRunningAgent, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
 function withKeyModal(state: TuiState): TuiState {
   return {
@@ -549,5 +549,34 @@ describe("PreToolUse 兜底回填 id", () => {
     s = reduceHook(s, { type: "PostToolUse", toolCallId: "call_0", toolName: "read", input: {}, output: "ok", isError: false, agentPath: "/root" });
     const done = s.blocks.find((b) => b.kind === "tool") as { status: string };
     expect(done.status).toBe("success");
+  });
+});
+
+describe("/compact 期间的界面状态（setCompacting 纯函数）", () => {
+  it("压缩开始：按运行中对待（消息进排队条等收尾，Esc 判打断压缩）", () => {
+    const compacting = setCompacting(initState([]), true);
+    expect(compacting.compacting).toBe(true);
+    expect(compacting.status).toBe("running");
+    // 压缩期间发的消息进排队条：与轮次运行中同一行为，
+    // 否则界面显示运行中而消息不在排队条，显示与传输两边不一致
+    const typed: TuiState = { ...compacting, prompt: { ...compacting.prompt, lines: ["压缩期间说的话"] } };
+    const sent = reduceAction(typed, { type: "send" });
+    expect(sent.queue.map((q) => q.text)).toEqual(["压缩期间说的话"]);
+    expect(sent.status).toBe("running");
+    // Esc：压缩优先，打断的是压缩本身（不判双击退出）
+    expect(
+      decideEsc({
+        compacting: sent.compacting,
+        running: sent.status === "running" || hasRunningAgent(sent.agents),
+        lastEscAt: 0,
+        now: 0,
+      }),
+    ).toBe("interrupt-compaction");
+  });
+
+  it("压缩收尾：compacting 复位、状态回空闲", () => {
+    const done = setCompacting(setCompacting(initState([]), true), false);
+    expect(done.compacting).toBe(false);
+    expect(done.status).toBe("idle");
   });
 });
