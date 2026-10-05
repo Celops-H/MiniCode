@@ -133,18 +133,51 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "qwen-plus",
   },
   {
-    // 计费 API（按 token 计费；编码套餐过期后用资源包也走这个端点）
+    // 计费 API（按 token 计费；编码套餐过期后用资源包也走这个端点）。
+    // 清单按内置目录 zhipuai 条目核对（该条目端点即本端点，最近核对：2026-10-06）：
+    // 目录未收录的旧名 glm-4-plus / glm-4-flash 移除（无目录依据，无法核实窗口与输出上限）；
+    // 视觉模型（glm-5v-turbo / glm-4.5v / glm-4.6v / glm-4.6v-flash）不收——本项目无图片输入形态
     id: "zhipu",
     name: "智谱 GLM（计费 API）",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     apiKeyEnv: "ZHIPU_API_KEY",
     catalogId: "zhipuai",
-    // 待核：glm-4-plus / glm-4-flash 未收录进模型目录，窗口与输出上限按兜底处理
-    models: [
-      { id: "glm-4-plus" },
-      { id: "glm-4-flash" },
+    // glm 系思考增量经 reasoning_content 字段下发（目录 zhipuai 条目标注）：
+    // 开启后 assistant 消息带该字段回传，思考块不退化为 <thinking> 文本占上下文
+    reasoningContent: true,
+    // 全系列均支持思考（目录 reasoning: true 均为真）；连接时经 /models 拉全量替换列表，
+    // 拉取条目无能力位信息，reasoning 标记只对预设内模型保留
+    reasoningModels: [
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.3-flashx",
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5",
+      "glm-4.7",
+      "glm-4.7-flash",
+      "glm-4.7-flashx",
+      "glm-4.6",
+      "glm-4.5",
+      "glm-4.5-air",
+      "glm-4.5-flash",
     ],
-    defaultModel: "glm-4-plus",
+    models: [
+      { id: "glm-5.3", contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: "glm-5.3-flash", contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: "glm-5.3-flashx", contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: "glm-5.2", contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: "glm-5.1", contextWindow: 200_000, maxTokens: 131_072 },
+      { id: "glm-5", contextWindow: 204_800, maxTokens: 131_072 },
+      { id: "glm-4.7", contextWindow: 204_800, maxTokens: 131_072 },
+      { id: "glm-4.7-flash", contextWindow: 200_000, maxTokens: 131_072 },
+      { id: "glm-4.7-flashx", contextWindow: 200_000, maxTokens: 131_072 },
+      { id: "glm-4.6", contextWindow: 204_800, maxTokens: 131_072 },
+      { id: "glm-4.5", contextWindow: 131_072, maxTokens: 98_304 },
+      { id: "glm-4.5-air", contextWindow: 131_072, maxTokens: 98_304 },
+      { id: "glm-4.5-flash", contextWindow: 131_072, maxTokens: 98_304 },
+    ],
+    defaultModel: "glm-5.3",
   },
   {
     // GLM Coding Plan 订阅（Anthropic 兼容端点，docs.bigmodel.cn/cn/guide/develop/claude）

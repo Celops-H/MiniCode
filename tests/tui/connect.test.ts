@@ -35,7 +35,8 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
   }
 });
 
-it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复写入按新值替换", async () => {  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复写入按新值替换", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
   const file = path.join(dir, "config.json");
   try {
     await writeGlobalConfig(file, deepseek, "sk-123");

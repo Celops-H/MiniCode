@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PROVIDER_PRESETS } from "../../src/config/presets.js";
 
@@ -50,5 +52,21 @@ describe("PROVIDER_PRESETS（厂商预设）", () => {
     expect(ids).toEqual(
       expect.arrayContaining(["zhipu", "zhipu-coding", "deepseek", "moonshot", "moonshot-anthropic"]),
     );
+  });
+
+  it("zhipu 计费端点清单与内置目录一致：模型在目录内，窗口与输出上限同目录值", () => {
+    const preset = PROVIDER_PRESETS.find((p) => p.id === "zhipu");
+    expect(preset).toBeDefined();
+    const snapshotFile = fileURLToPath(new URL("../../src/llm/models-dev.json", import.meta.url));
+    const catalog = JSON.parse(readFileSync(snapshotFile, "utf8")) as {
+      zhipuai?: { models?: Record<string, { limit?: { context?: number; output?: number } }> };
+    };
+    const catalogModels = catalog.zhipuai?.models ?? {};
+    for (const m of preset!.models) {
+      const entry = catalogModels[m.id];
+      expect(entry, `模型 ${m.id} 不在目录 zhipuai 条目内（预设与目录失同步）`).toBeTruthy();
+      expect(m.contextWindow, `${m.id} contextWindow 与目录不一致`).toBe(entry?.limit?.context);
+      expect(m.maxTokens, `${m.id} maxTokens 与目录不一致`).toBe(entry?.limit?.output);
+    }
   });
 });
