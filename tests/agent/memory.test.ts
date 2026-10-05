@@ -120,6 +120,55 @@ describe("会话记忆", () => {
     // 未调用现场摘要模型
     expect(summaryCalls).toBe(0);
   });
+
+  it("记忆关闭后重装配的会话压缩走现场摘要：记忆文本不跨重装配存活，不走记忆替代", async () => {
+    // 复现 /settings 关记忆 → 重装配 → /compact 的链路：重装配的新 agent 按关后的开关构造，
+    // 历史从会话恢复（initialMessages），记忆文本只在内存、不随会话恢复
+    let summaryCalled = false;
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          yield { type: "text_delta", text: "记忆：用户想搭建脚手架" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        if (context.messages.some((m) => typeof m.content === "string" && m.content.includes("结构化摘要"))) {
+          summaryCalled = true;
+          yield { type: "text_delta", text: "现场摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "好的" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const compactConfig = { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 };
+    // 重装配前的旧 agent（记忆开启时期）：跑一轮沉淀记忆
+    const previous = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    previous.start("搭建脚手架");
+    for await (const _ of previous.run()) {
+      // 消费
+    }
+    await previous.whenMemorySettled();
+    // 重装配：新 agent（memory=false）恢复历史后 /compact 无指导，走现场摘要而非记忆替代
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: false,
+      compactConfig,
+      initialMessages: previous.getMessages(),
+    });
+    expect(await agent.compactNow()).toBe(true);
+    expect(summaryCalled).toBe(true);
+    // 摘要消息来自现场摘要，不是记忆文本
+    expect(agent.getMessages()[0]).toMatchObject({
+      role: "user",
+      source: "system",
+      content: expect.stringContaining("现场摘要"),
+    });
+  });
 });
 
 describe("buildMemoryUpdateRequest", () => {
