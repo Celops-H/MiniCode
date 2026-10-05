@@ -64,3 +64,14 @@ export interface Tool {
 export function validateInput<T>(tool: Pick<Tool, "name" | "inputSchema">, input: unknown): T {
   return tool.inputSchema.parse(input) as T;
 }
+
+/**
+ * 工具描述共用的输出上限提示：数字与工具的 maxResultSizeChars 同源（调用处传同一常量），
+ * 超限截断、完整内容落盘、可用 read 读回——模型事先知道上限，可对大输出主动分段，
+ * 不必等截断回灌才发现。
+ * @param maxChars 结果字符上限（与工具 maxResultSizeChars 一致）
+ * @returns 提示文案
+ */
+export function outputLimitNote(maxChars: number): string {
+  return `输出超过 ${maxChars} 字符会被截断，完整内容自动落盘，可用 read 工具读回`;
+}

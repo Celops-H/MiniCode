@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import { validateInput, type ExecuteContext } from "../base.js";
+import { validateInput, outputLimitNote, type ExecuteContext } from "../base.js";
 import type { ExecuteResult, Tool } from "../base.js";
 import { currentCwd } from "../file-state.js";
 import { killProcessTree, startBackgroundTask } from "./bash-background.js";
@@ -12,12 +12,12 @@ const MAX_BASH_OUTPUT_CHARS = 4 * 1024 * 1024;
 /** 排水窗口：进程退出后等管道关闭的宽限时长；到点销毁流强制收尾（窗口内未吐完的尾部输出会丢） */
 const DRAIN_WINDOW_MS = 1000;
 
+const MAX_RESULT_CHARS = 30000;
+
 const schema = z.object({
-  command: z.string(),
-  /** 超时毫秒数，默认 30 秒 */
-  timeoutMs: z.number().int().positive().optional(),
-  /** 后台执行：立即返回任务 id，命令放后台跑，用 bash_task 工具查询与终止 */
-  background: z.boolean().optional(),
+  command: z.string().describe("要执行的 shell 命令"),
+  timeoutMs: z.number().int().positive().optional().describe("超时毫秒数，到点终止并标记失败；缺省 30000"),
+  background: z.boolean().optional().describe("true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止"),
 });
 
 /**
@@ -65,7 +65,8 @@ export const bashTool: Tool = {
   description:
     "在系统 shell 中执行命令，返回标准输出与错误输出。" +
     "默认 30 秒超时，到点终止并返回失败；预计更久的命令传更大的 timeoutMs（毫秒）。" +
-    "background 为 true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止",
+    "background 为 true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止。" +
+    outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
   isReadOnly: false,
   isConcurrencySafe(input) {
@@ -75,7 +76,7 @@ export const bashTool: Tool = {
     if (parsed.data.background) return false;
     return isReadOnlyBashCommand(parsed.data.command);
   },
-  maxResultSizeChars: 30000,
+  maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input, options?: ExecuteContext) {
     const { command, timeoutMs = 30000, background } = validateInput<{
       command: string;

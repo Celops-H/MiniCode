@@ -5,10 +5,9 @@ import type { Tool } from "../base.js";
 import { currentFileState, resolvePath } from "../file-state.js";
 
 const schema = z.object({
-  path: z.string(),
-  /** 待替换的旧文本，须在文件中唯一匹配 */
-  oldString: z.string(),
-  newString: z.string(),
+  path: z.string().describe("目标文件路径"),
+  oldString: z.string().describe("待替换的旧文本，须在文件中唯一匹配"),
+  newString: z.string().describe("替换后的新文本"),
 });
 
 /** 精确替换文件中的一段文本；旧文本不唯一或不存在时拒绝 */

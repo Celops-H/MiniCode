@@ -1,13 +1,14 @@
 import { z } from "zod";
-import { validateInput } from "../base.js";
+import { validateInput, outputLimitNote } from "../base.js";
 import type { Tool } from "../base.js";
 import type { BackgroundTask, BackgroundTaskStatus } from "./bash-background.js";
 import { getBackgroundTask, killBackgroundTask } from "./bash-background.js";
 
+const MAX_RESULT_CHARS = 10000;
+
 const schema = z.object({
-  task_id: z.string(),
-  /** status 查询状态与自上次查询的新增输出；kill 终止后台进程 */
-  action: z.enum(["status", "kill"]),
+  task_id: z.string().describe("bash 后台启动（background 参数）时返回的任务 id"),
+  action: z.enum(["status", "kill"]).describe("status 查询状态与自上次查询的新增输出；kill 终止后台进程"),
 });
 
 const STATUS_TEXT: Record<BackgroundTaskStatus, string> = {
@@ -40,10 +41,11 @@ export const bashTaskTool: Tool = {
   name: "bash_task",
   description:
     "查询或终止后台 bash 任务（配合 bash 工具的 background 参数使用）。" +
-    "status 只返回自上次查询以来的新增输出；任务结束后无需再查询",
+    "status 只返回自上次查询以来的新增输出；任务结束后无需再查询。" +
+    outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
   isReadOnly: false,
-  maxResultSizeChars: 10000,
+  maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input) {
     const { task_id, action } = validateInput<{ task_id: string; action: "status" | "kill" }>(
       bashTaskTool,

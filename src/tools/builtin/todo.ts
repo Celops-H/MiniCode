@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { outputLimitNote } from "../base.js";
 import type { Tool } from "../base.js";
 
 const TODO_STATUSES = ["pending", "in_progress", "completed", "cancelled"] as const;
@@ -10,14 +11,20 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
+const MAX_RESULT_CHARS = 10000;
+
 const todoSchema = z.object({
-  /** 完整待办列表：整体替换当前清单 */
-  todos: z.array(
-    z.object({
-      content: z.string(),
-      status: z.enum(TODO_STATUSES).optional(),
-    }),
-  ),
+  todos: z
+    .array(
+      z.object({
+        content: z.string().describe("待办内容"),
+        status: z
+          .enum(TODO_STATUSES)
+          .optional()
+          .describe("pending 待开始 | in_progress 进行中 | completed 已完成 | cancelled 已取消；缺省 pending"),
+      }),
+    )
+    .describe("完整待办列表：整体替换当前清单"),
 });
 
 /** 创建 todo 工具（每次调用独立实例，维护会话内待办清单） */
@@ -25,10 +32,11 @@ export function createTodoTool(): Tool {
   let current: TodoItem[] = [];
   return {
     name: "todo",
-    description: "维护任务待办清单：传入完整待办列表整体替换，返回最新清单",
+    description:
+      "维护任务待办清单：传入完整待办列表整体替换，返回最新清单。" + outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: todoSchema,
     isReadOnly: false,
-    maxResultSizeChars: 10000,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     async execute(input) {
       const { todos } = todoSchema.parse(input);
       current = todos.map((item, i) => ({

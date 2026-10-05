@@ -1,26 +1,29 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { z } from "zod";
-import { validateInput } from "../base.js";
+import { validateInput, outputLimitNote } from "../base.js";
 import type { Tool } from "../base.js";
 import { currentFileState, hashContent, resolvePath } from "../file-state.js";
 
+const MAX_RESULT_CHARS = 30000;
+
 const schema = z.object({
-  path: z.string(),
-  /** 起始行号（从 0 起） */
-  offset: z.number().int().nonnegative().optional(),
-  /** 读取行数 */
-  limit: z.number().int().positive().optional(),
+  path: z.string().describe("要读取的路径；传目录时改为列出目录条目"),
+  offset: z.number().int().nonnegative().optional().describe("起始行号，从 0 起，缺省从头读"),
+  limit: z.number().int().positive().optional().describe("读取行数，缺省读到文件末尾"),
 });
 
 /** 读取文件内容，返回带行号的文本（后续编辑工具可引用行号） */
 export const readTool: Tool = {
   name: "read",
-  description: "读取文件内容，返回带行号的文本",
+  description:
+    "读取文件内容，返回带行号的文本；path 传目录时改为列出目录条目。" +
+    "大文件用 offset 加 limit 分段读。" +
+    outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
-  maxResultSizeChars: 30000,
+  maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input) {
     const { path, offset = 0, limit } = validateInput<{
       path: string;

@@ -2,19 +2,19 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { validateInput } from "../base.js";
+import { validateInput, outputLimitNote } from "../base.js";
 import type { Tool } from "../base.js";
 import { currentCwd, resolvePath } from "../file-state.js";
 
 /** 二进制嗅探读取的字节数（git 同款 8000）：前段出现 NUL 字节即判定二进制 */
 const BINARY_SNIFF_BYTES = 8000;
 
+const MAX_RESULT_CHARS = 30000;
+
 const schema = z.object({
-  pattern: z.string(),
-  /** 搜索起始目录或单个文件，默认当前工作目录 */
-  path: z.string().optional(),
-  /** 文件名过滤，支持 * 通配符；模式中的目录部分被忽略（只按文件名匹配） */
-  glob: z.string().optional(),
+  pattern: z.string().describe("JavaScript 正则（不支持 (?i) 等内联标志）"),
+  path: z.string().optional().describe("搜索起始目录或单个文件，缺省当前工作目录"),
+  glob: z.string().optional().describe("文件名过滤，支持 * 通配符；模式中的目录部分被忽略"),
 });
 
 /** 按正则搜索文件内容，返回 文件:行号:内容 的匹配列表 */
@@ -23,11 +23,12 @@ export const grepTool: Tool = {
   description:
     "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表。" +
     "glob 参数只按文件名过滤（支持 * 通配符），模式里的目录部分（如 **/*.tsx 的目录段）会被忽略；" +
-    "path 可传目录或单个文件",
+    "path 可传目录或单个文件。" +
+    outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
-  maxResultSizeChars: 30000,
+  maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input) {
     const { pattern, path: dir, glob: fileGlob } = validateInput<{
       pattern: string;

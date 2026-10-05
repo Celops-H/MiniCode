@@ -6,8 +6,8 @@ import type { Tool } from "../base.js";
 import { currentFileState, resolvePath } from "../file-state.js";
 
 const schema = z.object({
-  path: z.string(),
-  content: z.string(),
+  path: z.string().describe("目标文件路径，父目录不存在时自动创建"),
+  content: z.string().describe("完整文件内容，覆盖已有内容"),
 });
 
 /** 写入文件，覆盖已有内容，自动创建父目录 */
