@@ -16,7 +16,8 @@
     "dev:tui": "cross-env NODE_OPTIONS=--experimental-ffi vite-node src/tui/dev.tsx",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && cross-env VITE_TUI_BUILD=1 vite build",
     "typecheck": "tsc --noEmit",
-    "test": "cross-env NODE_OPTIONS=--experimental-ffi vitest run"
+    "test": "cross-env NODE_OPTIONS=--experimental-ffi vitest run",
+    "diag:cursor": "cross-env NODE_OPTIONS=--experimental-ffi node scripts/diag-cursor.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
