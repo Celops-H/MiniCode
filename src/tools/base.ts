@@ -15,8 +15,11 @@ export type ExecuteResult =
       output: string;
       /** 该执行产出的上下文修改，并发批内批末统一应用 */
       contextModifier?: ContextModifier;
-      /** 显式标记该执行失败（如超时），回灌时 isError 置 true */
+      /** 显式标记该执行失败（如超时、命令非零退出），回灌时 isError 置 true */
       isError?: boolean;
+      /** 失败原因（如「命令失败：退出码 2」）：isError 且提供本字段时由执行器补发
+       *  PostToolUseFailure 供观测（事件 error 字段即本值）；缺省只标失败不发事件 */
+      error?: string;
     };
 
 /** 工具执行上下文：携带可中止信号（turn 内打断透传，bash 等长进程据此杀进程树） */

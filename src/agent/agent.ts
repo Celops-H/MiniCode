@@ -1355,15 +1355,29 @@ export class Agent {
           ),
           ...deadlines,
         ]);
-        const { output, contextModifier, isError } =
+        const { output, contextModifier, isError, error: failureReason } =
           typeof result === "string"
-            ? { output: result, contextModifier: undefined, isError: undefined }
+            ? { output: result, contextModifier: undefined, isError: undefined, error: undefined }
             : result;
         const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir, {
           sessionId: this.sessionId,
           toolName: call.name,
         });
         const finalOutput = truncated.content;
+        // PostToolUseFailure：执行完成但结果标记失败且带失败原因（如命令失败带退出码）时
+        // 补发失败事件供观测。先于 PostToolUse 发出：界面按事件序写卡片，完成事件的输出
+        // 落在最后，失败卡片保留完整输出（简短原因只进轨迹）
+        if (isError && failureReason !== undefined) {
+          await this.safeEmit({
+            type: "PostToolUseFailure",
+            toolCallId: call.id,
+            toolName: call.name,
+            input: call.input,
+            error: failureReason,
+            durationMs: Date.now() - executionStartedAt,
+            agentPath,
+          });
+        }
         // PostToolUse：工具执行完成（含标记失败的结果），供观测；带执行耗时
         await this.safeEmit({
           type: "PostToolUse",

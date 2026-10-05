@@ -348,6 +348,68 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     );
   });
 
+  it("执行完成但结果标记失败：按失败原因补发 PostToolUseFailure，PostToolUse 标 isError", async () => {
+    const hooks = new HookBus();
+    const post = vi.fn();
+    const failure = vi.fn();
+    hooks.on("PostToolUse", post);
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        makeReadTool(() => ({
+          output: "命令失败：退出码 2\n部分输出",
+          isError: true,
+          error: "命令失败：退出码 2",
+        })),
+      ],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PostToolUseFailure",
+        toolName: "read",
+        error: "命令失败：退出码 2",
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "PostToolUse", output: "命令失败：退出码 2\n部分输出", isError: true }),
+    );
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toContain("命令失败：退出码 2");
+  });
+
+  it("标记失败但未带失败原因：只标 isError 不补发 PostToolUseFailure（超时/打断的既有口径）", async () => {
+    const hooks = new HookBus();
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: mockReadToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [makeReadTool(() => ({ output: "命令执行超时", isError: true }))],
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(failure).not.toHaveBeenCalled();
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.isError).toBe(true);
+  });
+
   it("无权限管线时 PreToolUse 也无条件触发：deny 直接拒绝执行（原实现依赖管线，CLI 未装配则永不触发）", async () => {
     let executed = false;
     const hooks = new HookBus();

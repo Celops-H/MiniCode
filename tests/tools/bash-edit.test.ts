@@ -11,9 +11,10 @@ describe("bash 工具", () => {
     expect(out).toContain("hello");
   });
 
-  it("失败命令返回错误信息", async () => {
+  it("失败命令返回错误信息并标记失败", async () => {
     const out = await bashTool.execute({ command: "command-not-exist-xyz-123" });
-    expect(out).toContain("命令失败");
+    expect(out).toMatchObject({ isError: true });
+    expect(String(JSON.stringify(out))).toContain("命令失败");
   });
 });
 

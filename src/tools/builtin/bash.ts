@@ -94,7 +94,8 @@ export const bashTool: Tool = {
 /**
  * 前台执行命令：spawn 起 shell，累积 stdout/stderr，维护 cwd 与工具上下文一致。
  * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
- * 兼容旧 exec 语义：非零退出码返回失败文本、超时/中断标记 isError。
+ * 兼容旧 exec 语义：非零退出、超时、中断都标记 isError（命令失败另带失败原因，
+ * 由执行器转发 PostToolUseFailure）。
  * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
  * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
  * @param command shell 命令
@@ -179,7 +180,8 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
         return;
       }
       if (exitCode !== 0) {
-        resolve(`命令失败：退出码 ${exitCode ?? "未知"}${details ? `\n${details}` : ""}`);
+        const reason = `命令失败：退出码 ${exitCode ?? "未知"}`;
+        resolve({ output: details ? `${reason}\n${details}` : reason, isError: true, error: reason });
         return;
       }
       resolve(details.length > 0 ? details : "(命令无输出)");

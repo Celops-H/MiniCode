@@ -55,7 +55,7 @@ export type HookEvent =
       toolName: string;
       input: Record<string, unknown>;
       error: string;
-      /** 工具执行耗时 ms：执行中失败的调用带执行窗口耗时；
+      /** 工具执行耗时 ms：执行中失败与执行完成但标记失败（如命令失败）的调用带执行窗口耗时；
        *  执行前被拒绝（权限/参数校验/未知工具）没有执行窗口，不带该字段 */
       durationMs?: number;
       agentPath: string;

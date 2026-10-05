@@ -36,10 +36,10 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
     expect(String(out)).toContain("ERR");
   });
 
-  it("非零退出：保持旧语义——纯文本返回不标 isError", async () => {
+  it("非零退出：标记失败并携带失败原因（含退出码）", async () => {
     const out = await bashTool.execute({ command: 'node -e "process.exit(2)"' });
-    expect(typeof out).toBe("string");
-    expect(out).toContain("命令失败");
+    expect(out).toMatchObject({ isError: true, error: "命令失败：退出码 2" });
+    expect(String(JSON.stringify(out))).toContain("命令失败");
   });
 
   it("超时：到点杀进程并标记失败，文案提示可加大 timeoutMs 重试", async () => {
