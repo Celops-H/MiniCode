@@ -327,6 +327,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   const modeBox: { value: PermissionMode } = options.permissionMode ?? { value: "default" };
   /** 思考等级盒子（/model 左右调整；装配层 Agent.thinkingLevelRef 每轮读它透传） */
   const thinkingBox: { value: ThinkingLevel | undefined } = options.thinkingLevel ?? { value: undefined };
+  /** 默认模型活值（/model 弹窗 Ctrl+S 设定，初始取合并配置）：弹窗「（默认）」尾标读这里。
+   *  不能读 options.config——它是装配期静态引用，仅启动/reconfigure/切会话重读，
+   *  写盘成功只更新本盒子，同会话内重开弹窗尾标才不丢 */
+  const defaultModelBox: { value?: string } = { value: options.config?.defaultModel };
 
   const commit = (next: TuiState): void => setState(reconcile(next));
 
@@ -573,7 +577,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           models,
           selected,
           thinkingLevel: thinkingBox.value,
-          defaultModelId: options.config?.defaultModel,
+          defaultModelId: defaultModelBox.value,
         },
         prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
         candidate: undefined,
@@ -925,6 +929,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         void (async () => {
           try {
             await writeGlobalDefaultModel(resolveConfigPaths().globalConfigFile, picked.id);
+            // 盒子与弹窗标记同步更新：同会话内 Esc 重开 /model 尾标不回退
+            defaultModelBox.value = picked.id;
             if (state.modal?.kind === "model") {
               commit({ ...state, modal: { ...state.modal, defaultModelId: picked.id } });
             }
