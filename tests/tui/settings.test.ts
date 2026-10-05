@@ -7,10 +7,11 @@ import { buildSettingsRows, setSettingEnabled, SETTING_SPECS, settingValue } fro
 import type { Config } from "../../src/config/index.js";
 
 describe("buildSettingsRows（面板行构造）", () => {
-  it("无配置时六项开关按缺省值展示（压缩/隔离/协作/轨迹开，记忆/调试关）", () => {
+  it("无配置时七项开关按缺省值展示（链/压缩/隔离/协作/轨迹开，记忆/调试关）", () => {
     const rows = buildSettingsRows(undefined);
     expect(rows.map((r) => r.id)).toEqual(SETTING_SPECS.map((s) => s.id));
     expect(Object.fromEntries(rows.map((r) => [r.id, r.enabled]))).toEqual({
+      modelChainEnabled: true,
       "compact.enabled": true,
       memory: false,
       worktrees: true,
@@ -22,6 +23,7 @@ describe("buildSettingsRows（面板行构造）", () => {
 
   it("合并配置的生效值覆盖缺省值（嵌套与标量字段都读生效值）", () => {
     const config = {
+      modelChainEnabled: false,
       compact: { enabled: false },
       memory: true,
       agents: false,
@@ -30,6 +32,7 @@ describe("buildSettingsRows（面板行构造）", () => {
     } as unknown as Config;
     const rows = buildSettingsRows(config);
     expect(Object.fromEntries(rows.map((r) => [r.id, r.enabled]))).toEqual({
+      modelChainEnabled: false,
       "compact.enabled": false,
       memory: true,
       worktrees: true,
@@ -130,6 +133,14 @@ describe("setSettingEnabled（写回定义层）", () => {
     expect(global.worktrees).toBe(false);
     expect(global.logLevel).toBe("info");
     expect(global.modelChain).toEqual(["deepseek-chat"]);
+  });
+
+  it("优先级链开关写布尔项，modelChain 原样保留（清链不是关闭方式）", async () => {
+    const paths = setup({ logLevel: "info", modelChain: ["a-1", "b-1"] });
+    await setSettingEnabled("modelChainEnabled", false, paths);
+    const global = read(paths.globalConfigFile);
+    expect(global.modelChainEnabled).toBe(false);
+    expect(global.modelChain).toEqual(["a-1", "b-1"]);
   });
 
   it("未知设置项抛错不落盘", async () => {

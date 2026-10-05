@@ -759,7 +759,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     commit({ ...state, modal: { kind, rows, selected: 0 } });
   };
 
-  /** 打开 /settings 设置面板：行 = 六项功能开关，启用态按合并配置的生效值展示 */
+  /** 打开 /settings 设置面板：行 = 功能开关清单，启用态按合并配置的生效值展示 */
   const openSettingsModal = (): void => {
     const rows = buildSettingsRows(options.config);
     extensionsBaseline.settings = rows.map((r) => ({ id: r.id, enabled: r.enabled }));

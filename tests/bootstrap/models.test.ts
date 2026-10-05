@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assistantMessage, createContext, toolResultMessage } from "../../src/core/index.js";
+import type { StreamEvent } from "../../src/core/index.js";
 import type { Config } from "../../src/config/index.js";
 import { buildModelClient, resolveMainModel } from "../../src/bootstrap/models.js";
 import type { ChatCompletionsClient, ChatCompletionsClientFactory } from "../../src/llm/index.js";
@@ -128,6 +129,90 @@ describe("buildModelClient（按配置构建模型客户端）", () => {
     });
     // 查询用目录侧键（catalogId）而非 provider id：对不上映射就查不到值
     expect(models.resolve("m-1")?.model.contextWindow).toBe(3_000);
+  });
+});
+
+describe("优先级链总开关（modelChainEnabled）", () => {
+  /** 双厂商 + 链 [a-1, b-1] 的基础配置 */
+  function chainConfig(extra?: Partial<Config>): Config {
+    return {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }, { id: "a-2" }] },
+        { id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B_API_KEY", models: [{ id: "b-1" }] },
+      ],
+      modelChain: ["a-1", "b-1"],
+      ...extra,
+    };
+  }
+
+  /** 按厂商分流的 mock client：厂商 a 一律抛可切换错误（429），b 正常收尾；calls 记录「端点#模型」 */
+  function splitFactory(calls: string[]): ChatCompletionsClientFactory {
+    return (_apiKey, baseUrl) => ({
+      chat: {
+        completions: {
+          async create(request) {
+            calls.push(`${baseUrl}#${String(request.model)}`);
+            if (baseUrl === "https://a.example.com") {
+              throw Object.assign(new Error("rate limited"), { status: 429 });
+            }
+            return (async function* () {
+              yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
+            })();
+          },
+        },
+      },
+    }) satisfies ChatCompletionsClient;
+  }
+
+  it("缺省开启：主模型可切换失败按链切到备选（对照组）", async () => {
+    const calls: string[] = [];
+    const models = buildModelClient(chainConfig(), undefined, { env: KEYS, createOpenAIClient: splitFactory(calls) });
+    const events: StreamEvent[] = [];
+    for await (const event of models.stream("a-1", createContext("s"))) events.push(event);
+    expect(calls).toEqual(["https://a.example.com#a-1", "https://b.example.com#b-1"]);
+    expect(events.some((e) => e.type === "model_fallback")).toBe(true);
+  });
+
+  it("开关关闭：主模型可切换失败直接上抛，备选不参与路由", async () => {
+    const calls: string[] = [];
+    const models = buildModelClient(chainConfig({ modelChainEnabled: false }), undefined, {
+      env: KEYS,
+      createOpenAIClient: splitFactory(calls),
+    });
+    const consume = async (): Promise<void> => {
+      for await (const _ of models.stream("a-1", createContext("s"))) {
+        // 消费流
+      }
+    };
+    await expect(consume()).rejects.toMatchObject({ status: 429 });
+    expect(calls).toEqual(["https://a.example.com#a-1"]);
+  });
+
+  it("开关关闭：换主模型（/model、-m 同路径）仍可用，单模型直连", async () => {
+    const calls: string[] = [];
+    // 厂商 a 全挂时把主模型切到备选厂商的模型 b-1：直连产出正常（不再经路由）
+    const models = buildModelClient(chainConfig({ modelChainEnabled: false }), "b-1", {
+      env: KEYS,
+      createOpenAIClient: splitFactory(calls),
+    });
+    const events: StreamEvent[] = [];
+    for await (const event of models.stream("b-1", createContext("s"))) events.push(event);
+    expect(calls).toEqual(["https://b.example.com#b-1"]);
+    expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("开关关闭：链上不可解析条目不再装配告警（链已不参与运行时路由）", () => {
+    const warnings: string[] = [];
+    buildModelClient(chainConfig({ modelChainEnabled: false, modelChain: ["a-1", "ghost-1"] }), undefined, {
+      env: KEYS,
+      onWarning: (w) => warnings.push(w),
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it("开关关闭不改主模型解析：defaultModel > 链首 > 兜底的选取照旧", () => {
+    expect(resolveMainModel(chainConfig({ modelChainEnabled: false }), undefined, { env: KEYS })).toBe("a-1");
   });
 });
 

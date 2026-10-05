@@ -20,13 +20,15 @@ const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
 /**
  * 按配置构建模型客户端：config 配置了 providers → 注册多厂商 Provider（按 provider
  * 的 protocol 选工厂，缺省 openai-chat-completions），
- * 且配置了 modelChain → 挂 ModelRouter 优先级链路由。
+ * 且优先级链总开关开启（modelChainEnabled 缺省开）并配置了 modelChain → 挂 ModelRouter
+ * 优先级链路由；开关关闭时只用主模型，出错不再自动切备选。
  * 装配期逐 provider 查 apiKeyEnv（resolveAuth）：key 已配置才注册，未配置的不进
  * 模型列表（列表里出现的模型一定有 key，无例外）；可用厂商为零直接报错，不再回退
  * 硬编码兜底（删除文件重启即按预设重新播种，见 config/seed.ts）。
  * -m 指定时以其为主模型打头（配置的 modelChain 作为备选路由）；-m 未在配置中出现则
  * 显式报错，不静默忽略。modelChain 整链在装配期校验：主模型不可解析硬报错，
- * 其余条目不可解析经 onWarning 告警（运行时路由会跳过，见 Models.stream）。
+ * 其余条目不可解析经 onWarning 告警（运行时路由会跳过，见 Models.stream）；
+ * 优先级链总开关关闭时链不参与运行时路由，链校验一并跳过。
  * @param config 配置（providers / modelChain 可选）
  * @param modelId 模型 id 覆盖（-m 选项），可省略
  * @param opts.env 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
@@ -56,8 +58,18 @@ export function buildModelClient(
     (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
   );
   if (usable.length === 0) throw new Error(NO_PROVIDER_ERROR);
-  // -m 存在时以其为主模型打头，配置的 modelChain 作备选路由
-  const chain = modelId ? [modelId, ...(config?.modelChain ?? [])] : config?.modelChain;
+  // -m 存在时以其为主模型打头，配置的 modelChain 作备选路由。
+  // 优先级链总开关（缺省开）：关闭时链不进装配（router 与 chain 都不给，Models 退化为
+  // 单模型直连），出错不再自动切备选；链成员与顺序仍由 modelChain 定义，清空 modelChain
+  // 不是关闭方式。只拆路由不动主模型解析：defaultModel > modelChain[0] > 兜底的选取
+  // 照旧（见 resolveMainModel），链上不可解析条目的装配告警也随之跳过（链不参与运行时
+  // 路由，告警没有意义）
+  const chainEnabled = config?.modelChainEnabled ?? true;
+  const chain = chainEnabled
+    ? modelId
+      ? [modelId, ...(config?.modelChain ?? [])]
+      : config?.modelChain
+    : undefined;
   const models = new Models({
     router: chain && chain.length > 0 ? new ModelRouter() : undefined,
     chain,

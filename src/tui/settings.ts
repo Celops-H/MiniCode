@@ -23,6 +23,12 @@ export interface SettingSpec {
 /** 首轮列项（均为布尔开关；logLevel 为枚举型不进面板） */
 export const SETTING_SPECS: SettingSpec[] = [
   {
+    id: "modelChainEnabled",
+    label: "优先级链",
+    detail: "模型出错时按优先级链自动切备选（链成员与顺序在配置文件 modelChain 编辑）",
+    defaultValue: true,
+  },
+  {
     id: "compact.enabled",
     label: "撞线自动压缩",
     detail: "上下文接近窗口上限时自动压缩历史（/compact 手动不受限）",
@@ -70,7 +76,7 @@ export function settingValue(config: Config | undefined, spec: SettingSpec): boo
   return typeof current === "boolean" ? current : spec.defaultValue;
 }
 
-/** /settings 面板行：六项开关按合并配置的生效值展示（缺省行也展示，切换后写回才有落层依据） */
+/** /settings 面板行：各项开关按合并配置的生效值展示（缺省行也展示，切换后写回才有落层依据） */
 export function buildSettingsRows(config?: Config): ExtensionRow[] {
   return SETTING_SPECS.map((spec) => ({
     id: spec.id,

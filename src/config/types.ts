@@ -116,6 +116,10 @@ export const configSchema = z
   providers: z.array(providerConfigSchema).optional(),
   /** 优先级链：有序模型 id（ModelRouter 输入），id 须在某 provider 的 models 中 */
   modelChain: z.array(z.string()).optional(),
+  /** 优先级链总开关（缺省开）：false 时只用主模型，出错不再自动切备选；链成员与顺序仍由
+   *  modelChain 定义，清空 modelChain 不是关闭方式（开关与链内容解耦，恢复开关即恢复路由）。
+   *  只拆路由不影响主模型解析（defaultModel > modelChain[0] > 兜底的选取照旧） */
+  modelChainEnabled: z.boolean().optional(),
   /** 默认模型 id（/model 面板 Ctrl+S 设定，全局生效）：主模型解析序为 -m 选项 >
    *  defaultModel > modelChain[0] > 兜底；不进 ModelRouter 备选链，链成员与顺序仍手工编辑 */
   defaultModel: z.string().optional(),
