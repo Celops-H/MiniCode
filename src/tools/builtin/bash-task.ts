@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { validateInput } from "../base.js";
 import type { Tool } from "../base.js";
-import type { BackgroundTaskStatus } from "./bash-background.js";
+import type { BackgroundTask, BackgroundTaskStatus } from "./bash-background.js";
 import { getBackgroundTask, killBackgroundTask } from "./bash-background.js";
 
 const schema = z.object({
@@ -16,6 +16,19 @@ const STATUS_TEXT: Record<BackgroundTaskStatus, string> = {
   failed: "失败",
   killed: "已终止",
 };
+
+/**
+ * 任务状态的文字描述：状态名，随后按有无追加退出码与启动错误。
+ * 启动错误（spawn 失败，如 shell 不可用）必须带出：只报「失败」时模型
+ * 无从判断能否重试。两者互不排斥，缺哪个不写哪个。
+ * @param task 后台任务
+ * @returns 状态描述文本
+ */
+function taskStateText(task: BackgroundTask): string {
+  const exitText = task.exitCode !== undefined ? `（退出码 ${task.exitCode}）` : "";
+  const errorText = task.error ? ` · 启动错误：${task.error}` : "";
+  return `${STATUS_TEXT[task.status]}${exitText}${errorText}`;
+}
 
 /**
  * 后台 bash 任务管理工具：模型拿 bash background 返回的任务 id，
@@ -45,15 +58,12 @@ export const bashTaskTool: Tool = {
       // 守卫后对已完成/失败任务是无操作：按实际终态反馈，不再无条件宣称
       // 「已终止」与后续 status 查询自相矛盾（上方 getBackgroundTask 已确认任务存在）
       if (killed.status !== "killed") {
-        const exitText = killed.exitCode !== undefined ? `（退出码 ${killed.exitCode}）` : "";
-        return `任务 ${task_id} 已于先前结束：${STATUS_TEXT[killed.status]}${exitText}，无需终止`;
+        return `任务 ${task_id} 已于先前结束：${taskStateText(killed)}，无需终止`;
       }
       return `任务 ${task_id} 已终止`;
     }
     // status：状态行 + 自上次查询以来的新增输出（游标推进，旧输出不重复返回）
-    const statusText = STATUS_TEXT[task.status];
-    const exitText = task.exitCode !== undefined ? `（退出码 ${task.exitCode}）` : "";
-    const line = `任务 ${task.id}：${statusText}${exitText}`;
+    const line = `任务 ${task.id}：${taskStateText(task)}`;
     const fresh = task.output.slice(task.readMark).trim();
     task.readMark = task.output.length;
     if (fresh) return `${line}\n自上次查询的新增输出：\n${fresh}`;

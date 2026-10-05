@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import os from "node:os";
+import path from "node:path";
 import {
   bashTaskTool,
   bashTool,
   getBackgroundTask,
   killAllBackgroundTasks,
+  startBackgroundTask,
 } from "../../src/tools/index.js";
+import type { BackgroundTask } from "../../src/tools/index.js";
 
 // 起真实 shell/node 子进程，后台任务轮询受整机负载影响大：
 // 按自身耗时设独立超时，不用全局默认 5s，避免高负载下被误报为功能回归
@@ -142,4 +146,66 @@ describe("bash_task 工具", () => {
     const res = await bashTaskTool.execute({ task_id: "b999", action: "status" });
     expect(res).toContain("任务 b999 不存在");
   });
+
+  it("status 查询失败任务：退出码写进状态文本，无启动错误时不带那一段", async () => {
+    const out = await bashTool.execute({
+      command: "node -e \"process.exit(3)\"",
+      background: true,
+    });
+    const id = /任务 (b\d+)/.exec(out as string)?.[1]!;
+    await vi.waitFor(
+      () => {
+        expect(getBackgroundTask(id)?.status).toBe("failed");
+      },
+      { timeout: 5000 },
+    );
+
+    const res = await bashTaskTool.execute({ task_id: id, action: "status" });
+    expect(res).toContain("失败（退出码 3）");
+    expect(res).not.toContain("启动错误");
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "启动失败的任务：status 返回失败原因，kill 也带出原因",
+    async () => {
+      // 只报「失败」时模型无从判断能否重试，错误原因必须一并返回（E150）。
+      // 触发路径是真实的 spawn 失败：Windows 下 shell:true 用 ComSpec 指定的 shell，
+      // 指向不存在的路径即 ENOENT。失败后 close 仍会到达（带 libuv 的 -4058），
+      // 但 bash-background 的 running 守卫不写退出码，故错误文本是唯一原因
+      const task = startTaskWithBrokenShell();
+      await vi.waitFor(
+        () => {
+          expect(getBackgroundTask(task.id)?.error).toBeTruthy();
+        },
+        { timeout: 5000 },
+      );
+      const error = getBackgroundTask(task.id)!.error!;
+
+      const status = await bashTaskTool.execute({ task_id: task.id, action: "status" });
+      expect(status).toContain("失败");
+      expect(status).toContain("启动错误");
+      expect(status).toContain(error);
+
+      // kill 对已失败任务按实际终态反馈：同样带出原因，模型少一次往返
+      const killed = await bashTaskTool.execute({ task_id: task.id, action: "kill" });
+      expect(killed).toContain("已于先前结束");
+      expect(killed).toContain("失败");
+      expect(killed).toContain(error);
+    },
+  );
 });
+
+/**
+ * 起一个必然启动失败的后台任务：把 ComSpec 临时指向不存在的 shell。
+ * spawn 同步读该变量，调用后即还原，不影响本文件其它用例。
+ */
+function startTaskWithBrokenShell(): BackgroundTask {
+  const original = process.env.ComSpec;
+  process.env.ComSpec = path.join(os.tmpdir(), "minicode-no-such-shell", "cmd.exe");
+  try {
+    return startBackgroundTask("echo hi");
+  } finally {
+    if (original === undefined) delete process.env.ComSpec;
+    else process.env.ComSpec = original;
+  }
+}
