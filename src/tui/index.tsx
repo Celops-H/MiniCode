@@ -242,7 +242,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
       }
       if (!result.switchTo) break;
       // /session 切换：重读配置再进新会话——技能清单等装配输入按最新配置生效
-      //（技能开关变更不重装配、提示下个会话生效，切换型会话是进程内最主要的「下个会话」入口）；
+      //（技能开关变更不重装配，提示新建或切换会话后生效；切换型会话是进程内主要的生效入口）；
       // 视图按新会话消息重建
       config = await loadConfig();
       session =

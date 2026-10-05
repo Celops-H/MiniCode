@@ -100,7 +100,7 @@ export interface TuiLoopOptions {
   /** MCP 装配状态活读取（/mcp 面板连接状态列；随会话装配注入） */
   getMcpStatuses?: () => McpServerStatus[];
   /** 技能关闭名单初值（config.skills.disabled 全局/项目并集）：/skill 面板行启用态用；
-   *  会话内技能变更经活副本就地同步（不重装配，下个会话生效） */
+   *  会话内技能变更经活副本就地同步（不重装配，新建或切换会话后生效） */
   skillsDisabled?: string[];
   /** 合并后配置（/settings 面板数据源）：行启用态按生效值展示，应用后重装配重读 */
   config?: Config;
@@ -285,7 +285,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** /mcp /skill /settings 面板打开时的行启用态基线（Enter 应用时按 id 比对出改动行，只写改动） */
   let extensionsBaseline: Partial<Record<"mcp" | "skill" | "settings", Array<{ id: string; enabled: boolean }>>> = {};
   /** 技能关闭名单的会话内活副本：技能变更不重装配（清单在会话开始时注入系统提示词，
-   *  下个会话生效），写盘成功后就地同步，重开 /skill 面板的启用态才与已写配置一致 */
+   *  新建或切换会话后生效），写盘成功后就地同步，重开 /skill 面板的启用态才与已写配置一致 */
   let skillsDisabledLive: string[] = options.skillsDisabled ?? [];
   /** 打断后忽略本回合迟到增量（后端中断收尾不发 done，残余事件丢弃） */
   let ignoreStream = false;
@@ -744,7 +744,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
 
   /** 扩展面板 Enter 应用：改动行按「写回定义层」规则落配置。MCP server 在装配期启动，
    *  写盘后重装配当次生效；技能清单在会话开始时注入系统提示词，不做会话内重装配
-   *  （中途感知不做：模型仍持旧清单），变更下个会话生效。无改动仅关闭 */
+   *  （中途感知不做：模型仍持旧清单），变更在新建或切换会话后生效。无改动仅关闭 */
   const applyExtensions = (kind: "mcp" | "skill", rows: ExtensionRow[]): void => {
     const changed = diffExtensionRows(extensionsBaseline[kind] ?? [], rows);
     if (changed.length === 0) {
@@ -769,7 +769,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           pendingReconfigure = true;
           exitLoop();
         } else {
-          showToast("技能配置已写入，下个会话生效");
+          showToast("技能配置已写入，新建或切换会话后生效");
         }
       } catch (err) {
         showToast(`写入配置失败：${err instanceof Error ? err.message : String(err)}`);
