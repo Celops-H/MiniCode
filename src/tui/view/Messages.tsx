@@ -56,14 +56,19 @@ function useFoldClick(onFold: () => void): {
   };
 }
 
-/** 块衬线：左侧 3 列「●  」+ 内容列（内容整体缩进到第 3 列，后续行只空不标） */
+/** 块衬线：左侧 3 列「●  」+ 内容列（内容整体缩进到第 3 列，后续行只空不标）。
+ *  内容列不设 flexShrink=0。文本节点的 max-content 宽度是最长一行的长度，列不收缩时
+ *  长行（长 URL/长串）把列撑得比可用宽度更宽，行右端被裁。实测（见
+ *  tests/tui/scroll-stream.test.tsx 的 E135 两例）：列不收缩时，流式尾出现超宽长行后
+ *  节点高度不再随增量增长（停在可用高度），其后内容不渲染也不可滚动，即最后一条消息
+ *  底部缺行；列可收缩时按可用宽度折行，高度正常增长。一次性创建的消息块同数据下正常。 */
 function MarkedBlock(props: { markerColor: string; children: JSX.Element }): JSX.Element {
   return (
     <box flexDirection="row">
       <box width={3} flexShrink={0}>
         <text fg={props.markerColor}>●</text>
       </box>
-      <box flexDirection="column" flexGrow={1} flexShrink={0}>
+      <box flexDirection="column" flexGrow={1}>
         {props.children}
       </box>
     </box>
