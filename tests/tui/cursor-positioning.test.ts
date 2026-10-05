@@ -78,4 +78,26 @@ describe("硬件光标定位接线", () => {
     listeners[0]!();
     expect(written[1]).toBe("raw:\x1b[?25l");
   });
+
+  it("active=false（光标不归输入框管，如 connect key 弹窗态）：postProcess 不写定位", () => {
+    const postFns: Array<() => void> = [];
+    const written: string[] = [];
+    const renderer: CursorRenderer = {
+      addPostProcessFn: (fn) => postFns.push(fn),
+      on: () => {},
+      setCursorPosition: (x, y, visible) => {
+        written.push(`pos:${x},${y},${String(visible)}`);
+      },
+    };
+    attachCursorPositioning(renderer, () => {});
+    tuiCursor.row = 3;
+    tuiCursor.col = 5;
+    tuiCursor.active = false;
+    postFns[0]!();
+    expect(written).toEqual([]);
+    // 恢复掌管后照常定位
+    tuiCursor.active = true;
+    postFns[0]!();
+    expect(written).toEqual(["pos:5,3,true"]);
+  });
 });

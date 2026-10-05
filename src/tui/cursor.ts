@@ -2,14 +2,19 @@
  * 终端光标定位共享状态（输入法候选窗跟随）：Prompt 渲染时写入光标应处的终端行列（1-based），
  * loop 的 postProcessFn 每帧读取并 setCursorPosition 定位。光标的视觉呈现由 Prompt 渲染进
  * 文本（反色块，常亮不闪），定位仍每帧写入供输入法候选窗跟随。
+ * active=false（光标不归输入框管，如 connect key 弹窗输入态）时 postProcessFn 不写定位——
+ * 残留的输入框定位会把候选窗锚在输入框旧位；不写则光标格留在终端实际内容处。
  * 独立文件避免 loop ↔ view 循环依赖。
  */
 export const tuiCursor: {
   row: number;
   col: number;
+  /** 输入框当前是否掌管光标定位；false 时每帧不写定位 */
+  active: boolean;
 } = {
   row: 1,
   col: 1,
+  active: true,
 };
 
 /** DECTCEM 隐藏硬件光标：只改可见性，不动光标格 */
@@ -38,6 +43,7 @@ export interface CursorRenderer {
  */
 export function attachCursorPositioning(renderer: CursorRenderer, write: (chunk: string) => void): void {
   renderer.addPostProcessFn(() => {
+    if (!tuiCursor.active) return; // 光标不归输入框管：不写定位，光标格留在终端实际内容处
     renderer.setCursorPosition(tuiCursor.col, tuiCursor.row, true);
   });
   renderer.on("frame", () => {
