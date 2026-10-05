@@ -580,3 +580,35 @@ describe("/compact 期间的界面状态（setCompacting 纯函数）", () => {
     expect(done.status).toBe("idle");
   });
 });
+
+describe("失败标记完成的调用双事件（执行器先发 PostToolUseFailure 后发 PostToolUse）", () => {
+  it("卡片终态为失败，错误文本保留完整输出（后到的 PostToolUse 落盘展示）", () => {
+    let s = initState([]);
+    s = reduceHook(s, { type: "PreToolUse", toolCallId: "t1", toolName: "bash", input: { command: "exit 2" }, agentPath: "/root" });
+    s = reduceHook(s, {
+      type: "PostToolUseFailure",
+      toolCallId: "t1",
+      toolName: "bash",
+      input: { command: "exit 2" },
+      error: "命令失败：退出码 2",
+      durationMs: 5,
+      agentPath: "/root",
+    });
+    s = reduceHook(s, {
+      type: "PostToolUse",
+      toolCallId: "t1",
+      toolName: "bash",
+      input: { command: "exit 2" },
+      output: "命令失败：退出码 2\n部分输出",
+      isError: true,
+      durationMs: 6,
+      agentPath: "/root",
+    });
+    const card = s.blocks.find((b) => b.kind === "tool" && b.id === "t1") as
+      | (BlockView & { kind: "tool"; status: string; error?: string; output?: string })
+      | undefined;
+    expect(card?.status).toBe("failure");
+    expect(card?.error).toContain("部分输出");
+    expect(card?.output).toBeUndefined();
+  });
+});

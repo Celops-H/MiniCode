@@ -45,6 +45,8 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
   it("超时：到点杀进程并标记失败，文案提示可加大 timeoutMs 重试", async () => {
     const out = await bashTool.execute({ command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 200 });
     expect(out).toMatchObject({ isError: true });
+    // 超时只标失败不带失败原因：执行器据此不补发 PostToolUseFailure（命令失败才带）
+    expect((out as { error?: string }).error).toBeUndefined();
     expect(String(JSON.stringify(out))).toContain("执行超时");
     expect(String(JSON.stringify(out))).toContain("timeoutMs");
   });
