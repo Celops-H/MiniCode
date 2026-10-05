@@ -79,7 +79,7 @@ export interface CommandBlock {
 export type BlockView = MessageBlock | ToolBlock | AgentActivityBlock | NoticeBlock | CommandBlock;
 
 /** agent 树节点：路径 + 运行/完成/失败/中断状态；派生/完成时刻由 loop 侧注入（事件本身无时间戳），耗时 = completedAt - spawnedAt。
- *  live 会话终态（完成/失败/中断）条目在底栏树展示 10s 后消失，恢复重建的历史条目无完成时刻、常驻显示 */
+ *  live 会话终态（完成/失败/中断）条目在底栏树展示 10s 后消失，恢复重建的历史条目无完成时刻、不显示 */
 export interface AgentNode {
   path: string;
   status: "running" | "completed" | "failed" | "interrupted";

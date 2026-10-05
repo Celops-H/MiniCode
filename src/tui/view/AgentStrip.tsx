@@ -2,7 +2,7 @@
  * 底栏 agent 树：`● main` 仅多 agent 启用（存在子 agent）时显示；
  * 子 agent 运行中 `( ) 名称`、完成 `(√) 名称 耗时`、失败 `(!) 名称 耗时`（中断 `(×)`），
  * 失败行整行红字（与消息区失败活动行同色，扫一眼就能看出哪个子任务挂了）；
- * 终态（完成/失败/中断）条目 10s 后从树消失（恢复会话重建的历史条目无完成时刻，恒显示）；
+ * 终态（完成/失败/中断）条目 10s 后从树消失；恢复会话重建的历史条目无完成时刻，不显示；
  * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)`/`(!)`/`(×)` 括号中心列；
  * main 首行、子 agent 次行紧凑。
  * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。终态条目消失由本组件定时器过滤（state 保留，
@@ -129,10 +129,11 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
 }
 
 /** 终态条目是否可见：live 完成的条目 10s 后消失（completedAt 由 loop 注入时刻）；
- *  completedAt 缺失的终态条目是恢复会话重建的历史条目（无时刻可计时），恒显示 */
+ *  completedAt 缺失的终态条目是恢复会话重建的历史条目（无时刻可计时），直接不显示，
+ *  消息区的「⑂ 子 agent …」活动行不受影响 */
 function isTerminalVisible(a: AgentNode, now: number): boolean {
   if (a.status === "running") return true;
-  if (a.completedAt == null) return true;
+  if (a.completedAt == null) return false;
   return now - a.completedAt < DONE_VISIBLE_MS;
 }
 

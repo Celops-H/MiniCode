@@ -228,8 +228,8 @@ it("agentRowCount：仅 main=0；1 个子 agent 含 paddingTop=2 行（App 光�
   expect(agentRowCount([running("/root"), failed("/root/task_1", 0, 5000)], 20000)).toBe(0);
 });
 
-it("恢复会话重建的历史终态条目（无完成时刻）恒显示并入行数", async () => {
-  // 恢复会话由 initState 重建：终态条目无 completedAt（无时刻可计时），不再被 10s 过滤清空
+it("恢复会话重建的历史终态条目（无完成时刻）不显示且不计行数", async () => {
+  // 恢复会话由 initState 重建：终态条目无 completedAt（无时刻可计时），重建不带历史行
   const restored = (path: string, status: "completed" | "interrupted"): AgentNode => ({
     path,
     status,
@@ -239,7 +239,8 @@ it("恢复会话重建的历史终态条目（无完成时刻）恒显示并入�
   const setup = await render([running("/root"), restored("/root/task_1", "completed"), restored("/root/task_2", "interrupted")]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("(√) task_1");
-  expect(frame).toContain("(×) task_2");
-  expect(agentRowCount([running("/root"), restored("/root/task_1", "completed")])).toBe(3);
+  expect(frame).not.toContain("task_1");
+  expect(frame).not.toContain("task_2");
+  expect(frame).not.toContain("main");
+  expect(agentRowCount([running("/root"), restored("/root/task_1", "completed")])).toBe(0);
 });
