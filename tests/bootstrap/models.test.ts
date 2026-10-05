@@ -138,6 +138,12 @@ describe("resolveMainModel（主模型解析）", () => {
     expect(resolveMainModel(config)).toBe("a-1");
   });
 
+  it("defaultModel（/model 面板 Ctrl+S 设定）优先于链首，-m 选项仍最优先", () => {
+    const config: Config = { logLevel: "info", defaultModel: "d-1", modelChain: ["a-1", "b-1"] };
+    expect(resolveMainModel(config)).toBe("d-1");
+    expect(resolveMainModel(config, "custom-model")).toBe("custom-model");
+  });
+
   it("providers-only（无 modelChain）时主模型为首个模型，可解析（修复未知模型崩溃）", () => {
     const config: Config = {
       logLevel: "info",

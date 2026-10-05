@@ -176,13 +176,15 @@ export interface ConnectKeyModalState {
   key: string;
 }
 
-/** /model 模型选择弹窗：列出全部配置模型（↑↓ 选模型、←→ 调思考等级），Enter 应用 */
+/** /model 模型选择弹窗：列出全部配置模型（↑↓ 选模型、←→ 调思考等级、Ctrl+S 设默认），Enter 应用 */
 export interface ModelModalState {
   kind: "model";
   /** 模型列表带厂商（providerId/名称）：/model 弹窗按厂商分组展示（组头不可选中） */
   models: Array<{ id: string; providerId?: string; providerName?: string }>;
   selected: number;
   thinkingLevel: ThinkingLevel | undefined;
+  /** 当前默认模型 id（config.defaultModel）：列表行标「（默认）」；Ctrl+S 写盘成功后就地更新 */
+  defaultModelId?: string;
 }
 
 /** /mcp 与 /skill 扩展面板：行内启用/关闭 ←→ 切换（只改弹窗内候选，Esc 取消不改），
@@ -1196,6 +1198,7 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
     case "mode-cycle":
     case "thinking-adjust":
     case "session-action-toggle":
+    case "modal-set-default":
     case "extensions-toggle":
     case "copy":
     case "scroll":

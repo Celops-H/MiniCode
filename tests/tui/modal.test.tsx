@@ -343,6 +343,24 @@ it("/model 与 /connect 选中/未选中：模型名与供应商名起始列一�
   );
 });
 
+it("/model 默认模型行带「（默认）」尾标（选中与否都显示，Ctrl+S 后就地更新的呈现依据）", async () => {
+  const modal: ModalState = {
+    kind: "model",
+    models: [
+      { id: "gpt-4o", providerName: "OpenAI" },
+      { id: "gpt-5-mini", providerName: "OpenAI" },
+    ],
+    selected: 1,
+    thinkingLevel: undefined,
+    defaultModelId: "gpt-4o",
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 60, height: 14 });
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("gpt-4o（默认）");
+  expect(frame).not.toContain("gpt-5-mini（默认）");
+});
+
 it("/model 选中高亮随导航移动（createMemo 响应式，非 For 卡死）", async () => {
   const models = [
     { id: "gpt-4o", providerName: "OpenAI" },

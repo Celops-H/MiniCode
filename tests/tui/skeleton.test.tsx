@@ -257,6 +257,14 @@ it("键盘特殊解析：空格、大写还原、linefeed 软换行（opentui �
   expect(opentuiKeyToKey({ name: "c", ctrl: true, shift: true })).toEqual({ kind: "ignore" });
 });
 
+it("Ctrl+S：/model 弹窗设默认模型的键到达（kitty 协议上报），无 ctrl 时按普通字符", () => {
+  // 带 shift 的 ctrl 组合同 ctrl-p 口径：统一归 ctrl-s（opentui 对字母统一小写上报）
+  expect(opentuiKeyToKey({ name: "s", ctrl: true, shift: true })).toEqual({ kind: "ctrl-s" });
+  expect(opentuiKeyToKey({ name: "s", ctrl: true })).toEqual({ kind: "ctrl-s" });
+  expect(opentuiKeyToKey({ name: "s" })).toEqual({ kind: "char", char: "s" });
+  expect(opentuiKeyToKey({ name: "s", shift: true })).toEqual({ kind: "char", char: "S" });
+});
+
 it("Ctrl+J 换行（主流编辑习惯），映射到软换行 newline", () => {
   // kitty 键盘协议下 ctrl+j 带 ctrl 标志独立到达 → 软换行（非 Enter 发送）
   expect(opentuiKeyToKey({ name: "j", ctrl: true })).toEqual({ kind: "shift-enter" });

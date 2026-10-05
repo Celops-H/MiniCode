@@ -36,5 +36,7 @@ export type Key =
   | { kind: "ctrl-w" }
   /** Ctrl+P：取消最后一个排队项（消息/命令，恢复到输入框供编辑重发） */
   | { kind: "ctrl-p" }
+  /** Ctrl+S：/model 弹窗把选中模型设为默认模型（写全局配置，新会话起默认使用） */
+  | { kind: "ctrl-s" }
   /** 不支持的转义序列（鼠标、组合键等），消费掉但不产生键 */
   | { kind: "ignore" };

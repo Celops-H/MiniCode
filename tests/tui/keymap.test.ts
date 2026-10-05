@@ -78,13 +78,17 @@ it("session 弹窗：↑↓ 选行、←→ 切进入/删除、Enter 确定、Es
   expect(mapKey({ kind: "ctrl-d" }, m)).toEqual({ type: "exit" });
 });
 
-it("model 弹窗：↑↓ 选模型、←→ 调思考等级、Enter 应用", () => {
+it("model 弹窗：↑↓ 选模型、←→ 调思考等级、Ctrl+S 设默认、Enter 应用", () => {
   const m = { popup: "modal" as const, modalKind: "model" as const };
   expect(mapKey({ kind: "up" }, m)).toEqual({ type: "modal-nav", dir: -1 });
   expect(mapKey({ kind: "left" }, m)).toEqual({ type: "thinking-adjust", dir: -1 });
   expect(mapKey({ kind: "right" }, m)).toEqual({ type: "thinking-adjust", dir: 1 });
+  expect(mapKey({ kind: "ctrl-s" }, m)).toEqual({ type: "modal-set-default" });
   expect(mapKey({ kind: "enter" }, m)).toEqual({ type: "modal-confirm" });
   expect(mapKey({ kind: "esc" }, m)).toEqual({ type: "cancel" });
+  // Ctrl+S 只在 model 弹窗生效：其他弹窗与 normal 态不产生动作
+  expect(mapKey({ kind: "ctrl-s" }, { popup: "modal" as const })).toEqual({ type: "noop" });
+  expect(mapKey({ kind: "ctrl-s" })).toEqual({ type: "noop" });
 });
 
 it("connect-key 弹窗：字符→input、Backspace→backspace、Enter→modal-confirm、Esc→cancel、方向键→noop", () => {

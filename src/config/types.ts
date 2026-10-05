@@ -116,6 +116,9 @@ export const configSchema = z
   providers: z.array(providerConfigSchema).optional(),
   /** 优先级链：有序模型 id（ModelRouter 输入），id 须在某 provider 的 models 中 */
   modelChain: z.array(z.string()).optional(),
+  /** 默认模型 id（/model 面板 Ctrl+S 设定，全局生效）：主模型解析序为 -m 选项 >
+   *  defaultModel > modelChain[0] > 兜底；不进 ModelRouter 备选链，链成员与顺序仍手工编辑 */
+  defaultModel: z.string().optional(),
   /** Hook 配置：事件名 → 命令列表（shell 执行，stdin 收事件 JSON，stdout 回裁决）；未配置则 Hook 系统不启用 */
   hooks: z.partialRecord(z.enum(HOOK_EVENT_TYPES), z.array(z.string())).optional(),
   /** 上下文压缩配置：撞线自动压缩 + /compact 手动压缩；未配置则压缩不启用 */

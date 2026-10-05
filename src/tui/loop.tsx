@@ -14,7 +14,7 @@ import type { StreamEvent } from "../core/index.js";
 import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
-import { connectProvider, PROVIDER_PRESETS } from "./connect.js";
+import { connectProvider, PROVIDER_PRESETS, writeGlobalDefaultModel } from "./connect.js";
 import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList, type ExtensionRow } from "./extensions.js";
 import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
@@ -32,7 +32,7 @@ import { attachCursorPositioning } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { HookBus } from "../hooks/index.js";
-import { resolveTracesDir } from "../config/index.js";
+import { resolveTracesDir, resolveConfigPaths } from "../config/index.js";
 import type { UsageSummary } from "./state.js";
 import type { HookBus as HookBusType } from "../hooks/index.js";
 import type { PermissionApprover, PermissionDecision, PermissionRequest, PermissionMode } from "../permission/index.js";
@@ -555,7 +555,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       return;
     }
     if (command === "/model") {
-      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族，在途排队同 /connect）
+      // 显示当前配置的模型列表：↑↓ 选模型、←→ 调思考等级、Enter 应用（重装配族，在途排队同 /connect）；
+      // Ctrl+S 把选中模型设为默认（写全局配置 defaultModel，新会话起默认使用）
       if (inFlight()) {
         queueRunningCommand(command);
         return;
@@ -567,7 +568,13 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       // 读它会在切模型后弹窗显示错值、且 Enter 会静默重置 box）
       commit({
         ...state,
-        modal: { kind: "model", models, selected, thinkingLevel: thinkingBox.value },
+        modal: {
+          kind: "model",
+          models,
+          selected,
+          thinkingLevel: thinkingBox.value,
+          defaultModelId: options.config?.defaultModel,
+        },
         prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null },
         candidate: undefined,
       });
@@ -906,6 +913,26 @@ export async function runTui(options: TuiLoopOptions): Promise<{
           r?.clearSelection?.();
           showToast(`已复制 ${Array.from(text).length} 个字符到剪贴板`);
         }
+        return;
+      }
+      case "modal-set-default": {
+        // /model 弹窗 Ctrl+S：选中模型写为全局默认模型（只写 defaultModel，不切当前会话）。
+        // 弹窗保持打开可继续操作；写盘成功后就地更新默认标记——await 期间弹窗可能已被
+        // Esc 关闭或换成其他弹窗，只在仍是 model 弹窗时更新；失败 toast 不关弹窗
+        if (state.modal?.kind !== "model") return;
+        const picked = state.modal.models[state.modal.selected];
+        if (!picked) return;
+        void (async () => {
+          try {
+            await writeGlobalDefaultModel(resolveConfigPaths().globalConfigFile, picked.id);
+            if (state.modal?.kind === "model") {
+              commit({ ...state, modal: { ...state.modal, defaultModelId: picked.id } });
+            }
+            showToast(`已设为默认模型：${picked.id}（新会话起默认使用）`);
+          } catch (err) {
+            showToast(`设置默认模型失败：${err instanceof Error ? err.message : String(err)}`);
+          }
+        })();
         return;
       }
       case "modal-confirm": {

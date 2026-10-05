@@ -1,5 +1,5 @@
 /**
- * /connect 供应商预设与连接写配置。
+ * /connect 供应商预设与连接写配置；/model 面板的默认模型写盘（Ctrl+S）同在本模块。
  * 交互：/connect → 供应商弹窗选择 → 弹窗内输 API Key（Enter 确认）→ 写全局 config → 重建会话。
  * 写配置逻辑：
  * - 全局 ~/.minicode/config.json：追加/按 id 替换目标 provider，key 写进该 provider 的
@@ -70,9 +70,25 @@ export async function writeGlobalConfig(
     ...raw,
     providers: updated,
   };
-  const validated = configSchema.parse(merged);
-  // POSIX 权限同 seed.ts：目录 700 / 配置 600（apiKey 落盘在此，不应对其他用户可读）；
-  // mode 仅创建时生效——存量 644 配置（老版本建出）写回前显式收紧
+  await writeValidatedConfig(file, merged);
+}
+
+/**
+ * 写入全局默认模型（/model 面板 Ctrl+S）：只设 defaultModel 字段，不碰 providers 与
+ * modelChain（链成员与顺序仍手工编辑）；主模型解析序见 resolveMainModel。
+ * 全局生效：每次会话（含新会话）默认选它；当前会话模型不变。
+ * @param file 全局配置文件路径
+ * @param modelId 设为默认的模型 id
+ */
+export async function writeGlobalDefaultModel(file: string, modelId: string): Promise<void> {
+  const raw = await readGlobalConfigRaw(file);
+  await writeValidatedConfig(file, { ...raw, defaultModel: modelId });
+}
+
+/** strict 校验后写全局 config：目录 700 / 配置 600（apiKey 落盘在此，不应对其他用户可读）；
+ *  mode 仅创建时生效——存量 644 配置（老版本建出）写回前显式收紧 */
+async function writeValidatedConfig(file: string, raw: Record<string, unknown>): Promise<void> {
+  const validated = configSchema.parse(raw);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await fs.writeFile(file, JSON.stringify(validated, null, 2) + "\n", { mode: 0o600, encoding: "utf8" });
   await fs.chmod(file, 0o600);

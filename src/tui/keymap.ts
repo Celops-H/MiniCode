@@ -31,6 +31,8 @@ export type TuiAction =
   | { type: "session-action-toggle" }
   /** /model 弹窗左右调整思考等级 */
   | { type: "thinking-adjust"; dir: 1 | -1 }
+  /** /model 弹窗 Ctrl+S：把选中模型设为默认模型（写全局配置，新会话起默认使用） */
+  | { type: "modal-set-default" }
   /** /mcp 与 /skill 面板切换当前行启用/关闭（←→ 触发） */
   | { type: "extensions-toggle" }
   | { type: "permission"; decision: "allow" | "allow-all" | "deny" }
@@ -150,7 +152,7 @@ function mapNormalKey(key: Key, ctx: KeymapContext): TuiAction {
 }
 
 /** modal 态（权限确认 / 会话面板 / /connect / /model / /mcp /skill /settings）：方向键导航、Enter 确认、Esc 取消、1/2/3 权限决策；
- *  /model 弹窗里 ←→ 调思考等级（thinking-adjust），↑↓ 选模型；
+ *  /model 弹窗里 ←→ 调思考等级（thinking-adjust）、Ctrl+S 设默认模型（modal-set-default），↑↓ 选模型；
  *  /mcp /skill /settings 弹窗里 ←→ 切当前行启用/关闭（extensions-toggle）；
  *  /connect key 弹窗里字符键输 API Key、Backspace 删、Enter 确认；
  *  Ctrl+D 保留退出；Ctrl+C 不产生动作（打断语义由 Esc 承担，应用内复制在 normal 态）。 */
@@ -184,6 +186,8 @@ function mapModalKey(key: Key, modalKind?: KeymapContext["modalKind"]): TuiActio
       case "left":
       case "right":
         return { type: "thinking-adjust", dir: key.kind === "left" ? -1 : 1 };
+      case "ctrl-s":
+        return { type: "modal-set-default" };
       case "enter":
         return { type: "modal-confirm" };
       case "esc":

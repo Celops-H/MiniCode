@@ -294,7 +294,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const visible = Math.max(1, Math.min(total, avail - 8));
     const start = Math.max(0, Math.min(selPos - Math.floor((visible - 1) / 2), total - visible));
     const windowed = display.slice(start, start + visible);
-    // 配色统一：条目白、选中正绿（success + ▸），组头/提示灰
+    // 配色统一：条目白、选中正绿（success + ▸），组头/提示灰；默认模型行带「（默认）」尾标
     const items = windowed.map((d) =>
       d.kind === "group" ? (
         <text fg={theme.textMuted}>
@@ -304,11 +304,13 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
         <text fg={theme.success}>
           {"    ▸ "}
           {b.models[d.index]!.id}
+          {b.models[d.index]!.id === b.defaultModelId ? "（默认）" : ""}
         </text>
       ) : (
         <text fg={theme.text}>
           {"    "}
           {`  ${b.models[d.index]!.id}`}
+          {b.models[d.index]!.id === b.defaultModelId ? "（默认）" : ""}
         </text>
       ),
     );
@@ -322,7 +324,7 @@ function ModelModal(props: { modal: Extract<ModalState, { kind: "model" }> }): J
     const modelCount = b.models.length;
     const visibleModels = windowed.filter((d) => d.kind === "model").length;
     const overflow = modelCount > visibleModels ? `（${visibleModels}/${modelCount}）` : "";
-    return { items, scroll: { start, visible, total }, hint: `↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Esc 取消${overflow}` };
+    return { items, scroll: { start, visible, total }, hint: `↑↓ 选模型 · ←→ 思考等级 · Enter 应用 · Ctrl+S 设默认 · Esc 取消${overflow}` };
   });
   return (
     <box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>

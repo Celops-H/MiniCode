@@ -56,6 +56,12 @@ export function opentuiKeyToKey(e: OpentuiKeyLike): Key {
       // Ctrl+P 取消排队项；无 ctrl 时按普通字符处理
       if (ctrl) return { kind: "ctrl-p" };
       return shift ? { kind: "char", char: "P" } : { kind: "char", char: "p" };
+    case "s":
+      // Ctrl+S 在 /model 弹窗把选中模型设为默认模型；无 ctrl 时按普通字符处理。
+      // kitty 键盘协议下 C-S 独立上报可达；不支持该协议的终端可能把 Ctrl+S 当 XOFF
+      // 软件流控扣住输出（见 keymap 弹窗键位说明）
+      if (ctrl) return { kind: "ctrl-s" };
+      return shift ? { kind: "char", char: "S" } : { kind: "char", char: "s" };
     case "tab":
       return { kind: shift ? "shift-tab" : "tab" };
     case "escape":

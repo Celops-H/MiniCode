@@ -6,7 +6,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it, expect } from "vitest";
-import { connectProvider, writeGlobalConfig, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset, type ModelListEntry } from "../../src/tui/connect.js";
+import { connectProvider, writeGlobalConfig, writeGlobalDefaultModel, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset, type ModelListEntry } from "../../src/tui/connect.js";
 
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
@@ -30,6 +30,25 @@ it("writeGlobalConfig：写入 provider（带 apiKey 落盘），不写 modelCha
     ]);
     // 连接只把供应商加进列表，不改优先级链——当前会话与模型保持（用 /model 切模型）
     expect(parsed.modelChain).toBeUndefined();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("writeGlobalDefaultModel：写 defaultModel，保留既有 providers；重复写入按新值替换", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mc-connect-"));
+  const file = path.join(dir, "config.json");
+  try {
+    await writeGlobalConfig(file, deepseek, "sk-123");
+    await writeGlobalDefaultModel(file, "deepseek-v4-flash");
+    let parsed = JSON.parse(await readFile(file, "utf8")) as { defaultModel?: string; providers?: unknown[] };
+    expect(parsed.defaultModel).toBe("deepseek-v4-flash");
+    expect(parsed.providers).toHaveLength(1);
+    // 再设另一个模型：只替换 defaultModel，provider 列表不动
+    await writeGlobalDefaultModel(file, "qwen-max");
+    parsed = JSON.parse(await readFile(file, "utf8")) as { defaultModel?: string; providers?: unknown[] };
+    expect(parsed.defaultModel).toBe("qwen-max");
+    expect(parsed.providers).toHaveLength(1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

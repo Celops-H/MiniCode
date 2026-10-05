@@ -148,7 +148,7 @@ export function buildModelClient(
   const main = resolveMainModel(config, modelId, { env });
   if (!models.resolve(main)) {
     throw new Error(
-      `模型 ${main} 不可用：请确认其所属厂商的 API key 已配置、模型在 providers 中，或调整 -m / modelChain`,
+      `模型 ${main} 不可用：请确认其所属厂商的 API key 已配置、模型在 providers 中，或调整 -m / defaultModel / modelChain`,
     );
   }
   // modelChain 整链校验：主模型之外的条目不可解析（模型下线、所属厂商 key 已删后
@@ -165,8 +165,9 @@ export function buildModelClient(
 }
 
 /**
- * 解析会话主模型：-m 选项 > 优先级链首（modelChain[0]）> **key 就绪**的 providers
- * 首个模型；都没有则报错（无默认模型兜底，配置播种后种子 providers 必有模型）。
+ * 解析会话主模型：-m 选项 > 默认模型（defaultModel，/model 面板 Ctrl+S 写全局配置）>
+ * 优先级链首（modelChain[0]）> **key 就绪**的 providers 首个模型；都没有则报错
+ * （无默认模型兜底，配置播种后种子 providers 必有模型）。
  * 「providers 首个」与 buildModelClient 的 key 过滤一致——未配置 key 的厂商不进
  * 注册集合，取它的模型做主模型只会启动失败。
  * @param config 配置
@@ -184,7 +185,7 @@ export function resolveMainModel(
   const usable = (config?.providers ?? []).filter(
     (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
   );
-  const main = config?.modelChain?.[0] ?? usable[0]?.models[0]?.id;
+  const main = config?.defaultModel ?? config?.modelChain?.[0] ?? usable[0]?.models[0]?.id;
   if (!main) throw new Error(NO_PROVIDER_ERROR);
   return main;
 }
