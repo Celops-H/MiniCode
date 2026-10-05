@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkDangerousCommand } from "../../src/permission/index.js";
+import { checkDangerousCommand, resolveCommandShell } from "../../src/permission/index.js";
 
 describe("危险命令检测", () => {
   it("普通命令安全", () => {
@@ -57,5 +57,68 @@ describe("危险命令检测", () => {
     const result = checkDangerousCommand('eval "x"');
     expect(result.dangerous).toBe(true);
     expect(result.reason).toContain("eval");
+  });
+});
+
+describe("危险命令检测按实际 shell 判定", () => {
+  it("resolveCommandShell 按 COMSPEC 可执行名归类（测试注入，不读进程）", () => {
+    expect(resolveCommandShell({ platform: "linux" })).toBe("bash");
+    expect(resolveCommandShell({ platform: "darwin" })).toBe("bash");
+    // COMSPEC 缺省视为 cmd.exe（Node spawn(shell:true) 的缺省一致）
+    expect(resolveCommandShell({ platform: "win32", env: {} })).toBe("cmd");
+    expect(resolveCommandShell({ platform: "win32", env: { COMSPEC: "C:\\Windows\\system32\\cmd.exe" } })).toBe("cmd");
+    expect(
+      resolveCommandShell({ platform: "win32", env: { COMSPEC: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" } }),
+    ).toBe("powershell");
+    expect(
+      resolveCommandShell({
+        platform: "win32",
+        env: { COMSPEC: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+      }),
+    ).toBe("powershell");
+    // 误把 COMSPEC 指到 POSIX shell 的罕见配置按 bash 保守全拦
+    expect(resolveCommandShell({ platform: "win32", env: { COMSPEC: "C:\\Program Files\\Git\\bin\\bash.exe" } })).toBe(
+      "bash",
+    );
+  });
+
+  it("cmd 无命令替换与进程替换语法：符号是字面字符，不拦", () => {
+    expect(checkDangerousCommand("echo $(whoami)", "cmd").dangerous).toBe(false);
+    expect(checkDangerousCommand("echo `whoami`", "cmd").dangerous).toBe(false);
+    // E171 实测误报场景：node -e 写测试文件，命令含反引号模板字符串
+    expect(checkDangerousCommand('node -e "const t = `x${y}`"', "cmd").dangerous).toBe(false);
+    expect(checkDangerousCommand("diff <(ls) <(ls)", "cmd").dangerous).toBe(false);
+    expect(checkDangerousCommand("echo a=<(echo x)", "cmd").dangerous).toBe(false);
+    // IFS 与 /proc 是 POSIX 概念，cmd 下同样只是字面文本
+    expect(checkDangerousCommand("echo IFS=x", "cmd").dangerous).toBe(false);
+    expect(checkDangerousCommand("cat /proc/self/environ", "cmd").dangerous).toBe(false);
+    // 内建命令黑名单不分 shell，照常生效
+    expect(checkDangerousCommand("eval x", "cmd").dangerous).toBe(true);
+  });
+
+  it("PowerShell 下 $() 与反引号仍拦，进程替换不拦（bash 专属语法）", () => {
+    expect(checkDangerousCommand("echo $(whoami)", "powershell").dangerous).toBe(true);
+    expect(checkDangerousCommand("echo `whoami`", "powershell").dangerous).toBe(true);
+    expect(checkDangerousCommand("diff <(ls) <(ls)", "powershell").dangerous).toBe(false);
+    expect(checkDangerousCommand("cat /proc/self/environ", "powershell").dangerous).toBe(false);
+  });
+
+  it("bash 语义各模式照常拦：缺省行为不变", () => {
+    expect(checkDangerousCommand("echo $(whoami)").dangerous).toBe(true);
+    expect(checkDangerousCommand("diff <(ls)", "bash").dangerous).toBe(true);
+    expect(checkDangerousCommand("IFS=; cat /etc/passwd", "bash").dangerous).toBe(true);
+    expect(checkDangerousCommand("cat /proc/self/environ", "bash").dangerous).toBe(true);
+  });
+
+  it("PowerShell 的 iex 与 eval 同类拦截，内建名不分大小写", () => {
+    expect(checkDangerousCommand('iex "Remove-Item x"', "cmd").dangerous).toBe(true);
+    expect(checkDangerousCommand("Invoke-Expression Get-Content f", "cmd").dangerous).toBe(true);
+    expect(checkDangerousCommand("EVAL x", "cmd").dangerous).toBe(true);
+    // 内建黑名单不分 shell，cmd 下照常生效
+    expect(checkDangerousCommand("eval x", "cmd").dangerous).toBe(true);
+  });
+
+  it("COMSPEC 空串与缺失同样回退 cmd.exe（与 Node spawn 行为一致）", () => {
+    expect(resolveCommandShell({ platform: "win32", env: { COMSPEC: "" } })).toBe("cmd");
   });
 });

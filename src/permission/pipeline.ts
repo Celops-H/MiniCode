@@ -1,4 +1,4 @@
-import { checkDangerousCommand } from "./dangerous.js";
+import { checkDangerousCommand, resolveCommandShell } from "./dangerous.js";
 import { evaluateRules, ruleMatches, type PermissionBehavior, type PermissionRule } from "./rule.js";
 
 /** 权限模式：default 正常审批 / plan 只读放行 / bypassPermissions 跳过默认询问 */
@@ -40,6 +40,9 @@ export interface PermissionPipelineOptions {
   /** 作用域内免审批判定（/init 只读过程）：命中直接放行不弹审批块；宿主活读提供（/init 过程置位）。
    *  置于 Hook 之后、用户审批之前——保留 Hook 拦截语义，危险命令检查与规则层不受影响 */
   autoApprove?: (request: PermissionRequest) => boolean;
+  /** 平台与环境注入（测试用）：危险命令检查按实际 shell（COMSPEC）判定语法语义，缺省读进程 */
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -74,9 +77,11 @@ async check(request: PermissionRequest, hook?: PreToolUseHook): Promise<Permissi
       return { allowed: false, reason: `plan 模式只读：${toolName} 不可用`, source: "mode" };
     }
 
-    // bash 工具先做危险命令检查（硬拒绝，保守，bypass 模式同样生效）
+    // bash 工具先做危险命令检查（硬拒绝，保守，bypass 模式同样生效）；
+    // 按 COMSPEC 归类实际 shell，cmd 下命令替换等 bash 专属语法不误报
     if (toolName === "bash" && content !== undefined) {
-      const dangerous = checkDangerousCommand(content);
+      const shell = resolveCommandShell({ platform: this.options.platform, env: this.options.env });
+      const dangerous = checkDangerousCommand(content, shell);
       if (dangerous.dangerous) {
         return { allowed: false, reason: `危险命令：${dangerous.reason}`, source: "dangerous" };
       }

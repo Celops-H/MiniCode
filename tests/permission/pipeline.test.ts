@@ -92,6 +92,30 @@ describe("权限决策管线", () => {
     const result = await pipeline.check({ toolName: "read", content: '文件内容 eval "x"' });
     expect(result.allowed).toBe(true);
   });
+
+  it("危险命令检查按 COMSPEC 归类 shell：cmd 下命令替换不拦，PowerShell 下仍拦", async () => {
+    const cmdPipeline = new PermissionPipeline({
+      rules: [],
+      mode: "bypassPermissions",
+      platform: "win32",
+      env: { COMSPEC: "C:\\Windows\\system32\\cmd.exe" },
+    });
+    // E171 实测误报场景：node -e 写测试文件，命令含反引号模板字符串
+    expect(
+      await cmdPipeline.check({ toolName: "bash", content: 'node -e "console.log(`x`)"' }),
+    ).toMatchObject({ allowed: true, source: "mode" });
+
+    const psPipeline = new PermissionPipeline({
+      rules: [],
+      mode: "bypassPermissions",
+      platform: "win32",
+      env: { COMSPEC: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+    });
+    expect(await psPipeline.check({ toolName: "bash", content: "echo $(whoami)" })).toMatchObject({
+      allowed: false,
+      source: "dangerous",
+    });
+  });
 });
 
 describe("权限模式", () => {
@@ -180,6 +204,8 @@ describe("作用域内免审批 autoApprove（/init 只读过程）", () => {
       rules: [],
       approver: async () => ({ action: "allow" }),
       autoApprove: () => true,
+      // 用例断言 bash 语法的危险模式，注入 POSIX 平台固定 bash 语义
+      platform: "linux",
     });
     expect(await pipeline.check({ toolName: "bash", content: "echo $(id)" })).toMatchObject({ allowed: false, source: "dangerous" });
   });
