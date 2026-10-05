@@ -36,6 +36,24 @@ function spanColorOf(
   return {};
 }
 
+/** 按包含匹配找首个 span（同样式相邻内容会被渲染器合并，行尾填充带空格） */
+function spanColorContaining(
+  spans: { lines: Array<{ spans: Array<{ text: string; fg?: unknown; bg?: unknown }> }> },
+  needle: string,
+): { fg?: string; bg?: string } {
+  const hex = (color: unknown): string | undefined => {
+    const buf = (color as { buffer?: ArrayLike<number> } | undefined)?.buffer;
+    if (!buf) return undefined;
+    return `#${[0, 1, 2].map((i) => (buf[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+  };
+  for (const line of spans.lines) {
+    for (const span of line.spans) {
+      if (span.text.includes(needle)) return { fg: hex(span.fg), bg: hex(span.bg) };
+    }
+  }
+  return {};
+}
+
 it("多行输入按行渲染", async () => {
   const setup = await testRender(
     () => <PromptView prompt={prompt({ lines: ["第一行", "第二行"] })} />,
@@ -289,4 +307,23 @@ it("折行后光标块渲染位置与 promptCursorPosition 折算一致（渲染
   // 高 8 - 视觉行 2 - 上边框 1 = 5，使公式对齐孤立渲染的帧内绝对行
   expect(promptCursorPosition(p, 30, 8, 5)).toEqual({ row: block!.row, col: block!.col });
   expect(block).toEqual({ row: 3, col: 6 });
+});
+
+it("选区跨折行块：各块裁剪自身区间，光标处样式压过选区", async () => {
+  // 宽 30：36 字符折为 [0,26) + [26,36) 两条视觉行；选区 [2,30) 跨两块，光标 curCol=30 停在 "4" 上
+  const p = prompt({ lines: ["abcdefghijklmnopqrstuvwxyz0123456789"], curCol: 30, sel: { line: 0, col: 2 } });
+  const setup = await testRender(() => <PromptView prompt={p} />, { width: 30, height: 8 });
+  await setup.waitForVisualIdle();
+  const spans = setup.captureSpans();
+  const selSpan = { bg: "#1c1c22" };
+  const cursorSpan = { bg: "#ececf0" };
+  // 混合内容行普通段的 bg 是面板底色（框背景垫底），未抬高
+  const panelSpan = { bg: "#101013" };
+  // 首块：选区前的 "ab" 正常，选区段抬到行尾（同样式相邻内容被渲染器合并，按包含匹配）
+  expect(spanColorContaining(spans, "❯ ab")).toMatchObject(panelSpan);
+  expect(spanColorContaining(spans, "cdefghijklmnopqrstuvwxyz")).toMatchObject(selSpan);
+  // 续块：选区裁剪为 "0123" 抬高、光标字符 "4" 整字反色压过选区、其后正常
+  expect(spanColorContaining(spans, "0123")).toMatchObject(selSpan);
+  expect(spanColorContaining(spans, "4")).toMatchObject(cursorSpan);
+  expect(spanColorContaining(spans, "56789")).toMatchObject(panelSpan);
 });

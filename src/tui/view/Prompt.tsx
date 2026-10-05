@@ -113,7 +113,7 @@ export function promptCursorPosition(
 /** 输入行软折行：按可用列宽把逻辑行（码点数组）切成视觉行，返回各行的码点区间 [start,end)。
  *  first 首行可用列（已扣前缀）、rest 续行可用列；宽字符行尾放不下整字挪到下一行，不在行中劈开。
  *  空行返回一条空区间（占一视觉行）。 */
-export function wrapByCols(ch: string[], first: number, rest: number): Array<[number, number]> {
+function wrapByCols(ch: string[], first: number, rest: number): Array<[number, number]> {
   const rows: Array<[number, number]> = [];
   let start = 0;
   let used = 0;
