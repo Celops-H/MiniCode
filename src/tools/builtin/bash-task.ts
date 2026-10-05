@@ -24,7 +24,7 @@ const STATUS_TEXT: Record<BackgroundTaskStatus, string> = {
  * @param task 后台任务
  * @returns 状态描述文本
  */
-function taskStateText(task: BackgroundTask): string {
+export function taskStateText(task: BackgroundTask): string {
   const exitText = task.exitCode !== undefined ? `（退出码 ${task.exitCode}）` : "";
   const errorText = task.error ? ` · 启动错误：${task.error}` : "";
   return `${STATUS_TEXT[task.status]}${exitText}${errorText}`;

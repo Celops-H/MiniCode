@@ -9,6 +9,7 @@ import {
   startBackgroundTask,
 } from "../../src/tools/index.js";
 import type { BackgroundTask } from "../../src/tools/index.js";
+import { taskStateText } from "../../src/tools/builtin/bash-task.js";
 
 // 起真实 shell/node 子进程，后台任务轮询受整机负载影响大：
 // 按自身耗时设独立超时，不用全局默认 5s，避免高负载下被误报为功能回归
@@ -193,6 +194,26 @@ describe("bash_task 工具", () => {
       expect(killed).toContain(error);
     },
   );
+});
+
+describe("taskStateText（任务状态文本）", () => {
+  // 真机用例（Windows 下打坏 ComSpec 触发 spawn 失败）只在本机平台跑，
+  // 格式化逻辑与平台无关，这里逐分支断言，换平台运行也不丢覆盖
+  it("启动失败：带出错误原文，无退出码时不加退出码段", () => {
+    const task = { status: "failed", error: "spawn C:\\no-such-dir\\cmd.exe ENOENT" } as BackgroundTask;
+    expect(taskStateText(task)).toBe("失败 · 启动错误：spawn C:\\no-such-dir\\cmd.exe ENOENT");
+  });
+
+  it("非零退出码：写退出码，无启动错误时不带那一段；两段都有时按退出码、启动错误依次排列", () => {
+    expect(taskStateText({ status: "failed", exitCode: 3 } as BackgroundTask)).toBe("失败（退出码 3）");
+    expect(taskStateText({ status: "failed", exitCode: 3, error: "boom" } as BackgroundTask)).toBe(
+      "失败（退出码 3） · 启动错误：boom",
+    );
+  });
+
+  it("运行中：只有状态名", () => {
+    expect(taskStateText({ status: "running" } as BackgroundTask)).toBe("运行中");
+  });
 });
 
 /**
