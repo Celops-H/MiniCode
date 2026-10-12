@@ -36,10 +36,11 @@ const AGENT_NAME_PATTERN = /^[a-z0-9_]+$/;
 
 /**
  * 失败结果：协作工具的守卫失败（名字/路径/深度等）统一按失败回灌，
- * 父 agent 才能把命名失败、深度超限当失败处理而不是当正常结果消费
+ * 父 agent 才能把命名失败、深度超限当失败处理而不是当正常结果消费。
+ * error 即失败原因，执行器据此补发 PostToolUseFailure 供观测
  */
-function failure(text: string): { output: string; isError: true } {
-  return { output: text, isError: true };
+function failure(text: string): { output: string; isError: true; error: string } {
+  return { output: text, isError: true, error: text };
 }
 
 export interface CollabDeps {

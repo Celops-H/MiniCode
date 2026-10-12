@@ -135,10 +135,9 @@ export function createSkillTool(skills: SkillInfo[]): Tool {
       const { name } = nameSchema.parse(input);
       const skill = byName.get(name);
       if (!skill) {
-        return {
-          output: `未知技能：${name}。可用技能：${[...byName.keys()].join("、") || "（无）"}`,
-          isError: true,
-        };
+        const reason = `未知技能：${name}。可用技能：${[...byName.keys()].join("、") || "（无）"}`;
+        // error 即失败原因，执行器据此补发 PostToolUseFailure 供观测
+        return { output: reason, isError: true, error: reason };
       }
       try {
         const text = await readFile(skill.filePath, "utf8");
@@ -146,10 +145,8 @@ export function createSkillTool(skills: SkillInfo[]): Tool {
         const { body } = parseFrontmatter(text);
         return body.trim() ? body : "（技能正文为空）";
       } catch (err) {
-        return {
-          output: `读取技能失败：${skill.name}（${(err as NodeJS.ErrnoException).message}）`,
-          isError: true,
-        };
+        const reason = `读取技能失败：${skill.name}（${(err as NodeJS.ErrnoException).message}）`;
+        return { output: reason, isError: true, error: reason };
       }
     },
   };

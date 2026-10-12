@@ -1074,6 +1074,52 @@ describe("协作工具集（多 agent 环境）", () => {
 const waitTool = collabTool(team, "wait_agent");
     expect(expectFailure(await waitTool.execute({ target: "/root" }))).toContain("不能等待自己");
   });
+
+  it("协作工具失败：结果带失败原因，执行器补发 PostToolUseFailure（评测失败口径不漏计）", async () => {
+    const team = new Team();
+    const hooks = new HookBus();
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const post = vi.fn();
+    hooks.on("PostToolUse", post);
+    // 记录事件先后：失败事件在前、完成事件在后
+    const eventOrder: string[] = [];
+    hooks.on("PostToolUseFailure", () => {
+      eventOrder.push("failure");
+    });
+    hooks.on("PostToolUse", () => {
+      eventOrder.push("post");
+    });
+    const root = new Agent({
+      modelClient: toolThenTextClient("send_message", { target: "nobody", message: "hi" }),
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.registerRoot(root);
+    root.start("发");
+    for await (const _ of root.run()) {
+      // 消费
+    }
+    // 补发事件与 PostToolUse 成对：失败事件在前、完成事件在后，error 即失败原因
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PostToolUseFailure",
+        toolName: "send_message",
+        error: expect.stringContaining("不存在"),
+      }),
+    );
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "PostToolUse", toolName: "send_message", isError: true }),
+    );
+    // 失败事件先于完成事件：界面按事件序写卡片，失败卡片不丢输出
+    expect(eventOrder).toEqual(["failure", "post"]);
+    const result = root.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.isError).toBe(true);
+    expect(String(result?.content)).toContain("不存在");
+  });
 });
 
 

@@ -158,9 +158,31 @@ describe("buildSkillsPromptSection / createSkillTool", () => {
     // 成功路径返回纯文本正文（ExecuteResult string 形态）
     expect(await tool.execute({ name: "review" })).toBe("审查指令正文\n步骤 2");
 
-    const bad = await (tool.execute({ name: "nope" }) as Promise<{ output: string; isError?: boolean }>);
+    const bad = await (tool.execute({ name: "nope" }) as Promise<{
+      output: string;
+      isError?: boolean;
+      error?: string;
+    }>);
     expect(bad.isError).toBe(true);
     expect(bad.output).toContain("未知技能：nope");
     expect(bad.output).toContain("review");
+    // 失败结果带原因：执行器据此补发 PostToolUseFailure，评测失败口径不漏计
+    expect(bad.error).toBe(bad.output);
+  });
+
+  it("skill 工具读技能正文失败：结果标记失败并带原因", async () => {
+    // 技能文件被删/权限不足：读取失败按失败回灌
+    const tool = createSkillTool([
+      { name: "gone", description: "已删", source: "project", filePath: "/nonexistent/SKILL.md" },
+    ]);
+    const bad = await (tool.execute({ name: "gone" }) as Promise<{
+      output: string;
+      isError?: boolean;
+      error?: string;
+    }>);
+    expect(bad.isError).toBe(true);
+    expect(bad.output).toContain("读取技能失败：gone");
+    // 失败结果带原因：执行器据此补发 PostToolUseFailure，评测失败口径不漏计
+    expect(bad.error).toBe(bad.output);
   });
 });

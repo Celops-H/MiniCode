@@ -65,7 +65,31 @@ describe("McpManager（生命周期与工具接入）", () => {
     expect(ok).toMatchObject({ output: "echo: hi\n第二段", isError: false });
     const boom = tools.find((t) => t.name === "mcp__fs__boom")!;
     const bad = await boom.execute({});
-    expect(bad).toMatchObject({ output: "工具内部失败", isError: true });
+    // 失败结果带原因：执行器据此补发 PostToolUseFailure，评测失败口径不漏计
+    expect(bad).toMatchObject({ output: "工具内部失败", isError: true, error: "工具内部失败" });
+  });
+
+  it("失败原因超限截断：error 留前 500 字符与总长提示，output 保留原文", async () => {
+    const manager = new McpManager({ fs: fakeConfig("boom-long") });
+    managers.push(manager);
+    const tools = await manager.startAll();
+    const boom = tools.find((t) => t.name === "mcp__fs__boom")!;
+    const bad = (await boom.execute({})) as { output: string; error: string };
+    // output 未被截断（回灌模型与落盘截断由执行层处理）
+    expect(bad.output).toBe("错".repeat(800));
+    // error 是简短原因（上限 500 字符，与 src/mcp/manager.ts 的常量一致）
+    expect(bad.error).toBe(`${"错".repeat(500)}…（共 800 字符，原因已截断）`);
+  });
+
+  it("失败且无文本输出：error 回落为回灌文案，仍满足补发条件", async () => {
+    const manager = new McpManager({ fs: fakeConfig("boom-empty") });
+    managers.push(manager);
+    const tools = await manager.startAll();
+    const boom = tools.find((t) => t.name === "mcp__fs__boom")!;
+    const bad = (await boom.execute({})) as { output: string; isError: boolean; error: string };
+    expect(bad.isError).toBe(true);
+    expect(bad.output).toBe("（MCP 工具无文本输出）");
+    expect(bad.error).toBe("（MCP 工具无文本输出）");
   });
 
   it("enabled=false 的 server 跳过不启动，状态标注未启动", async () => {

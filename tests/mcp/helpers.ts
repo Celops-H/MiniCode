@@ -7,7 +7,9 @@ import path from "node:path";
  * FAKE_MODE 控制行为分支：silent（tools/call 永不回复）、crash-after-list（tools/list 后自杀）、
  * crash-on-call（收到 tools/call 立即退出不回复，用于在途请求跨进程退出的断言）、
  * flood（tools/call 先灌 2MB 无结构输出再正常回复，用于行缓冲超限后解析不失效的断言）、
- * bigtext（回复 7 万个多字节汉字，用于跨 chunk 边界解码断言）。
+ * bigtext（回复 7 万个多字节汉字，用于跨 chunk 边界解码断言）、
+ * boom-long（tools/call 按失败回复 800 字错误文本，用于失败原因截断断言）、
+ * boom-empty（tools/call 按失败回复空文本，用于失败原因回落断言）。
  * FAKE_TOOLS（JSON 数组）覆盖声明的工具清单。
  */
 export const FAKE_SERVER = `const rl = require("node:readline").createInterface({ input: process.stdin });
@@ -36,7 +38,11 @@ rl.on("line", (line) => {
       reply(msg.id, { content: [{ type: "text", text: "echo: " + text }] });
       return;
     }
-    if (msg.params?.name === "boom") reply(msg.id, { content: [{ type: "text", text: "工具内部失败" }], isError: true });
+    if (msg.params?.name === "boom") {
+      if (process.env.FAKE_MODE === "boom-long") { reply(msg.id, { content: [{ type: "text", text: "错".repeat(800) }], isError: true }); return; }
+      if (process.env.FAKE_MODE === "boom-empty") { reply(msg.id, { content: [], isError: true }); return; }
+      reply(msg.id, { content: [{ type: "text", text: "工具内部失败" }], isError: true });
+    }
     else reply(msg.id, { content: [{ type: "text", text: "echo: " + text }, { type: "text", text: "第二段" }] });
   }
 });`;

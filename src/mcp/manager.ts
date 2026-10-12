@@ -6,6 +6,9 @@ import { McpClient } from "./client.js";
 /** 接入的 MCP 工具结果字符上限 */
 const MCP_MAX_RESULT_CHARS = 30_000;
 
+/** 失败原因的截断点：原因是简短说明（轨迹、日志用），大输出截断防污染，截断时另附总长标记 */
+const MCP_ERROR_REASON_CHARS = 500;
+
 /** 单个 server 的装配状态（TUI /mcp 面板与装配错误行共用） */
 export interface McpServerStatus {
   name: string;
@@ -145,7 +148,17 @@ export class McpManager {
       async execute(input, options) {
         const args = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
         const result = await client.callTool(info.name, args, options?.signal);
-        return { output: result.output || "（MCP 工具无文本输出）", isError: result.isError };
+        const output = result.output || "（MCP 工具无文本输出）";
+        // server 自报失败时补失败原因（取结果文本，无文本用回灌文案；超限截断），
+        // 执行器据此补发 PostToolUseFailure
+        if (result.isError) {
+          const reason =
+            output.length > MCP_ERROR_REASON_CHARS
+              ? `${output.slice(0, MCP_ERROR_REASON_CHARS)}…（共 ${output.length} 字符，原因已截断）`
+              : output;
+          return { output, isError: true, error: reason };
+        }
+        return { output, isError: false };
       },
     }));
   }

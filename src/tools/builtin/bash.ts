@@ -95,8 +95,8 @@ export const bashTool: Tool = {
 /**
  * 前台执行命令：spawn 起 shell，累积 stdout/stderr，维护 cwd 与工具上下文一致。
  * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
- * 兼容旧 exec 语义：非零退出、超时、中断都标记 isError（命令失败另带失败原因，
- * 由执行器转发 PostToolUseFailure）。
+ * 兼容旧 exec 语义：非零退出、超时、中断都标记 isError（命令失败与启动失败另带
+ * 失败原因，由执行器转发 PostToolUseFailure）。
  * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
  * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
  * @param command shell 命令
@@ -208,12 +208,14 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       stream.on("error", () => {});
     }
 
-    // spawn 本身失败（shell 不可用等罕见路径）也尽快收尾
+    // spawn 本身失败（shell 不可用等罕见路径）也尽快收尾：与命令失败同口径，
+    // 置 isError 并带原因，执行器据此补发 PostToolUseFailure
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve(`命令启动失败：${err.message}`);
+      const reason = `命令启动失败：${err.message}`;
+      resolve({ output: reason, isError: true, error: reason });
     });
 
     child.on("exit", (code) => {
