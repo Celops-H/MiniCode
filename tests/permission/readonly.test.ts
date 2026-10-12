@@ -381,6 +381,19 @@ describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });
+
+  it("包装剥开后的独立符号词照常剥离；command 的 -v/-V 查询放行", () => {
+    // call 剥开后段首露出独立符号词（cmd 的 call 会重新解析后续命令行）
+    for (const command of ["call ( del x", "call @ del x"]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
+    }
+    // command -v/-V 只查询命令路径，不执行后续命令词；sudo 包装叠加同样放行
+    for (const command of ["command -v rm", "command -V rm", "sudo command -v rm", "command -v git"]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
+    }
+    // command 不带 -v/-V 时后续命令词照常判定
+    expect(readOnlyWriteShell("command rm x", "cmd")).toBeDefined();
+  });
 });
 
 describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {

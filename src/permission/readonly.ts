@@ -164,11 +164,15 @@ function normalizeCommandWord(word: string): string {
  */
 function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
   let rest = [...words];
-  // 先剥独立的纯分组符号词（( rm x)、{ rm x、@ del x），首词判定看其后真实命令词
-  while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
   // 外层循环：连乘的包装（sudo env FOO=1 cmd）逐层剥开
   while (rest.length > 0) {
+    // 段首的独立分组符号词逐层剥干净（( rm x)、{ rm x、@ del x——含剥包装后露出的
+    // call ( del x），首词判定看其后真实命令词
+    while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
+    if (rest.length === 0) break;
     const head = normalizeCommandWord(rest[0]!);
+    // command 的 -v/-V 只查询命令路径（-v 查路径、-V 查并输出描述），不执行后续词
+    if (head === "command" && /^-[vV]$/.test(rest[1] ?? "")) return undefined;
     const isWrapper =
       /^[A-Za-z_][A-Za-z0-9_]*=/.test(head) ||
       head === "sudo" || head === "env" || head === "nohup" || head === "nice" ||
