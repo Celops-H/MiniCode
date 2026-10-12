@@ -2,6 +2,8 @@ import {
   assembleAssistantMessage,
   COMMAND_MARKER,
   createContext,
+  errorMessage,
+  modelErrorText,
   type ThinkingLevel,
   toolCallsOf,
   toolResultMessage,
@@ -493,6 +495,14 @@ export class Agent {
     return lastAssistantText(this.messages);
   }
 
+  /** 末尾错误记录的文本（最后一条消息是错误记录时返回，否则 undefined）：
+   *  末轮流内错误未产出结论时，conclusionText 会向前取到更早轮的旧文本——
+   *  终态判定按本方法兜住，不把旧文本当结论回灌父 */
+  trailingErrorText(): string | undefined {
+    const last = this.messages.at(-1);
+    return last?.role === "error" ? last.content : undefined;
+  }
+
   /**
    * 执行单个 turn（多 Agent 协作的 turn 级调度单元）。
    * 每 turn：撞线压缩 → 组装上下文 → 流式调用模型 → 回灌回复 →
@@ -522,6 +532,8 @@ export class Agent {
     // 超窗应急剥组重发：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
     // 不做摘要；剥组与重试有上限，超限直接报错并恢复剥前消息（剥组是重试手段，失败不留副作用）
     const messagesBeforeRetry = this.messages;
+    // 正常收尾（流结束未抛错）时携带的流内错误文本：无产出的出错轮据此落错误记录
+    let streamError: string | undefined;
     let retryAttempts = 0;
     for (;;) {
       // 一次 API 尝试的测量窗口（LlmCallEnd）：超窗剥组重试与模型链切换
@@ -593,6 +605,7 @@ export class Agent {
             stopReason: attemptStopReason,
             error: attemptError,
           });
+          streamError = attemptError;
         }
         break;
       } catch (err) {
@@ -608,23 +621,29 @@ export class Agent {
         }
         if (!isContextTooLongError(err) || retryAttempts >= MAX_CONTEXT_RETRY) {
           this.messages = messagesBeforeRetry;
+          const error = err instanceof Error ? err.message : String(err);
           await this.emitLlmCallEnd({
             model: effectiveModel,
             durationMs: Date.now() - attemptStart,
             firstEventMs: attemptFirstEventMs,
-            error: err instanceof Error ? err.message : String(err),
+            error,
           });
+          // 出错轮留痕：错误记录落盘（重启后恢复展示），随后照常上抛由宿主渲染错误块
+          await this.appendMessage(errorMessage(modelErrorText(error), effectiveModel));
           throw err;
         }
         const peeled = peelToolGroups(this.messages, parseContextTooLongGap(err));
         if (!peeled) {
           this.messages = messagesBeforeRetry;
+          const error = err instanceof Error ? err.message : String(err);
           await this.emitLlmCallEnd({
             model: effectiveModel,
             durationMs: Date.now() - attemptStart,
             firstEventMs: attemptFirstEventMs,
             error: "上下文超限且无工具回合可剥，无法重试",
           });
+          // 无工具回合可剥的出错轮同样留痕，文本与宿主渲染的错误块口径一致
+          await this.appendMessage(errorMessage(modelErrorText(error), effectiveModel));
           throw err;
         }
         await this.emitLlmCallEnd({
@@ -664,7 +683,14 @@ export class Agent {
       await this.flushOwnSession();
       return;
     }
-    await this.appendMessage(assistant);
+    // 流内错误且无任何产出：落错误记录代替空 assistant——空 content 的 assistant
+    // 不带信息（请求组装时本就被剥除），落盘只会让恢复会话留下一笔无展示的痕迹；
+    // 错误记录按宿主渲染口径落盘，重启后错误行照常恢复
+    if (assistant.content.length === 0 && streamError !== undefined) {
+      await this.appendMessage(errorMessage(modelErrorText(streamError), effectiveModel));
+    } else {
+      await this.appendMessage(assistant);
+    }
 
     const calls = toolCallsOf(assistant);
     if (calls.length === 0) {
@@ -970,6 +996,8 @@ export class Agent {
    * 命令痕迹（source:"command"）不回灌：痕迹只落持久化供界面重演，发给模型会被
    * 当成新的用户请求（实测 /compact 痕迹让模型再跑一遍压缩、跑偏内容混入历史）；
    * 「命令发生过」由摘要元信息（压缩全量读历史，命令痕迹在列）自然带出。
+   * 错误记录（role:"error"）同口径剥除：它是界面留痕不是对话消息，
+   * 发给模型会污染上下文（模型无对应产出）。
    * @returns 请求用消息数组（未改写时为内部数组的原引用）
    */
   private requestMessages(): Message[] {
@@ -978,7 +1006,7 @@ export class Agent {
           m.role === "assistant" ? { ...m, content: m.content.filter((b) => b.type !== "thinking") } : m,
         )
       : this.messages;
-    return base.filter((m) => !(m.role === "user" && m.source === "command"));
+    return base.filter((m) => !(m.role === "user" && m.source === "command") && m.role !== "error");
   }
 
   /**

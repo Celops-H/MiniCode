@@ -1438,6 +1438,115 @@ describe("结论文本与消息署名", () => {
 });
 
 
+describe("出错轮错误记录（重启后恢复展示用留痕）", () => {
+  it("模型调用抛错：落错误记录（带产出模型与引导文本），随后照常抛错", async () => {
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          throw new Error("Incorrect API key provided");
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("1");
+    await expect(
+      (async () => {
+        for await (const _ of agent.run()) {
+          // 消费
+        }
+      })(),
+    ).rejects.toThrow("Incorrect API key");
+
+    const messages = agent.getMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ role: "user", content: "1" });
+    expect(messages[1]).toMatchObject({
+      role: "error",
+      model: "mock",
+      content: "Incorrect API key provided\n可用 /model 换模型，或 /connect 连接厂商配置 API Key",
+    });
+  });
+
+  it("流内 error 且无产出：落错误记录代替空 content 的 assistant", async () => {
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("1");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    const messages = agent.getMessages();
+    expect(messages.map((m) => m.role)).toEqual(["user", "error"]);
+    expect(messages[1]).toMatchObject({ content: "流意外结束（未收到 finish_reason）", model: "mock" });
+  });
+
+  it("超窗错误且无工具回合可剥：落错误记录后上抛（文本与宿主错误块一致）", async () => {
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          throw Object.assign(new Error("prompt is too long: 137500 tokens > 135000 maximum"), { status: 400 });
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("1");
+    await expect(
+      (async () => {
+        for await (const _ of agent.run()) {
+          // 消费
+        }
+      })(),
+    ).rejects.toThrow("prompt is too long");
+    expect(agent.getMessages().at(-1)).toMatchObject({
+      role: "error",
+      model: "mock",
+      content: "prompt is too long: 137500 tokens > 135000 maximum",
+    });
+  });
+
+  it("错误记录不回灌模型：下一轮请求的上下文不含 error 消息", async () => {
+    let first = true;
+    let seenRoles: string[] = [];
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          if (first) {
+            first = false;
+            throw new Error("连接中断");
+          }
+          seenRoles = context.messages.map((m) => m.role);
+          yield { type: "text_delta", text: "恢复了" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("1");
+    await expect(
+      (async () => {
+        for await (const _ of agent.run()) {
+          // 消费
+        }
+      })(),
+    ).rejects.toThrow("连接中断");
+    agent.start("2");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    // 两轮用户输入照常进请求，错误记录被剥除（界面留痕不是对话消息）
+    expect(seenRoles).toEqual(["user", "user"]);
+  });
+});
+
 describe("只读工具执行超时定时器清理", () => {
   it("cancel 后定时器不再触发（race settle 后不残留 ref'd 定时器拖住退出）", async () => {
     vi.useFakeTimers();

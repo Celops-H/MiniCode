@@ -31,7 +31,8 @@ export interface TraceHeader {
 export interface TraceMessageLine {
   kind: "message";
   agentPath: string;
-  role: "user" | "assistant" | "tool_result";
+  /** 与统一消息模型的四类角色一致（error 为出错轮的界面留痕记录） */
+  role: "user" | "assistant" | "tool_result" | "error";
   id: string;
   timestamp?: string;
   [key: string]: unknown;

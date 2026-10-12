@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assistantMessage,
   createContext,
+  errorMessage,
   toolResultMessage,
   userMessage,
 } from "../../src/core/index.js";
@@ -91,6 +92,25 @@ describe("buildRequest：消息与工具转换", () => {
       role: "assistant",
       content: [{ type: "thinking", thinking: "标签转思考" }],
     });
+  });
+
+  it("错误记录（role:error）不进请求体：界面留痕不是对话消息", () => {
+    const context = createContext("s", [
+      userMessage("hi"),
+      errorMessage("401 令牌已过期", "m1"),
+      userMessage("再来"),
+    ]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    // 相邻 user 合并（角色交替约束），错误记录本身不带出
+    expect(req.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hi" },
+          { type: "text", text: "再来" },
+        ],
+      },
+    ]);
   });
 
   it("工具 schema 转换为 input_schema 格式", () => {

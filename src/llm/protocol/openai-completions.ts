@@ -82,11 +82,16 @@ export class OpenAICompletionsProtocol implements Protocol {
    * @returns OpenAI chat.completions 请求体（不含 model / stream）
    */
   buildRequest(context: Context, model?: ModelInfo): unknown {
-    // 跳过既无 content 也无 tool_calls 的 assistant：完整轮无任何产出时 runTurn 会落 content:[] 的
-    // 空 assistant，续跑把它带给厂商会 400——无信息的消息直接不发更安全
+    // 剥除无信息消息：错误记录（role:"error"）是界面留痕不是对话消息（摘要/记忆等
+    // 直传原始消息的组装路径也要剥，与 agent 请求组装的剥除口径一致）；既无 content
+    // 也无 tool_calls 的 assistant（完整轮无任何产出时 runTurn 会落 content:[] 的空
+    // assistant）带给厂商会 400——无信息的消息直接不发更安全
     const converted = context.messages
       .map((message) => toOpenAIMessage(message, this.reasoningContent))
-      .filter((m) => !(m.role === "assistant" && m.content == null && m.tool_calls == null));
+      .filter(
+        (m): m is Record<string, unknown> =>
+          m !== null && !(m.role === "assistant" && m.content == null && m.tool_calls == null),
+      );
     const reasoning = model?.reasoning === true;
     return {
       // 系统提示词作为首条 system 消息进请求体（空则不占位，厂商拒空 system）
@@ -390,15 +395,18 @@ function droppedChunkSample(chunk: unknown): string {
  * 统一消息 → OpenAI 消息；assistant 的文本与工具调用拆成两个字段。
  * @param message 统一格式消息
  * @param reasoningContent DeepSeek 等推理厂商：thinking 回传为 reasoning_content 字段
- * @returns OpenAI 消息对象
+ * @returns OpenAI 消息对象；错误记录无对应消息形态返回 null（调用方剥除）
  */
-function toOpenAIMessage(message: Message, reasoningContent: boolean): Record<string, unknown> {
+function toOpenAIMessage(message: Message, reasoningContent: boolean): Record<string, unknown> | null {
   switch (message.role) {
     case "user":
       return { role: "user", content: message.content };
     case "tool_result":
       // 工具结果用 tool 角色，通过 tool_call_id 关联原调用
       return { role: "tool", tool_call_id: message.toolCallId, content: message.content };
+    case "error":
+      // 界面留痕不是对话消息：模型对这条没有对应产出，不带进请求
+      return null;
     case "assistant": {
       const textBlocks = message.content
         .filter((b): b is TextContent => b.type === "text")

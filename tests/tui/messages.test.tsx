@@ -311,6 +311,16 @@ it("错误块标红警示", async () => {
   expect(setup.captureCharFrame()).toContain("⚠");
 });
 
+it("错误块署名取块自带模型：与会话当前模型不同时显示块模型（切模型后旧错误行不翻转）", async () => {
+  const setup = await app([
+    { kind: "message", id: "e1", role: "assistant", model: "model-a", text: "模型响应超时", isError: true, thinkingCollapsed: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("model-a");
+  expect(frame).not.toContain("test-model");
+});
+
 it("每块首行圆点标记 + 内容缩进到第 3 列（后续行只空不标）", async () => {
   const setup = await app([
     { kind: "message", id: "u1", role: "user", text: "第一行\n第二行也缩进", time: "14:00:01", thinkingCollapsed: true },

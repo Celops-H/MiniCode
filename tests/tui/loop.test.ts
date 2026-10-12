@@ -6,7 +6,7 @@
  * 本文件覆盖可纯函数断言的部分：key 缓冲增删、与普通输入态的隔离。
  */
 import { it, expect, describe } from "vitest";
-import { assistantMessage, COMMAND_MARKER, userMessage } from "../../src/core/index.js";
+import { assistantMessage, COMMAND_MARKER, errorMessage, userMessage } from "../../src/core/index.js";
 import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, setCompacting, hasRunningAgent, type BlockView, type TuiState } from "../../src/tui/state.js";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
@@ -89,6 +89,22 @@ describe("/model 边界：模型调用 error 事件渲染进消息区且回到�
     const s = reduceEvent(initState([]), { type: "error", message: "存储写入失败" });
     const block = s.blocks.at(-1) as { text: string } | undefined;
     expect(block?.text).toBe("存储写入失败");
+  });
+  it("错误块署名快照本轮产出模型：块自带 model，不随当前模型名翻转", () => {
+    let s = initState([], "", "model-a");
+    s = reduceHook(s, { type: "UserPromptSubmit", input: "你好" });
+    s = reduceEvent(s, { type: "error", message: "模型响应超时" });
+    expect(s.blocks.at(-1)).toMatchObject({ kind: "message", isError: true, model: "model-a" });
+  });
+  it("恢复会话重演错误记录：错误块带署名与文本（与 live 错误块同形）", () => {
+    const s = initState([userMessage("你好"), errorMessage("401 令牌已过期或验证不正确", "model-a")]);
+    expect(s.blocks.at(-1)).toMatchObject({
+      kind: "message",
+      role: "assistant",
+      model: "model-a",
+      text: "401 令牌已过期或验证不正确",
+      isError: true,
+    });
   });
   it("model_fallback 事件：追加常驻通知行到消息区（路由切换可见，非一闪而过 toast）", () => {
     const s = reduceEvent(initState([]), { type: "model_fallback", from: "gpt-4o", to: "deepseek-v4-flash", reason: "error" });

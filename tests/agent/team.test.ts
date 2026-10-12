@@ -274,6 +274,69 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(String(mail?.content)).toContain("(子代理未产出结论)");
   });
 
+  it("子 agent 末轮流内错误未产出结论：按失败终态回灌，不拿更早轮旧文本当结论", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      maxResultSizeChars: 100,
+      execute: () => "内容",
+    };
+    const child = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            // 首轮：有正文 + 工具调用（更早轮的开场白）
+            yield { type: "text_delta", text: "第一轮开场白" };
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            // 末轮流内错误：无产出、流结束（不抛），落错误记录留痕
+            yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 失败终态：末轮错误记录按失败回灌（结束标记与事件同口径），
+    // 不把首轮开场白当结论（lastAssistantText 的旧文本失败模式）
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBe(true);
+    expect(completed[0]!.conclusion).toContain("流意外结束");
+    const mail = root.getMessages().find(
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务结论】"),
+    );
+    expect(String(mail?.content)).toContain("执行失败");
+    expect(String(mail?.content)).toContain("任务未完成");
+    expect(String(mail?.content)).not.toContain("第一轮开场白");
+  });
+
   it("结论含通用工具调用写法不误伤：正文讨论 <tool_call> 不判不可信", async () => {
     const hooks = new HookBus();
     const completed: Array<{ failed?: boolean }> = [];

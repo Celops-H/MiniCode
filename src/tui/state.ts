@@ -554,6 +554,18 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
         card.error = message.isError ? message.content : undefined;
         card.output = message.isError ? undefined : message.content;
       }
+    } else if (message.role === "error") {
+      // 出错轮留痕重演为错误消息块（⚠ 红字，与 live 错误块同形）：署名取出错轮的产出模型
+      blocks.push({
+        kind: "message",
+        id: message.id,
+        role: "assistant",
+        model: message.model,
+        text: message.content,
+        isError: true,
+        thinkingCollapsed: true,
+        time: msgTime(message),
+      });
     }
   }
   return {
@@ -741,7 +753,8 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
       if (!state.streaming || (!state.streaming.text && !state.streaming.thinking)) {
         // 无前缀内容的独立错误：展示错误消息块并回到空闲（无内容时 error 作轮边界收口；
         // 路由切换续流的场景下本分支先收掉主模型错误块，备选增量到达时重建流式区）；
-        // 与 interact catch 同一套 modelErrorText，模型类错误带换模型/配 key 引导
+        // 与 interact catch 同一套 modelErrorText，模型类错误带换模型/配 key 引导。
+        // 署名快照本轮产出模型（同 done 落块口径）：切换模型后旧错误行署名不翻转
         return {
           ...state,
           activeModel: undefined,
@@ -753,6 +766,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
               kind: "message",
               id: `err_${state.blocks.length}`,
               role: "assistant",
+              model: state.activeModel,
               text: modelErrorText(event.message),
               isError: true,
               time: formatTime(),

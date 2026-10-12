@@ -1,6 +1,6 @@
 /**
  * 统一消息模型：全项目通用数据格式，所有厂商差异在此屏蔽。
- * 三种消息 + 内容块（Text / Thinking / ToolCall）。
+ * 四种消息（用户 / 模型回复 / 工具结果 / 错误记录）+ 内容块（Text / Thinking / ToolCall）。
  */
 
 import { randomUUID } from "node:crypto";
@@ -106,7 +106,24 @@ export interface ToolResultMessage {
   timestamp: string;
 }
 
-export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+/**
+ * 错误记录：出错轮的界面留痕（模型调用失败：认证错误/超时/网络等），落盘供
+ * 重启后恢复展示。不是对话消息：不参与模型请求（与命令痕迹同口径在请求组装
+ * 时剥除），不构成对话轮次。
+ */
+export interface ErrorMessage {
+  role: "error";
+  /** 稳定 id：会话重放、排查定位时精确指认消息 */
+  id: string;
+  /** 展示文本（modelErrorText 口径：模型类错误含换模型/配 key 引导） */
+  content: string;
+  /** 出错轮的产出模型（署名；缺省回落会话当前模型） */
+  model?: string;
+  /** 消息创建时间（ISO）：会话恢复时展示用 */
+  timestamp: string;
+}
+
+export type Message = UserMessage | AssistantMessage | ToolResultMessage | ErrorMessage;
 
 /**
  * 构造用户消息。
@@ -170,6 +187,23 @@ export function toolResultMessage(
   id: string = randomUUID(),
 ): ToolResultMessage {
   return { role: "tool_result", id, toolCallId, toolName, isError, content, timestamp };
+}
+
+/**
+ * 构造错误记录。
+ * @param content 展示文本（已过 modelErrorText 口径）
+ * @param model 出错轮的产出模型，缺省无署名（回落会话当前模型）
+ * @param id 稳定 id，缺省随机生成
+ * @param timestamp 消息创建时间，缺省当前时间
+ * @returns 错误记录消息
+ */
+export function errorMessage(
+  content: string,
+  model?: string,
+  id: string = randomUUID(),
+  timestamp = new Date().toISOString(),
+): ErrorMessage {
+  return { role: "error", id, content, ...(model ? { model } : {}), timestamp };
 }
 
 /**

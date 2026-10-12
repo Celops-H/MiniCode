@@ -749,10 +749,12 @@ describe("交互循环", () => {
       interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} }),
     ).rejects.toThrow("连接中断");
 
-    // 用户消息已落盘：reconfigure/重开后的 UI 与模型上下文一致（agent 内存里有这条）
+    // 用户消息已落盘：reconfigure/重开后的 UI 与模型上下文一致（agent 内存里有这条）；
+    // 出错轮同时落错误记录（重启后红字错误行可恢复，署名带产出模型）
     const loaded = await store.loadSession(session.meta.id);
-    expect(loaded.getMessages()).toHaveLength(1);
+    expect(loaded.getMessages()).toHaveLength(2);
     expect(loaded.getMessages()[0]).toMatchObject({ role: "user", content: "这轮会出错的消息" });
+    expect(loaded.getMessages()[1]).toMatchObject({ role: "error", content: "连接中断", model: "mock" });
   });
 
   it("api error 多轮中途抛错：checkpoint 已落盘部分不重复，出错轮只补增量", async () => {
@@ -805,10 +807,11 @@ describe("交互循环", () => {
       interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} }),
     ).rejects.toThrow("连接中断");
 
-    // 盘上序列无重复：user + assistant(工具调用) + tool_result 各一条——
-    // checkpoint 已落盘的 user/assistant 不被 finally 重复追加，出错轮只补 tool_result
+    // 盘上序列无重复：user + assistant(工具调用) + tool_result 各一条，出错轮补错误记录——
+    // checkpoint 已落盘的 user/assistant 不被 finally 重复追加
     const loaded = await store.loadSession(session.meta.id);
-    expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "assistant", "tool_result"]);
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "assistant", "tool_result", "error"]);
+    expect(loaded.getMessages().at(-1)).toMatchObject({ role: "error", content: "连接中断" });
   });
 
   it("会话收尾注入收件箱滞留消息：Esc 打断的中断标记随会话结束落盘（恢复会话有迹可循）", async () => {

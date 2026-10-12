@@ -326,11 +326,16 @@ export class Team {
     if (!parentPath) return; // root 无父，无需回灌
     if (agent.isActive()) return; // 期间又被驱动（新任务），让新循环结束时再回灌
     const name = agentNameOf(path);
+    // 失败口径归一：驱动失败（模型链耗尽等）优先；其次末轮为错误记录留痕
+    // （流内错误未产出结论）——两者同走失败终态，不拿更早轮的旧文本当结论回灌
+    const failureText = failure !== undefined
+      ? failure instanceof Error ? failure.message : String(failure)
+      : agent.trailingErrorText();
     // 子 agent 会话收尾：按终态写结束标记（结论不可信按失败记，与回灌口径一致）。
     // 收尾失败不阻断结论回灌（落盘故障只丢标记不丢消息，消息已随轮 flush）
     const endReason = agent.isInterrupted()
       ? "interrupted"
-      : failure !== undefined || looksLikeRawToolCallMarkup(agent.conclusionText())
+      : failureText !== undefined || looksLikeRawToolCallMarkup(agent.conclusionText())
         ? "failed"
         : "completed";
     try {
@@ -357,21 +362,20 @@ export class Team {
       });
       return;
     }
-    if (failure !== undefined) {
-      // 失败终态：模型链耗尽等驱动失败——不合并 worktree（产出不完整），
-      // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本当结论
-      const message = failure instanceof Error ? failure.message : String(failure);
+    if (failureText !== undefined) {
+      // 失败终态：驱动失败或末轮出错未产出结论——不合并 worktree（产出不完整），
+      // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本/旧文本当结论
       await this.safeEmit({
         type: "AgentCompleted",
         path: path.toString(),
         parentPath: parentPath.toString(),
-        conclusion: `子代理 ${name} 失败：${message}`,
+        conclusion: `子代理 ${name} 失败：${failureText}`,
         failed: true,
       });
       await this.sendMessage(parentPath, {
         type: "FINAL_ANSWER",
         from: path,
-        content: `子代理 ${name} 执行失败（${message}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
+        content: `子代理 ${name} 执行失败（${failureText}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
         triggerTurn: true,
       });
       return;

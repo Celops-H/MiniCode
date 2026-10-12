@@ -3,6 +3,7 @@ import {
   assembleAssistantMessage,
   assistantMessage,
   createContext,
+  errorMessage,
   toolResultMessage,
   userMessage,
 } from "../../src/core/index.js";
@@ -185,6 +186,20 @@ describe("buildRequest：消息与工具转换", () => {
     const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
     // 完整轮无任何产出落下的空 assistant 没有信息，直接不发
     expect(req.messages).toEqual([{ role: "system", content: "s" }]);
+  });
+
+  it("错误记录（role:error）不进请求体：界面留痕不是对话消息", () => {
+    const context = createContext("s", [
+      userMessage("hi"),
+      errorMessage("401 令牌已过期", "m1"),
+      userMessage("再来"),
+    ]);
+    const req = protocol.buildRequest(context) as { messages: Array<Record<string, unknown>> };
+    expect(req.messages).toEqual([
+      { role: "system", content: "s" },
+      { role: "user", content: "hi" },
+      { role: "user", content: "再来" },
+    ]);
   });
 
 

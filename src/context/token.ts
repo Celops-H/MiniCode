@@ -49,6 +49,9 @@ function messageTokens(message: Message): number {
       return textTokens(message.content);
     case "tool_result":
       return textTokens(message.content);
+    case "error":
+      // 界面留痕体积并入估算（保守略高估，与命令痕迹同口径）
+      return textTokens(message.content);
     case "assistant": {
       let n = 0;
       for (const block of message.content) {

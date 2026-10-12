@@ -3,6 +3,7 @@ export {
   userMessage,
   assistantMessage,
   toolResultMessage,
+  errorMessage,
   toolCallsOf,
 } from "./message.js";
 export { createContext } from "./context.js";
@@ -21,5 +22,6 @@ export type {
   AssistantMeta,
   ModelUsage,
   ToolResultMessage,
+  ErrorMessage,
   Message,
 } from "./message.js";

@@ -252,6 +252,7 @@ export class AnthropicMessagesProtocol implements Protocol {
  * 思考块按目标模型转换（见 toAnthropicBlock）。
  * 完整轮无产出落下的空 assistant（content 为空数组）直接跳过：与 openai 侧
  * buildRequest 的过滤对称，跨协议切模型续跑不再把它发给严格校验端点吃 400。
+ * 错误记录（role:"error"）是界面留痕不是对话消息，同样跳过。
  * 跳过（以及错误轮紧跟工具轮等形态）会让历史出现相邻同角色的 user 消息，而严格
  * 校验端点要求角色交替——相邻 user 合并为一条（内容块数组并列，顺序不变），
  * 请求体不再产生相邻同角色消息。
@@ -309,6 +310,9 @@ function toAnthropicMessages(messages: Message[], targetModelId?: string): unkno
           content: message.content,
           is_error: message.isError,
         });
+        break;
+      case "error":
+        // 界面留痕不是对话消息：不带进请求（见函数头注释）
         break;
     }
   }

@@ -1378,8 +1378,10 @@ export async function runTui(options: TuiLoopOptions): Promise<{
               kind: "message",
               id: `err_${state.blocks.length}`,
               role: "assistant",
-              // 错误块标题行已带 ⚠（Messages 组件 isError 标题），text 不再加前缀防双 ⚠；
-              // modelErrorText 对模型类错误附「换模型/配 key」引导
+              // 署名快照本轮产出模型（回落当前模型名的旧行为在切模型后会把旧错误行
+              // 署名翻转成新模型）；错误块标题行已带 ⚠（Messages 组件 isError 标题），
+              // text 不再加前缀防双 ⚠；modelErrorText 对模型类错误附「换模型/配 key」引导
+              model: state.activeModel,
               text: modelErrorText(error),
               isError: true,
               time: formatTime(),
