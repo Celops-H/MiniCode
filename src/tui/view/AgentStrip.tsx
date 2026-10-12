@@ -130,7 +130,7 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
 
 /** 终态条目是否可见：live 完成的条目 10s 后消失（completedAt 由 loop 注入时刻）；
  *  completedAt 缺失的终态条目是恢复会话重建的历史条目（无时刻可计时），直接不显示，
- *  消息区的「⑂ 子 agent …」活动行不受影响 */
+ *  消息区的「⑂ 子 agent …」活动块不受影响 */
 function isTerminalVisible(a: AgentNode, now: number): boolean {
   if (a.status === "running") return true;
   if (a.completedAt == null) return false;

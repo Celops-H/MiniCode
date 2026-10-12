@@ -118,7 +118,7 @@ it("子 agent 活动行带路径与状态；结论默认折叠、点击展开", 
   const setup = await testRender(
     () => (
       <Messages
-        blocks={[{ kind: "agent", event: "completed", path: "/root/task_1", conclusion: "已合并分区逻辑", collapsed: true }]}
+        blocks={[{ kind: "agent", event: "completed", path: "/root/task_1", tools: [], conclusion: "已合并分区逻辑", collapsed: true }]}
         modelLabel="m"
         onFoldAt={(i) => calls.push(i)}
       />
@@ -138,7 +138,7 @@ it("子 agent 活动行带路径与状态；结论默认折叠、点击展开", 
 
 it("子 agent 结论展开后显示结论与合并（默认折叠，点击展开）", async () => {
   const setup = await app([
-    { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "已合并分区逻辑", mergeResult: "2 处改动", collapsed: false },
+    { kind: "agent", event: "completed", path: "/root/task_1", tools: [], conclusion: "已合并分区逻辑", mergeResult: "2 处改动", collapsed: false },
   ]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
@@ -149,7 +149,7 @@ it("子 agent 结论展开后显示结论与合并（默认折叠，点击展开
 
 it("子 agent 失败活动行：红字「失败」与完成区分，失败文本可展开", async () => {
   const collapsed = await app([
-    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
+    { kind: "agent", event: "failed", path: "/root/task_1", tools: [], conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
   ]);
   await collapsed.waitForVisualIdle();
   const frame = collapsed.captureCharFrame();
@@ -164,7 +164,7 @@ it("子 agent 失败活动行：红字「失败」与完成区分，失败文本
   expect(spanFgOf(collapsed.captureSpans(), "●")).toBe("#e06c75");
   // 展开显示失败文本（结论）
   const expanded = await app([
-    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: false },
+    { kind: "agent", event: "failed", path: "/root/task_1", tools: [], conclusion: "子代理 task_1 失败：连接超时", collapsed: false },
   ]);
   await expanded.waitForVisualIdle();
   expect(expanded.captureCharFrame()).toContain("结论：子代理 task_1 失败：连接超时");
@@ -173,7 +173,7 @@ it("子 agent 失败活动行：红字「失败」与完成区分，失败文本
 it("子 agent 空结论活动行：警示措辞「未产出结论」，不与真完成同形", async () => {
   // 模型未产出正文（conclusion 为空串）：旧行为显示「完成 · 输出 1 行」（占位文案计一行）
   const setup = await app([
-    { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "", collapsed: true },
+    { kind: "agent", event: "completed", path: "/root/task_1", tools: [], conclusion: "", collapsed: true },
   ]);
   await setup.waitForVisualIdle();
   const frame = setup.captureCharFrame();
@@ -184,10 +184,96 @@ it("子 agent 空结论活动行：警示措辞「未产出结论」，不与真
   expect(spanFgOf(setup.captureSpans(), "未产出结论")).toBe("#e06c75");
 });
 
+it("子 agent 活动块折叠态：标题带工具调用次数，段内工具与结论都不铺屏", async () => {
+  // 段头一行要容纳「完成 · 工具调用 3 次 · 输出 1 行（▸ 点击展开）」：80 列防折行干扰断言
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          {
+            kind: "agent",
+            event: "completed",
+            path: "/root/task_1",
+            tools: [
+              { id: "c1", name: "bash", args: '{"command":"pnpm test"}', status: "success", durationMs: 3200 },
+              { id: "c2", name: "read", args: '{"path":"src/a.ts"}', status: "failure", error: "路径不存在" },
+              { id: "c3", name: "grep", args: '{"pattern":"foo"}', status: "running" },
+            ],
+            conclusion: "冒烟通过",
+            collapsed: true,
+          },
+        ]}
+        modelLabel="test-model"
+      />
+    ),
+    { width: 80, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("子 agent [/root/task_1]");
+  expect(frame).toContain("工具调用 3 次");
+  expect(frame).toContain("输出 1 行");
+  expect(frame).toContain("点击展开");
+  // 折叠态：工具行与结论都不展示（主消息区只有一行段头）
+  expect(frame).not.toContain("pnpm test");
+  expect(frame).not.toContain("冒烟通过");
+});
+
+it("子 agent 活动块展开：结论在前、工具行在后，失败原因只取首行", async () => {
+  const setup = await app([
+    {
+      kind: "agent",
+      event: "failed",
+      path: "/root/task_1",
+      tools: [
+        { id: "c1", name: "bash", args: '{"command":"pnpm build"}', status: "failure", error: "命令失败：退出码 1\n细节行", durationMs: 500 },
+      ],
+      conclusion: "子代理 task_1 失败：连接超时",
+      collapsed: false,
+    },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("结论：子代理 task_1 失败：连接超时");
+  expect(frame).toContain("bash pnpm build");
+  expect(frame).toContain("命令失败：退出码 1");
+  expect(frame).toContain("耗时 500ms");
+  expect(frame).not.toContain("细节行"); // 失败原因单行收敛（首行截断，多行明细不进块）
+  // 结论行在工具行之前（点开先读结论，过程梗概在后）
+  const lines = frame.split("\n");
+  expect(lines.findIndex((l) => l.includes("结论："))).toBeLessThan(lines.findIndex((l) => l.includes("bash pnpm build")));
+});
+
+it("子 agent 段内工具行：失败原因超 60 字截断加省略号", async () => {
+  const error = "e".repeat(80);
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          {
+            kind: "agent",
+            event: "failed",
+            path: "/root/t",
+            tools: [{ id: "c1", name: "bash", args: "{}", status: "failure", error }],
+            conclusion: "失败",
+            collapsed: false,
+          },
+        ]}
+        modelLabel="m"
+      />
+    ),
+    { width: 100, height: 12 },
+  );
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain(`${"e".repeat(60)}…`);
+  expect(frame).not.toContain("e".repeat(61));
+});
+
 it("同屏失败与完成块各按自身状态着色（不互相串色）", async () => {
   const setup = await app([
-    { kind: "agent", event: "failed", path: "/root/task_1", conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
-    { kind: "agent", event: "completed", path: "/root/task_2", conclusion: "已合并分区逻辑", collapsed: true },
+    { kind: "agent", event: "failed", path: "/root/task_1", tools: [], conclusion: "子代理 task_1 失败：连接超时", collapsed: true },
+    { kind: "agent", event: "completed", path: "/root/task_2", tools: [], conclusion: "已合并分区逻辑", collapsed: true },
   ]);
   await setup.waitForVisualIdle();
   const spans = setup.captureSpans();

@@ -2,6 +2,7 @@
  * 界面状态（纯函数核心）：事件/动作 → 界面状态。
  * 消息区由有序「块」组成（消息/工具卡片/子 agent 活动）；输入框多行编辑（上限 20 行）、
  * 历史回溯、slash 命令候选；帧生成（resolve）只读这些状态。
+ * 子 agent 的工具调用不铺主消息流工具卡：按 agentPath 分流进其活动块段内（见 reduceHook）。
  */
 import { COMMAND_MARKER, modelErrorText, type Message } from "../core/index.js";
 import { INIT_PROMPT_PREFIX } from "../context/index.js";
@@ -46,14 +47,30 @@ export interface ToolBlock {
   collapsedOutput: boolean;
 }
 
-/** 子 agent 活动行（派生/完成/失败/中断，带结论与合并结果）；collapsed 默认折叠——结论/合并长内容
- *  平时收敛成单行，点击展开（子 agent 结果应像工具一样支持展开/关闭）。
+/** 子 agent 段内的一次工具调用：主消息区不铺工具卡，收进活动块展开视图。
+ *  状态口径与主流程一致（running 执行中 / success / failure，error 为失败原因） */
+export interface AgentToolCall {
+  id: string;
+  name?: string;
+  args: string;
+  status: "running" | "success" | "failure";
+  error?: string;
+  /** 执行耗时 ms（PostToolUse/PostToolUseFailure 带；执行前被拒不显示） */
+  durationMs?: number;
+}
+
+/** 子 agent 活动块：一段（一次派生到一次终态）一个块——派生（AgentSpawned）开段，
+ *  完成/失败/中断（AgentCompleted/AgentInterrupted）收束同一段，followup 唤醒开新段。
+ *  段内工具调用（tools）与结论/合并都收进块内，默认 collapsed 折叠成单行状态，
+ *  点击展开——子 agent 的工具卡与中间过程不铺主消息流，多 agent 并行不刷屏。
  *  failed 是 AgentCompleted 的失败终态（驱动/模型链失败，或结论命中工具调用标记判不可信，
  *  结论为明确失败文本）：与正常完成分开成一种展示态，消息区按红色错误样式显示，不与「完成」混淆 */
 export interface AgentActivityBlock {
   kind: "agent";
-  event: "spawned" | "completed" | "failed" | "interrupted";
+  event: "running" | "completed" | "failed" | "interrupted";
   path: string;
+  /** 段内工具调用（按调用顺序；该段专属，不落主消息流工具卡） */
+  tools: AgentToolCall[];
   conclusion?: string;
   mergeResult?: string;
   collapsed: boolean;
@@ -455,12 +472,13 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
               kind: "agent",
               event: "completed",
               path: message.agentPath,
+              tools: [],
               conclusion: mail.body,
               collapsed: true,
             });
           } else if (mail.type === "INTERRUPTED") {
             node.status = "interrupted";
-            blocks.push({ kind: "agent", event: "interrupted", path: message.agentPath, collapsed: true });
+            blocks.push({ kind: "agent", event: "interrupted", path: message.agentPath, tools: [], collapsed: true });
           }
           continue;
         }
@@ -576,14 +594,18 @@ export function resetToNewState(state: TuiState): TuiState {
   };
 }
 
-/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠 / 子 agent 结论与合并，失败结论同样可展开）；
+/** 是否有可折叠内容（思考折叠 / 工具参数与输出折叠 / 子 agent 段内工具与结论，失败结论同样可展开）；
  *  导出给视图判断是否挂折叠提示与悬停高亮——折叠动作 fold-at 也用同一份判定，两处条件保持同源 */
 export function isFoldable(block: BlockView): boolean {
   if (block.kind === "message") return Boolean(block.thinking);
   if (block.kind === "tool") return Boolean(block.args) || Boolean(block.output || block.error);
-  // 子 agent 有结论/合并结果才可折叠（派生/中断无内容不需折叠；失败结论是失败文本，同样可展开看全文）
+  // 子 agent：段内有过工具调用，或有结论/合并结果才可折叠
+  // （刚派生无内容不需折叠；失败结论是失败文本，同样可展开看全文）
   if (block.kind === "agent")
-    return (block.event === "completed" || block.event === "failed") && Boolean(block.conclusion || block.mergeResult);
+    return (
+      block.tools.length > 0 ||
+      ((block.event === "completed" || block.event === "failed") && Boolean(block.conclusion || block.mergeResult))
+    );
   return false;
 }
 
@@ -851,6 +873,69 @@ function appendMessageBlock(
   };
 }
 
+/** 段内工具行按调用 id 更新（无则追加） */
+function upsertAgentToolLine(
+  block: Extract<BlockView, { kind: "agent" }>,
+  id: string,
+  update: (prev: AgentToolCall | undefined) => AgentToolCall,
+): Extract<BlockView, { kind: "agent" }> {
+  const j = block.tools.findIndex((t) => t.id === id);
+  const tools = j >= 0 ? block.tools.map((t, k) => (k === j ? update(t) : t)) : [...block.tools, update(undefined)];
+  return { ...block, tools };
+}
+
+/** 子 agent 工具事件并入活动块：按调用 id 更新段内工具行（无则追加）。
+ *  opts.acrossSegments（结果事件）时先按 id 找包含该调用的段——结果迟到、该路径又有新段时
+ *  归位原段；新调用（PreToolUse）直接并入最近的段——无 id 厂商的合成 id（call_N）
+ *  跨轮复用，按 id 找到旧段会把新调用错挂过去。
+ *  并入的段：运行中段正常；终态段（事件序异常/丢终态后到的工具事件）也并入，
+ *  不新开运行段（新段没有收束事件，会永远停在「运行中」）。
+ *  该路径一个段都没有（派生事件缺失）时才补一段承接，
+ *  保证子 agent 工具事件永不落成主消息流工具卡 */
+function applyAgentToolCall(
+  state: TuiState,
+  path: string,
+  id: string,
+  update: (prev: AgentToolCall | undefined) => AgentToolCall,
+  opts: { acrossSegments?: boolean } = {},
+): TuiState {
+  let latestIndex = -1;
+  for (let i = state.blocks.length - 1; i >= 0; i--) {
+    const block = state.blocks[i]!;
+    if (block.kind !== "agent" || block.path !== path) continue;
+    if (latestIndex < 0) latestIndex = i;
+    if (opts.acrossSegments && block.tools.some((t) => t.id === id)) {
+      const updated = upsertAgentToolLine(block, id, update);
+      return { ...state, blocks: state.blocks.map((b, k) => (k === i ? updated : b)) };
+    }
+  }
+  const latest = latestIndex >= 0 ? state.blocks[latestIndex] : undefined;
+  if (latest?.kind === "agent") {
+    const updated = upsertAgentToolLine(latest, id, update);
+    return { ...state, blocks: state.blocks.map((b, k) => (k === latestIndex ? updated : b)) };
+  }
+  return {
+    ...state,
+    blocks: [...state.blocks, { kind: "agent", event: "running", path, tools: [update(undefined)], collapsed: true }],
+  };
+}
+
+/** 收束子 agent 段：该路径最近一个运行中段改为终态并挂上结论/合并（collapsed 保持用户所选）。
+ *  无运行中段（恢复重建的直调路径等）时补一个终态块 */
+function closeAgentSegment(
+  blocks: BlockView[],
+  path: string,
+  event: "completed" | "failed" | "interrupted",
+  extra: { conclusion?: string; mergeResult?: string } = {},
+): BlockView[] {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]!;
+    if (block.kind !== "agent" || block.path !== path || block.event !== "running") continue;
+    return blocks.map((b, k) => (k === i ? { ...block, event, ...extra } : b));
+  }
+  return [...blocks, { kind: "agent", event, path, tools: [], collapsed: true, ...extra }];
+}
+
 /** HookEvent → 状态（用户输入 / 工具生命周期 / 子 agent 活动 / 会话边界）。
  *  agent 生命周期事件可附带 spawnedAt/completedAt（loop 侧注入），state 本身保持纯函数 */
 export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
@@ -882,6 +967,18 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       };
     }
     case "PreToolUse": {
+      // 子 agent 的工具调用收进其活动块（不铺主消息流工具卡，多 agent 并行不刷屏）。
+      // 不置 status=running：status 是根回合口径——子 agent 的 Stop 不回落它（见下方 Stop 分支），
+      // 置位会让状态行在根空闲时停在运行中；子 agent 活跃由底栏树与 Esc 判定的
+      // hasRunningAgent 承担（state.agents），与状态行互不代偿
+      if (event.agentPath !== "/root") {
+        return applyAgentToolCall(state, event.agentPath, event.toolCallId, () => ({
+          id: event.toolCallId,
+          name: event.toolName,
+          args: JSON.stringify(event.input ?? {}),
+          status: "running",
+        }));
+      }
       const card = findToolById(state.blocks, event.toolCallId) ?? findPendingTool(state.blocks);
       const blocks = card
         ? state.blocks.map((b) =>
@@ -913,6 +1010,24 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks, status: "running" };
     }
     case "PostToolUse": {
+      if (event.agentPath !== "/root") {
+        return applyAgentToolCall(
+          state,
+          event.agentPath,
+          event.toolCallId,
+          (prev) => ({
+            id: event.toolCallId,
+            name: event.toolName,
+            args: JSON.stringify(event.input ?? {}),
+            // 执行完成但 isError 标记（如超时/被杀）：按失败显示（✕），不伪装成功
+            status: event.isError ? "failure" : "success",
+            error: event.isError ? event.output : undefined,
+            // 执行耗时：行尾显示「耗时 x」；执行前被拒的事件不带该字段
+            durationMs: event.durationMs ?? prev?.durationMs,
+          }),
+          { acrossSegments: true },
+        );
+      }
       const card = findToolById(state.blocks, event.toolCallId);
       if (!card) return state;
       const blocks = state.blocks.map((b) =>
@@ -931,6 +1046,22 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks };
     }
     case "PostToolUseFailure": {
+      if (event.agentPath !== "/root") {
+        return applyAgentToolCall(
+          state,
+          event.agentPath,
+          event.toolCallId,
+          (prev) => ({
+            id: event.toolCallId,
+            name: event.toolName,
+            args: JSON.stringify(event.input ?? {}),
+            status: "failure",
+            error: event.error,
+            durationMs: event.durationMs ?? prev?.durationMs,
+          }),
+          { acrossSegments: true },
+        );
+      }
       const card = findToolById(state.blocks, event.toolCallId);
       if (!card) return state;
       const blocks = state.blocks.map((b) =>
@@ -953,7 +1084,9 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
     case "AgentSpawned":
       // 已存在条目（followup 唤醒已完成/中断的 agent）：重置为运行态、清完成时刻，
       // 树重新亮起（否则条目停在上一次终态、AgentStrip 10s 后过滤消失后不再出现）；
-      // 不存在（初次派生）：追加新条目。两种都加一条 spawned 活动行。
+      // 不存在（初次派生）：追加新条目。活动块同口径开新段（每次派生/唤醒一段）。
+      // 该路径仍有运行中段（驱动断续接防重入/重复事件：两次驱动只发一次终态）时不重开段，
+      // 否则先驱段永远停在「运行中」——终态一次收束
       // spawnedAt：事件未携带时保留原值（loop 订阅侧恒注入当前时刻，此处兜底直调 reducer 的测试路径）
       return {
         ...state,
@@ -964,29 +1097,24 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
                 : a,
             )
           : [...state.agents, { path: event.path, status: "running", spawnedAt: event.spawnedAt ?? null, completedAt: null }],
-        blocks: [...state.blocks, { kind: "agent", event: "spawned", path: event.path, collapsed: true }],
+        blocks: state.blocks.some((b) => b.kind === "agent" && b.path === event.path && b.event === "running")
+          ? state.blocks
+          : [...state.blocks, { kind: "agent", event: "running", path: event.path, tools: [], collapsed: true }],
       };
     case "AgentCompleted": {
       // failed 标记的完成是失败终态（驱动/模型链失败，或结论命中工具调用标记判不可信，
       // 结论为明确失败文本，见 AgentCompleted 负载注释）：
-      // 树与活动行都按失败展示，不再与正常完成同形（此前失败与完成在界面上无任何区分）
+      // 树与活动块都按失败展示，不再与正常完成同形（此前失败与完成在界面上无任何区分）
       const failed = event.failed === true;
       return {
         ...state,
         agents: state.agents.map((a) =>
           a.path === event.path ? { ...a, status: failed ? "failed" : "completed", completedAt: event.completedAt ?? null } : a,
         ),
-        blocks: [
-          ...state.blocks,
-          {
-            kind: "agent",
-            event: failed ? "failed" : "completed",
-            path: event.path,
-            conclusion: event.conclusion,
-            mergeResult: event.mergeResult,
-            collapsed: true,
-          },
-        ],
+        blocks: closeAgentSegment(state.blocks, event.path, failed ? "failed" : "completed", {
+          conclusion: event.conclusion,
+          mergeResult: event.mergeResult,
+        }),
       };
     }
     case "AgentInterrupted":
@@ -995,7 +1123,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
         agents: state.agents.map((a) =>
           a.path === event.path ? { ...a, status: "interrupted", completedAt: event.completedAt ?? null } : a,
         ),
-        blocks: [...state.blocks, { kind: "agent", event: "interrupted", path: event.path, collapsed: true }],
+        blocks: closeAgentSegment(state.blocks, event.path, "interrupted"),
       };
     case "Stop":
       // 只把主 agent（/root）的 Stop 视为回合空闲：子 agent 每轮结束也发 Stop，

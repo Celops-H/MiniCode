@@ -23,6 +23,10 @@ import {
 } from "../../src/tui/state.js";
 import type { Message } from "../../src/core/index.js";
 
+/** 取块序列里的子 agent 活动块（断言用，收窄类型） */
+const agentSegments = (s: TuiState): Array<Extract<TuiState["blocks"][number], { kind: "agent" }>> =>
+  s.blocks.filter((b): b is Extract<TuiState["blocks"][number], { kind: "agent" }> => b.kind === "agent");
+
 it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   const base = initState([]);
   const withBlocks = {
@@ -40,19 +44,21 @@ it("fold-at：鼠标点折叠头直接翻该块（不带聚焦）", () => {
   expect(unchanged.blocks[1]).toBe(withBlocks.blocks[1]);
 });
 
-it("fold-at 翻子 agent 结论折叠态（有结论才可折叠；派生无内容不可翻）", () => {
+it("fold-at 翻子 agent 段折叠态（有结论或工具行才可折叠；刚派生无内容不可翻）", () => {
   const base = initState([]);
   const withAgent = {
     ...base,
-    blocks: [{ kind: "agent", event: "completed", path: "/root/t", conclusion: "ok", collapsed: true }] as typeof base.blocks,
+    blocks: [
+      { kind: "agent", event: "completed", path: "/root/t", tools: [], conclusion: "ok", collapsed: true },
+    ] as typeof base.blocks,
   };
   // completed 有结论 → 折叠翻转 true→false
   const unfolded = reduceAction(withAgent, { type: "fold-at", index: 0 });
   expect(unfolded.blocks[0]?.kind === "agent" && unfolded.blocks[0].collapsed).toBe(false);
-  // spawned 无结论 → 不可折叠，原样保留
+  // 刚派生（无工具无结论）→ 不可折叠，原样保留
   const spawned = {
     ...base,
-    blocks: [{ kind: "agent", event: "spawned", path: "/root/t", collapsed: true }] as typeof base.blocks,
+    blocks: [{ kind: "agent", event: "running", path: "/root/t", tools: [], collapsed: true }] as typeof base.blocks,
   };
   const unchanged = reduceAction(spawned, { type: "fold-at", index: 0 });
   expect(unchanged.blocks[0]).toBe(spawned.blocks[0]);
@@ -107,9 +113,10 @@ it("AgentSpawned 追加到 agents 树（main 恒在首位，去重；完成带�
     { path: "/root", status: "running", spawnedAt: null, completedAt: null },
     { path: "/root/task_1", status: "running", spawnedAt: null, completedAt: null },
   ]);
-  // 重复事件去重
+  // 重复事件去重（活动块同口径：该路径仍在途，不重开段，防止先驱段永远停在「运行中」）
   const dup = reduceHook(spawned, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root" });
   expect(dup.agents).toHaveLength(2);
+  expect(agentSegments(dup)).toHaveLength(1);
   // 完成事件：状态改 completed + 记录完成时刻（loop 注入），派生时刻保留算耗时
   const done = reduceHook(dup, { type: "AgentCompleted", path: "/root/task_1", parentPath: "/root", conclusion: "ok", completedAt: 1000 });
   expect(done.agents[1]).toEqual({ path: "/root/task_1", status: "completed", spawnedAt: null, completedAt: 1000 });
@@ -149,8 +156,8 @@ it("AgentCompleted.failed：树条目落失败态、活动行标失败（不再�
   expect(failed.blocks.at(-1)).toMatchObject({ kind: "agent", event: "failed", path: "/root/t", collapsed: true });
   // 失败结论可展开看全文（与完成的结论走同一条折叠链）
   expect(isFoldable(failed.blocks.at(-1)!)).toBe(true);
-  // 失败但没有结论/合并结果（正常路径不会出现）：不可折叠，不挂出无内容的折叠提示
-  expect(isFoldable({ kind: "agent", event: "failed", path: "/root/t", collapsed: true })).toBe(false);
+  // 失败但没有结论/合并结果与工具行（正常路径不会出现）：不可折叠，不挂出无内容的折叠提示
+  expect(isFoldable({ kind: "agent", event: "failed", path: "/root/t", tools: [], collapsed: true })).toBe(false);
   // 失败不算运行中：Esc 判定与重装配守卫按终态放行
   expect(hasRunningAgent(failed.agents)).toBe(false);
   // followup 唤醒失败条目：与完成态一样重置回运行态
@@ -164,6 +171,152 @@ it("AgentCompleted.failed：树条目落失败态、活动行标失败（不再�
   const done = reduceHook(spawned, { type: "AgentCompleted", path: "/root/t", parentPath: "/root", conclusion: "ok", completedAt: 900 });
   expect(done.agents[1]).toMatchObject({ status: "completed" });
   expect(done.blocks.at(-1)).toMatchObject({ event: "completed" });
+});
+
+it("子 agent 工具事件收进活动块：不铺主消息流工具卡，完成收束同一段", () => {
+  let s = reduceHook(initState([]), { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 100 });
+  // 派生开段：运行中块、无工具行
+  expect(s.blocks).toEqual([
+    { kind: "agent", event: "running", path: "/root/task_1", tools: [], collapsed: true },
+  ]);
+  // 子 agent 工具调用：不进主消息流工具卡，挂进段内工具行
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "c1", toolName: "read", input: { path: "a.ts" }, agentPath: "/root/task_1" });
+  expect(s.blocks.some((b) => b.kind === "tool")).toBe(false);
+  expect(agentSegments(s)[0]!.tools).toEqual([
+    { id: "c1", name: "read", args: '{"path":"a.ts"}', status: "running" },
+  ]);
+  // 主 agent 同步工具事件仍铺主工具卡（分流不误伤 root）
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "r1", toolName: "bash", input: { command: "ls" }, agentPath: "/root" });
+  expect(s.blocks.some((b) => b.kind === "tool" && b.id === "r1")).toBe(true);
+  // 结果事件写回段内工具行：成功 + 耗时
+  s = reduceHook(s, {
+    type: "PostToolUse",
+    toolCallId: "c1",
+    toolName: "read",
+    input: { path: "a.ts" },
+    output: "ok",
+    isError: false,
+    durationMs: 120,
+    agentPath: "/root/task_1",
+  });
+  expect(agentSegments(s)[0]!.tools).toEqual([
+    { id: "c1", name: "read", args: '{"path":"a.ts"}', status: "success", durationMs: 120 },
+  ]);
+  // 完成收束同一段：段数不变，event 转 completed，工具行保留并挂上结论
+  s = reduceHook(s, { type: "AgentCompleted", path: "/root/task_1", parentPath: "/root", conclusion: "结论一", completedAt: 900 });
+  const segments = agentSegments(s);
+  expect(segments).toHaveLength(1);
+  expect(segments[0]).toMatchObject({ event: "completed", conclusion: "结论一" });
+  expect(segments[0]!.tools).toHaveLength(1);
+});
+
+it("子 agent 失败与中断收束段：工具行保留，段头转对应终态", () => {
+  const spawn = (): TuiState => reduceHook(initState([]), { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  // 执行中失败（PostToolUseFailure 带原因）→ 段内工具行落失败态
+  let s = spawn();
+  s = reduceHook(s, {
+    type: "PostToolUseFailure",
+    toolCallId: "c1",
+    toolName: "bash",
+    input: { command: "x" },
+    error: "命令失败：退出码 1",
+    durationMs: 40,
+    agentPath: "/root/t",
+  });
+  expect(agentSegments(s)[0]!.tools).toEqual([
+    { id: "c1", name: "bash", args: '{"command":"x"}', status: "failure", error: "命令失败：退出码 1", durationMs: 40 },
+  ]);
+  // 失败标记完成的调用（执行器先发 PostToolUseFailure 后发 PostToolUse）：错误取完整输出，
+  // 后到事件不带 durationMs 时保留原耗时
+  s = reduceHook(s, {
+    type: "PostToolUse",
+    toolCallId: "c1",
+    toolName: "bash",
+    input: { command: "x" },
+    output: "命令失败：退出码 1\n部分输出",
+    isError: true,
+    agentPath: "/root/t",
+  });
+  expect(agentSegments(s)[0]!.tools).toEqual([
+    {
+      id: "c1",
+      name: "bash",
+      args: '{"command":"x"}',
+      status: "failure",
+      error: "命令失败：退出码 1\n部分输出",
+      durationMs: 40,
+    },
+  ]);
+  // 中断收束：同一段转中断，工具行原样保留
+  s = reduceHook(s, { type: "AgentInterrupted", path: "/root/t", parentPath: "/root", completedAt: 800 });
+  expect(agentSegments(s)).toHaveLength(1);
+  expect(agentSegments(s)[0]).toMatchObject({ event: "interrupted" });
+  expect(agentSegments(s)[0]!.tools).toHaveLength(1);
+  // 失败终态：failed 标记的 AgentCompleted 收束为 failed
+  let f = spawn();
+  f = reduceHook(f, { type: "AgentCompleted", path: "/root/t", parentPath: "/root", conclusion: "子代理 t 失败：连接超时", failed: true, completedAt: 900 });
+  expect(agentSegments(f)[0]).toMatchObject({ event: "failed" });
+});
+
+it("followup 唤醒开新段：同名路径两段互不串（先完成段的结论与工具行不动）", () => {
+  let s = reduceHook(initState([]), { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "c1", toolName: "read", input: {}, agentPath: "/root/t" });
+  s = reduceHook(s, { type: "AgentCompleted", path: "/root/t", parentPath: "/root", conclusion: "第一段结论" });
+  // 唤醒：新段（运行中、无工具），已完成段保留
+  s = reduceHook(s, { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  expect(agentSegments(s)).toHaveLength(2);
+  expect(agentSegments(s)[1]).toMatchObject({ event: "running", tools: [] });
+  // 新段的工具事件落新段：第一段不变
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "c2", toolName: "grep", input: {}, agentPath: "/root/t" });
+  expect(agentSegments(s)[0]).toMatchObject({ event: "completed", conclusion: "第一段结论" });
+  expect(agentSegments(s)[0]!.tools).toHaveLength(1);
+  expect(agentSegments(s)[1]!.tools).toHaveLength(1);
+  // 第一段的迟到结果事件按调用 id 归位原段（两段并存时不被误并入新段）
+  s = reduceHook(s, {
+    type: "PostToolUse",
+    toolCallId: "c1",
+    toolName: "read",
+    input: {},
+    output: "ok",
+    isError: false,
+    durationMs: 5,
+    agentPath: "/root/t",
+  });
+  expect(agentSegments(s)[0]!.tools).toEqual([{ id: "c1", name: "read", args: "{}", status: "success", durationMs: 5 }]);
+  expect(agentSegments(s)[1]!.tools).toEqual([{ id: "c2", name: "grep", args: "{}", status: "running" }]);
+  // 同 id 新调用（无 id 厂商合成 call_N 跨轮复用）并入新段：PreToolUse 不跨段按 id 归位
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "c1", toolName: "bash", input: {}, agentPath: "/root/t" });
+  expect(agentSegments(s)[0]!.tools).toEqual([{ id: "c1", name: "read", args: "{}", status: "success", durationMs: 5 }]);
+  expect(agentSegments(s)[1]!.tools).toEqual([
+    { id: "c2", name: "grep", args: "{}", status: "running" },
+    { id: "c1", name: "bash", args: "{}", status: "running" },
+  ]);
+});
+
+it("子 agent 工具事件不置根回合运行态（status 是根回合口径，后台子 agent 活跃不代偿）", () => {
+  let s = reduceHook(initState([]), { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  expect(s.status).toBe("idle");
+  s = reduceHook(s, { type: "PreToolUse", toolCallId: "c1", toolName: "read", input: {}, agentPath: "/root/t" });
+  expect(s.status).toBe("idle");
+  s = reduceHook(s, { type: "PostToolUse", toolCallId: "c1", toolName: "read", input: {}, output: "ok", isError: false, agentPath: "/root/t" });
+  // 状态行不因后台子 agent 的工具事件置运行态：子 agent 的 Stop 不回落它，置位会让状态行停在运行中
+  expect(s.status).toBe("idle");
+  expect(hasRunningAgent(s.agents)).toBe(true); // 活跃判定由 agent 树承担
+});
+
+it("工具事件无运行中段：并入最近段不新开（防悬空），无段时才补开承接段", () => {
+  // 收束后到的工具事件（事件序异常/丢终态）：并入已完成段，不新开运行段
+  let s = reduceHook(initState([]), { type: "AgentSpawned", path: "/root/t", parentPath: "/root" });
+  s = reduceHook(s, { type: "AgentCompleted", path: "/root/t", parentPath: "/root", conclusion: "ok" });
+  s = reduceHook(s, { type: "PostToolUseFailure", toolCallId: "late", toolName: "bash", input: {}, error: "余波", agentPath: "/root/t" });
+  expect(agentSegments(s)).toHaveLength(1);
+  expect(agentSegments(s)[0]).toMatchObject({ event: "completed" });
+  expect(agentSegments(s)[0]!.tools).toHaveLength(1);
+  // 该路径一个段都没有（派生事件缺失）：补开运行段承接，仍不落主消息流工具卡
+  let d = reduceHook(initState([]), { type: "PreToolUse", toolCallId: "c9", toolName: "read", input: {}, agentPath: "/root/gone" });
+  expect(d.blocks.some((b) => b.kind === "tool")).toBe(false);
+  expect(agentSegments(d)).toHaveLength(1);
+  expect(agentSegments(d)[0]).toMatchObject({ event: "running", path: "/root/gone" });
 });
 
 it("hasRunningAgent：主 agent 或 completed/interrupted 不算，运行中的子 agent 才算", () => {

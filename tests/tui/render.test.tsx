@@ -4,11 +4,11 @@
  * 注意：状态行用窄宽用例钉住「窄屏不折行」——flexShrink:0 使右侧溢出被截而非换行。
  */
 import { testRender } from "@opentui/solid";
-import { createStore } from "solid-js/store";
+import { createStore, reconcile } from "solid-js/store";
 import { describe, it, expect, afterEach } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
-import { initState, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
 import { messageScroller } from "../../src/tui/scroll.js";
 import { assistantMessage } from "../../src/core/index.js";
 
@@ -176,6 +176,76 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("● main");
     expect(frame).not.toContain("main()");
     expect(frame).toContain("( ) task_1");
+  });
+
+  it("live 子 agent 活动块：段头就地刷新、折叠提示出现、点击展开、行内图标就地更新", async () => {
+    // 走生产路径：runTui 的 commit 是 setState(reconcile(next))，For 行创建后不重建——
+    // 组件体常量会把创建时的折叠判定冻结（派生时无工具 → 永不出现提示、点不开），
+    // 本用例用 reconcile 提交，钉住折叠判定与行内状态都是响应式读取
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const setup = await testRender(
+      () => (
+        <App
+          state={state}
+          model="m"
+          onAction={(a) => {
+            if (a.type === "fold-at") setState(reconcile(reduceAction(state, a)));
+          }}
+        />
+      ),
+      { width: 70, height: 14 },
+    );
+    await setup.waitForVisualIdle();
+    setState(reconcile(reduceHook(state, { type: "AgentSpawned", path: "/root/task_1", parentPath: "/root", spawnedAt: 0 })));
+    await setup.waitForVisualIdle();
+    // 刚派生无内容：不可折叠，无提示
+    expect(setup.captureCharFrame()).not.toContain("点击展开");
+    // 工具事件：计数刷新 + 折叠提示出现（组件体快照实现下提示不会出现）
+    setState(
+      reconcile(reduceHook(state, { type: "PreToolUse", toolCallId: "c1", toolName: "read", input: { path: "a.ts" }, agentPath: "/root/task_1" })),
+    );
+    await setup.waitForVisualIdle();
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("子 agent [/root/task_1]");
+    expect(frame).toContain("运行中");
+    expect(frame).toContain("工具调用 1 次");
+    expect(frame).toContain("点击展开");
+    // 未展开：工具行不铺屏（子 agent 工具卡不进主消息流）
+    expect(frame).not.toContain("read a.ts");
+    // 点段头（首块头部在第 1 行）：展开显示段内工具行
+    await setup.mockMouse.click(30, 1);
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("read a.ts");
+    // 结果事件就地写回同一行：图标由创建时的运行态刷新为 ✓，耗时出现
+    setState(
+      reconcile(
+        reduceHook(state, {
+          type: "PostToolUse",
+          toolCallId: "c1",
+          toolName: "read",
+          input: { path: "a.ts" },
+          output: "ok",
+          isError: false,
+          durationMs: 120,
+          agentPath: "/root/task_1",
+        }),
+      ),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("✓ read a.ts");
+    expect(frame).toContain("耗时 120ms");
+    // 图标颜色随状态就地更新（成功绿，与静态块断言同一色板）
+    expect(textFg(setup.captureSpans(), "✓")).toBe("#7fd88f");
+    // 完成事件收束同一段：展开态就地补出结论（不新起一行「完成」）
+    setState(
+      reconcile(reduceHook(state, { type: "AgentCompleted", path: "/root/task_1", parentPath: "/root", conclusion: "冒烟通过", completedAt: 9 })),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("完成");
+    expect(frame).toContain("结论：冒烟通过");
   });
 
   it("AgentInterrupted 后底栏树显示 (×) 名、消息区显示中断活动行", async () => {

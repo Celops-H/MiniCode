@@ -33,7 +33,7 @@ describe("恢复会话重建 agent 树与活动行", () => {
     ]);
     const rows = state.blocks.filter((b) => b.kind === "agent");
     expect(rows).toEqual([
-      { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "查完了，结论如下", collapsed: true },
+      { kind: "agent", event: "completed", path: "/root/task_1", tools: [], conclusion: "查完了，结论如下", collapsed: true },
     ]);
     // 注入消息不再铺成「你」消息块
     expect(state.blocks.some((b) => b.kind === "message" && b.text.includes("【任务结论】"))).toBe(false);
@@ -46,7 +46,7 @@ describe("恢复会话重建 agent 树与活动行", () => {
     ]);
     expect(state.agents[1]).toMatchObject({ path: "/root/task_1", status: "interrupted" });
     expect(state.blocks.filter((b) => b.kind === "agent")).toEqual([
-      { kind: "agent", event: "interrupted", path: "/root/task_1", collapsed: true },
+      { kind: "agent", event: "interrupted", path: "/root/task_1", tools: [], collapsed: true },
     ]);
   });
 
@@ -60,8 +60,8 @@ describe("恢复会话重建 agent 树与活动行", () => {
     expect(state.agents[1]).toMatchObject({ path: "/root/task_1", status: "completed" });
     const rows = state.blocks.filter((b) => b.kind === "agent");
     expect(rows).toEqual([
-      { kind: "agent", event: "interrupted", path: "/root/task_1", collapsed: true },
-      { kind: "agent", event: "completed", path: "/root/task_1", conclusion: "续跑完成", collapsed: true },
+      { kind: "agent", event: "interrupted", path: "/root/task_1", tools: [], collapsed: true },
+      { kind: "agent", event: "completed", path: "/root/task_1", tools: [], conclusion: "续跑完成", collapsed: true },
     ]);
   });
 

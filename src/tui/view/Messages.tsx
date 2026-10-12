@@ -3,20 +3,21 @@
  * 每个块前有 3 列衬线：首行放一个圆点标记（●，按来源着色：你/模型=浅蓝、工具/思考/子agent=灰、
  * 通知=红警示），后续行只空不标——一眼分清哪条是自己、哪条是模型、哪个是工具调用。
  * 工具卡片 rounded 框线 + 边框内标题（状态图标 + 工具名），参数/输出点击折叠（折叠头 onMouseUp）；
- * 子 agent 活动行带结论/合并，失败终态按红色标记；错误块红色标记。
+ * 子 agent 活动块一段一行（运行中/完成/失败/中断 + 工具调用次数），段内工具行与结论/合并收进展开视图，
+ * 失败终态按红色标记；错误块红色标记。
  * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
  * 所有展示状态在 state，本组件只读呈现。
  */
-import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import { isFoldable } from "../state.js";
-import type { BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
+import type { AgentToolCall, BlockView, CommandBlock, MessageBlock, ToolBlock, NoticeBlock, Streaming } from "../state.js";
 import { messageScroller, noteScrollPosition, noteUserScroll, followOnViewportResize } from "../scroll.js";
 import { theme } from "./theme.js";
 
-/** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗 */
-function toolStatus(b: ToolBlock): { icon: string; fg: string } {
+/** 状态图标/颜色：进行中 spinner（黄=进行中）、成功绿、失败红、待执行暗（段内工具行复用同套） */
+function toolStatus(b: { status: "pending" | "running" | "success" | "failure" }): { icon: string; fg: string } {
   switch (b.status) {
     case "running":
       return { icon: "⠋", fg: theme.running };
@@ -184,7 +185,7 @@ function argsDigest(args: string, max = 40): string {
 
 /** 执行耗时文案：完成/失败卡显示「· 耗时 1.2s」，不足 1 秒记 ms；
  *  执行前被拒（无 durationMs 事件）与被中断（无 PostToolUse）无耗时不显示 */
-function durationText(b: ToolBlock): string {
+function durationText(b: { durationMs?: number }): string {
   if (b.durationMs === undefined) return "";
   if (b.durationMs < 1000) return ` · 耗时 ${b.durationMs}ms`;
   return ` · 耗时 ${(b.durationMs / 1000).toFixed(1)}s`;
@@ -279,29 +280,61 @@ function hasOutput(b: ToolBlock): boolean {
   return Boolean(b.output || b.error);
 }
 
-/** 子 agent 活动行：派生/完成（结论+合并可折叠）/失败（失败文本，红字）/中断——结论长内容平时收敛单行，
- *  点击展开（子 agent 结果应像工具一样支持展开/关闭） */
+/** 失败原因单行摘要：取首行并截断（子 agent 明细在子会话文件与轨迹里，块内单行收敛） */
+function reasonDigest(error: string, max = 60): string {
+  const first = error.split("\n")[0]?.trimEnd() ?? "";
+  const chars = Array.from(first);
+  return chars.length > max ? `${chars.slice(0, max).join("")}…` : first;
+}
+
+/** 子 agent 段内工具行（块展开时展示）：状态图标 + 名称 + 参数摘要 + 耗时 + 失败原因首行。
+ *  与主流程工具卡的浓缩口径一致——子 agent 工具的输出全文不进消息区，留住「做了什么」的梗概。
+ *  行在创建后不重建（store 就地合并更新，见 AgentView 注释）：图标与失败原因都经 memo 读取，
+ *  样式/文本对响应式值的更新即生效——组件体常量会把创建时的值冻结（图标停在 ⠋、原因不出现） */
+function AgentToolLineView(props: { t: AgentToolCall }): JSX.Element {
+  const t = props.t;
+  const status = createMemo(() => toolStatus(t));
+  const reason = createMemo(() => (t.error ? reasonDigest(t.error) : ""));
+  return (
+    <text fg={theme.textMuted}>
+      <span style={{ fg: status().fg }}>{status().icon}</span> {t.name ?? "tool"}
+      {t.args ? ` ${argsDigest(t.args, 48)}` : ""}
+      {durationText(t)}
+      {reason() ? <span style={{ fg: theme.error }}> · {reason()}</span> : null}
+    </text>
+  );
+}
+
+/** 子 agent 活动块：一段（一次派生到一次终态）一个块——标题行随状态流转
+ *  （运行中/完成/失败/中断 + 段内工具调用次数），段内工具行与结论/合并收进展开视图
+ *  （默认收起，点击展开；失败终态红字，与「完成」一眼分开）。
+ *  子 agent 的工具卡与中间过程不铺主消息流，多 agent 并行只按段占一行。
+ *  行在创建后不重建（runTui 的 commit 走 store+reconcile 就地合并字段，For 行只创建一次）：
+ *  组件体常量会把创建时的折叠判定冻结（派生时无工具 → 永远点不开），
+ *  折叠判定必须走 createMemo、鼠标监听必须常挂——折叠动作本身在 reducer 侧按
+ *  isFoldable 守卫，点无内容的段为无操作 */
 function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: () => void }): JSX.Element {
   const b = props.b;
   // 折叠判定复用 state 的 isFoldable（原先视图另抄了一份同样条件，改一处易漏改）；
   // 工具卡片的参数与输出是两个独立开关，不走这里
-  const foldable = isFoldable(b);
+  const foldable = createMemo(() => isFoldable(b));
   const h = useFoldHover(props.onFold);
   return (
     <box
       flexDirection="column"
-      // 不可折叠（派生/中断）时不挂任何鼠标监听，整行纯展示
-      {...(foldable
-        ? { onMouseDown: h.onMouseDown, onMouseUp: h.onMouseUp, onMouseOver: h.onMouseOver, onMouseOut: h.onMouseOut }
-        : {})}
+      onMouseDown={h.onMouseDown}
+      onMouseUp={h.onMouseUp}
+      onMouseOver={h.onMouseOver}
+      onMouseOut={h.onMouseOut}
     >
-      <text fg={h.fg()}>
+      <text fg={foldable() ? h.fg() : theme.textMuted}>
         <span style={{ fg: theme.foregroundAccent }}>⑂</span> 子 agent [{b.path}]
-        {b.event === "spawned" ? " 已派生" : null}
+        {b.event === "running" ? " 运行中" : null}
         {b.event === "interrupted" ? " 中断" : null}
         {/* 失败终态：红字「失败」，与完成的「完成」一眼分开（此前两者同形） */}
         {b.event === "failed" ? <span style={{ fg: theme.error }}> 失败</span> : null}
         {b.event === "completed" ? " 完成" : null}
+        {b.tools.length > 0 ? ` · 工具调用 ${b.tools.length} 次` : ""}
         {b.event === "completed" && b.conclusion
           ? ` · 输出 ${b.conclusion.trimEnd().split("\n").length} 行`
           : ""}
@@ -309,15 +342,19 @@ function AgentView(props: { b: Extract<BlockView, { kind: "agent" }>; onFold: ()
         {b.event === "completed" && !b.conclusion ? (
           <span style={{ fg: theme.warning }}> · 未产出结论</span>
         ) : null}
-        {foldable && b.collapsed ? "（▸ 点击展开）" : ""}
+        {foldable() && b.collapsed ? "（▸ 点击展开）" : ""}
       </text>
-      <Show when={foldable && !b.collapsed}>
-        {/* 失败详情用红色，与工具卡片的错误详情同口径（失败是需要看见的信息，不压成普通灰字） */}
-        <text fg={b.event === "failed" ? theme.error : theme.textMuted}>
-          {b.conclusion ? `结论：${b.conclusion}` : null}
-          {b.conclusion && b.mergeResult ? "\n" : null}
-          {b.mergeResult ? `合并：${b.mergeResult}` : null}
-        </text>
+      <Show when={foldable() && !b.collapsed}>
+        {/* 结论/合并在前、工具过程在后（点开先读结论）；失败详情用红色，
+            与工具卡片的错误详情同口径（失败是需要看见的信息，不压成普通灰字） */}
+        <Show when={b.conclusion || b.mergeResult}>
+          <text fg={b.event === "failed" ? theme.error : theme.textMuted}>
+            {b.conclusion ? `结论：${b.conclusion}` : null}
+            {b.conclusion && b.mergeResult ? "\n" : null}
+            {b.mergeResult ? `合并：${b.mergeResult}` : null}
+          </text>
+        </Show>
+        <For each={b.tools}>{(t) => <AgentToolLineView t={t} />}</For>
       </Show>
     </box>
   );
