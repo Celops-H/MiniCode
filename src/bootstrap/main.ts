@@ -31,7 +31,8 @@ program
       return;
     }
     for (const meta of sessions) {
-      console.log(`${meta.id}  ${meta.title}  ${meta.model}  ${meta.updatedAt}`);
+      // 空模型＝引导态建的会话，显「未连接」占位（与 TUI 面板同口径）
+      console.log(`${meta.id}  ${meta.title}  ${meta.model || "未连接"}  ${meta.updatedAt}`);
     }
   });
 

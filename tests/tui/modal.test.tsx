@@ -171,6 +171,21 @@ it("会话面板三列各自对齐：长短标题下模型起始列一致（列�
   expect(rowA.indexOf("aaaa11")).toBeGreaterThan(rowA.indexOf("model-alpha"));
 });
 
+it("会话面板模型列为空（引导态建的会话）显「未连接」占位，列宽随占位取宽", async () => {
+  const modal: ModalState = {
+    kind: "session",
+    sessions: [{ id: "cccc3333", title: "引导态会话", model: "", updatedAt: "2026-08-27T00:00:00.000Z", sizeBytes: 1024 }],
+    selected: 1,
+  };
+  const setup = await testRender(() => <ModalView modal={modal} />, { width: 70, height: 12 });
+  await setup.waitForVisualIdle();
+  const row = setup.captureCharFrame().split("\n").find((l) => l.includes("cccc33")) ?? "";
+  expect(row).toContain("未连接");
+  // 列序保持：占位在标题后、哈希前，且未被截断（列宽按占位取）
+  expect(row.indexOf("未连接")).toBeGreaterThan(row.indexOf("引导态会话"));
+  expect(row.indexOf("cccc33")).toBeGreaterThan(row.indexOf("未连接"));
+});
+
 it("会话面板删除态：选中行显示操作态（进入/删除，←→ 切换；新建行无操作态）", async () => {
   const sessions = [{ id: "ab3f90", title: "重构 partition", model: "deepseek-v4-flash", updatedAt: "now", sizeBytes: 2048 }];
   const [modal, setModal] = createStore<ModalState>({ kind: "session", sessions, selected: 1, action: "enter" });
