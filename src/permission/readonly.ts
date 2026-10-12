@@ -6,12 +6,16 @@
  *   「echo "rm" 不误拦」服务的，一行流里的真实代码无法与字面文本区分）；
  * - $( ) 命令替换内的写命令不检测，由权限管线的危险命令检查兜底
  *   （该检查随管线存在，无管线的 agent 无此兜底）。兜底按实际 shell 语义生效：
- *   cmd 归类下 bash -c 引号内的替换不被危险命令检查拦，只读侧由 bash -c 整体拒绝
- *   兜住，root 侧该形态落入正常审批链；
+ *   cmd 归类下 bash -c 引号内的替换不被危险命令检查拦，只读侧由 shell 执行体
+ *   整体拒绝兜住，root 侧该形态落入正常审批链；
  * - cmd 的 doskey 宏与 PowerShell 的 Set-Alias 可把写命令改名（如 sal wd Remove-Item），
  *   改名后的命令词绕过黑名单，不做别名反解；
- * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释），
- *   未覆盖的落盘形态（curl -o、reg add 等持久化写）另行补全。
+ * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
+ *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
+ *   落盘出口（下载、sort 输出文件）与持久化写（注册表、setx、计划任务、服务控制）
+ *   按形态判定，见 segmentWriteVerdict 各分支；
+ * - 包管理器安装与脚本执行（pnpm install 等）、for 循环 do 内嵌命令、certutil -decode
+ *   等其余执行与落盘形态未覆盖（缺口记录 request.md E190）。
  */
 import { resolveCommandShell, stripQuotedSpans, type CommandShellKind } from "./dangerous.js";
 
@@ -77,6 +81,20 @@ const PREFIX_VALUE_FLAGS = new Set([
   "--user", "--group", "--unset", "--split-string",
 ]);
 
+/** shell 家族与 Windows 脚本宿主：调用即执行内层代码（-c 内联、脚本文件、stdin），整体拒绝 */
+const SCRIPT_HOST_WORDS = new Set(["sh", "bash", "dash", "zsh", "ksh", "fish", "cscript", "wscript"]);
+
+/** 脚本解释器：带脚本操作数即按脚本文件执行拒绝；内联代码形态走一行流边界 */
+const INTERPRETER_WORDS = new Set(["python", "python3", "py", "node", "perl", "ruby", "php", "lua"]);
+
+/** 解释器的一行流旗标：python -c、node -e/-p/--eval/--print、perl -e/-pe、ruby/lua -e、php -r/-R/-B */
+const INLINE_SCRIPT_FLAG_RE = /^-([A-Za-z]*[eE]|[cprRB])$|^--(eval|print)/;
+
+/** 脚本操作数：非选项词与 stdin 的「-」（重定向词如 2>&1、< f 除外） */
+function isScriptOperand(word: string): boolean {
+  return word === "-" || (!word.startsWith("-") && !/^\d*[<>]/.test(word));
+}
+
 /**
  * 命令词归一：取路径基名、剥 Windows 可执行后缀、转小写。
  * Windows 的可执行名查找不分大小写与分隔符（cmd.exe / C:\...\cmd.exe 与 cmd 等效），
@@ -121,9 +139,18 @@ function segmentWriteVerdict(words: string[]): string | undefined {
   }
   const first = rest[0] === undefined ? undefined : normalizeCommandWord(rest[0]);
   if (!first) return undefined;
-  // sh -c 内层命令在引号里无法核验，整体按不可核验拒绝（只读 agent 无正当需要）
-  if ((first === "sh" || first === "bash" || first === "dash" || first === "zsh") && rest.includes("-c")) {
-    return `写命令 ${first} -c（内层命令无法核验）`;
+  // shell 家族与 Windows 脚本宿主：-c 内联、脚本文件、stdin 都是无法核验的内层代码，
+  // 整体拒绝——与下面 cmd /c、powershell/pwsh 同口径（只读 agent 无正当需要）
+  if (SCRIPT_HOST_WORDS.has(first)) {
+    return `写命令 ${first}（脚本执行无法核验）`;
+  }
+  // 解释器脚本文件执行（python x.py、node x.js）：脚本内容同属无法核验的内层代码，拒绝。
+  // 一行流（-c/-e 等内联旗标）沿用既有边界：引号内代码与字面文本无法区分，不检测
+  if (INTERPRETER_WORDS.has(first)) {
+    if (!rest.slice(1).some((w) => INLINE_SCRIPT_FLAG_RE.test(w)) && rest.slice(1).some(isScriptOperand)) {
+      return `写命令 ${first}（脚本文件执行无法核验）`;
+    }
+    return undefined;
   }
   // cmd /c /k 转交、PowerShell 与 WSL 调用、start 拉起新进程同理：内层命令（引号内的
   // -Command 脚本、base64 的 -EncodedCommand、WSL 内的 Linux 命令、start 的新窗口命令行）
@@ -136,13 +163,21 @@ function segmentWriteVerdict(words: string[]): string | undefined {
   if (first === "powershell" || first === "pwsh" || first === "wsl" || first === "start") {
     return `写命令 ${first}（内层命令无法核验）`;
   }
-  // xargs 的真实命令是首选项后的词
+  // xargs 的真实命令是首选项后的词；脚本执行体与解释器隔着 xargs 调用同样按写拒绝
   if (first === "xargs") {
     const target = rest.slice(1).find((w) => !w.startsWith("-"));
-    if (target && WRITE_COMMAND_WORDS.has(normalizeCommandWord(target))) return `写命令 xargs ${target}`;
+    if (target) {
+      const t = normalizeCommandWord(target);
+      if (WRITE_COMMAND_WORDS.has(t) || SCRIPT_HOST_WORDS.has(t) || INTERPRETER_WORDS.has(t)) return `写命令 xargs ${target}`;
+    }
     return undefined;
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
+  // awk/sed 的 -f/--file：程序来自脚本文件，同 python x.py 类，无法核验一律拒绝（awk 的 -F 字段分隔符不匹配）
+  if ((first === "awk" || first === "gawk" || first === "mawk" || first === "sed") &&
+      rest.slice(1).some((w) => /^-f/.test(w) || /^--file(=|$)/.test(w))) {
+    return `写命令 ${first} -f（脚本文件执行无法核验）`;
+  }
   // find 的写动作：-delete 与 -exec/-ok 系列执行任意命令，均为写操作
   if (first === "find" && /-(delete|exec|execdir|okdir|ok|fprint|fprintf|fprint0|fls)\b/.test(rest.join(" "))) {
     return "写命令 find（删除/执行/输出到文件）";

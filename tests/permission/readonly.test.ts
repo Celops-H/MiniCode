@@ -191,8 +191,8 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
     expect(readOnlyWriteShell("wsl.exe bash -c \"rm x\"", "cmd")).toMatch(/wsl/);
     expect(readOnlyWriteShell("start del x", "cmd")).toMatch(/start/);
     expect(readOnlyWriteShell("start cmd /c del x", "cmd")).toMatch(/start/);
-    // Git Bash 的 sh.exe -c 同样命中
-    expect(readOnlyWriteShell("sh.exe -c \"rm x\"", "cmd")).toMatch(/sh -c/);
+    // Git Bash 的 sh.exe -c 同样命中（shell 执行体整体拒绝，见脚本执行形态用例）
+    expect(readOnlyWriteShell("sh.exe -c \"rm x\"", "cmd")).toMatch(/sh（脚本执行无法核验）/);
     expect(readOnlyWriteShell("cmd /d dir", "cmd")).toBeUndefined();
   });
 
@@ -242,6 +242,92 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
     expect(readOnlyWriteShell("RM -rf build", "bash")).toMatch(/写命令/);
     expect(readOnlyWriteShell("Rm x", "cmd")).toMatch(/写命令/);
     expect(readOnlyWriteShell("XARGS RM", "bash")).toMatch(/写命令/);
+  });
+});
+
+describe("只读 agent 写拦截判定（脚本执行形态）", () => {
+  it("shell 家族与 Windows 脚本宿主整体拒绝：-c、脚本文件与 stdin 同口径", () => {
+    for (const command of [
+      "sh x.sh",
+      "bash x.sh",
+      "bash -x setup.sh",
+      "dash run.sh",
+      "zsh run.sh",
+      "ksh run.sh",
+      "fish run.fish",
+      "bash",
+      "bash --version",
+      "sh < input.sh",
+      "cscript setup.vbs",
+      "wscript run.js",
+      "cscript //nologo x.vbs",
+      "sudo bash x.sh",
+      "timeout 10 sh build.sh",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/脚本执行无法核验/);
+    }
+  });
+
+  it("解释器脚本文件执行拒绝（含 -m 模块、stdin 与 xargs 形态），一行流维持放行", () => {
+    for (const command of [
+      "python x.py",
+      "python3 x.py",
+      "py x.py",
+      "python ./tool.py",
+      "python -m json.tool in.json",
+      "python -V x.py",
+      "node x.js",
+      "node --experimental-strip-types x.ts",
+      "perl x.pl",
+      "ruby x.rb",
+      "php x.php",
+      "lua x.lua",
+      "python -",
+      "node -",
+      "ls *.py | xargs python",
+      "xargs -n1 node",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/脚本文件执行无法核验|写命令 xargs/);
+    }
+    for (const command of [
+      "node -e 'console.log(1)'",
+      "node -p '1+1'",
+      "node --eval 'x'",
+      "python -c 'print(1)'",
+      "python --version",
+      "python -c 'import sys; print(sys.argv)' a b",
+      "perl -e 'print 1'",
+      "perl -pe 's/a/b/'",
+      "ruby -e 'puts 1'",
+      "php -r 'echo 1;'",
+      "lua -e 'print(1)'",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("awk/sed 的 -f/--file 脚本文件拒绝，内联程序与 -F 字段分隔符放行", () => {
+    for (const command of [
+      "awk -f prog.awk data.txt",
+      "awk --file=prog.awk data.txt",
+      "gawk -f p.awk f",
+      "mawk -f p.awk f",
+      "awk -fprog.awk data.txt",
+      "sed -f script.sed input.txt",
+      "sed --file=script.sed f",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/脚本文件执行无法核验/);
+    }
+    for (const command of [
+      "awk '{print $1}' f",
+      "awk -F: '{print $1}' f",
+      "gawk -F, '{print $2}' f",
+      "sed 's/a/b/' f",
+      "sed -n '1,5p' f",
+      "sed -e 's/a/b/' f",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
   });
 });
 

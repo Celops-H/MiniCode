@@ -99,7 +99,7 @@ describe("只读 agent 写拦截", () => {
     expect(lastToolResult(readonlyAgent)).toContain("重定向");
     expect(executed).toHaveLength(0);
 
-    for (const command of ["rm -rf build", "git commit -m x", "sed -i s/a/b/ f.txt"]) {
+    for (const command of ["rm -rf build", "git commit -m x", "sed -i s/a/b/ f.txt", "bash setup.sh", "node build.js"]) {
       const agent = new Agent({
         modelClient: toolThenText("bash", { command }),
         modelId: "mock",
