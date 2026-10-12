@@ -128,9 +128,10 @@ function ThinkingFold(props: { text: string; collapsed: boolean; onFold: () => v
 }
 
 /** 单条消息块：用户/助手，含点击可切换的思考折叠与错误标记。
- *  助手署名跟随消息的实际产出模型（路由切到备选后归属正确），缺省回落会话当前模型 */
+ *  助手署名跟随消息的实际产出模型（路由切到备选后归属正确），缺省回落会话当前模型；
+ *  无产出模型且会话模型为空（连接引导态）回落「未连接」占位，不留空白署名 */
 function MessageView(props: { b: MessageBlock; modelLabel: string; onFold: () => void }): JSX.Element {
-  const label = props.b.role === "user" ? "你" : (props.b.model ?? props.modelLabel);
+  const label = props.b.role === "user" ? "你" : (props.b.model || props.modelLabel || "未连接");
   return (
     <box flexDirection="column">
       <text fg={theme.textMuted}>

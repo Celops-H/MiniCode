@@ -41,6 +41,29 @@ it("用户消息带头部与文本；「你」标签与圆点为绿、模型标�
   expect(spanFgOf(setup.captureSpans(), "test-model")).toBe("#61afef");
 });
 
+it("空模型（连接引导态）助手署名回落「未连接」占位，不留空白署名", async () => {
+  // 引导态发消息落出的错误块：产出模型与会话模型都是空串快照
+  const setup = await testRender(
+    () => (
+      <Messages
+        blocks={[
+          { kind: "message", id: "e1", role: "assistant", model: "", text: "未知模型", isError: true, thinkingCollapsed: true, time: "14:00:03" },
+        ]}
+        modelLabel=""
+      />
+    ),
+    { width: 60, height: 16 },
+  );
+  await setup.waitForVisualIdle();
+  expect(setup.captureCharFrame()).toContain("未连接");
+  // 正常署名不受影响：消息带产出模型时仍按产出模型显示
+  const named = await app([
+    { kind: "message", id: "a2", role: "assistant", model: "glm-4.5", text: "好的", thinkingCollapsed: true },
+  ]);
+  await named.waitForVisualIdle();
+  expect(named.captureCharFrame()).toContain("glm-4.5");
+});
+
 it("助手消息带思考折叠（收起显示「思考」）", async () => {
   const setup = await app([
     {

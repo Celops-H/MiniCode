@@ -1,5 +1,6 @@
 /**
  * 状态行（底部固定一行）：模型 · 会话标题 · 模式[default/plan mode/auto mode] · 用量三段 · 运行状态 · 操作提示。
+ * 模型段为空（零可用厂商的连接引导态）显示灰色的「未连接」占位，不留悬空分隔点。
  * 会话位显示标题（随 /rename 同步；长标题按列宽截断到 20 列），id 完整值在 /session 面板可见。
  * 运行状态三段：空闲 / 运行中（Esc 打断、连按两次退出）/ 压缩中（Esc 打断压缩）。
  * 观感：一行内分布；窄屏右侧溢出被截（自然右缘裁切）：溢出先截右侧
@@ -37,7 +38,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
   return (
     <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} flexShrink={0}>
       <box flexDirection="row" gap={1} flexShrink={0}>
-        <text fg={theme.modelColor}>{props.model}</text>
+        <text fg={props.model ? theme.modelColor : theme.textMuted}>{props.model || "未连接"}</text>
         {/* 会话标题：最长 20 列截断（CJK 列宽），避免长标题把模式 chip/右侧提示顶出 */}
         <text fg={theme.textMuted}>
           · 会话 {fitWidth(props.title || DEFAULT_SESSION_TITLE, 20)}

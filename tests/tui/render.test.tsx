@@ -97,6 +97,26 @@ describe("view/App 渲染链", () => {
     expect(textFg(setup.captureSpans(), "model-blue")).toBe("#61afef");
   });
 
+  it("引导态（零可用厂商）状态行模型段显示「未连接」占位，不留悬空分隔点", async () => {
+    // 模型段为空是连接引导态的真实输入：会话模型为占位空串（NO_MODEL_ID），
+    // 旧输出模型段无内容，行内直接出现「 · 会话」这类悬空分隔点
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const setup = await testRender(
+      () => <App state={state} onAction={() => {}} />,
+      { width: 64, height: 8 },
+    );
+    await setup.waitForVisualIdle();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("未连接 · 会话");
+    // 占位按次要信息着色（灰），不与真实模型名的模型蓝混淆
+    expect(textFgContaining(setup.captureSpans(), "未连接")).toBe("#8f9096");
+    // 连接成功后模型名切回：文案与颜色跟随 store 更新
+    setState({ modelLabel: "glm-4.5" });
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).not.toContain("未连接");
+    expect(textFg(setup.captureSpans(), "glm-4.5")).toBe("#61afef");
+  });
+
   it("运行中状态显示黄色（进行中黄，红色只留严重错误/API error）", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     setState({ status: "running" });
