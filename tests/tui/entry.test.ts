@@ -155,10 +155,10 @@ it("createSwitchedSession：无 defaultModel 时回落链首与可用首模型",
 it("createSwitchedSession：零可用厂商（连接引导态）回占位模型不报错", async () => {
   const store = makeStore();
   // 首次启动的种子形态：providers 在、key 全未配置；同名环境变量先清掉防误判可用
-  delete process.env.MC_E182_UNSET_KEY;
+  delete process.env.MC_TEST_UNSET_KEY;
   const keyless = await createSwitchedSession(
     store,
-    configSchema.parse({ providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "MC_E182_UNSET_KEY", models: [{ id: "m-1" }] }] }),
+    configSchema.parse({ providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "MC_TEST_UNSET_KEY", models: [{ id: "m-1" }] }] }),
   );
   expect(keyless.meta.model).toBe(NO_MODEL_ID);
   const bare = await createSwitchedSession(store, configSchema.parse({}));

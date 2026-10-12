@@ -116,7 +116,7 @@ export async function reloadOrDraftSession(
   }
 }
 
-/** 纯草稿会话在无模型时的占位模型 id（不落盘：连接成功后 reconfigure 重建草稿） */
+/** 无可用模型时的占位模型 id（空串）：连接成功后 reconfigure 重建草稿或归位会话模型 */
 export const NO_MODEL_ID = "";
 
 /** /session 面板「新建会话」：主模型按重启同序从配置重解析
