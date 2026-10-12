@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SessionStore } from "../../src/storage/index.js";
 import { configSchema } from "../../src/config/index.js";
-import { NO_MODEL_ID, createStartupModels, resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
+import { NO_MODEL_ID, createStartupModels, createSwitchedSession, resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
 
 let dir = "";
 
@@ -130,6 +130,26 @@ it("reloadOrDraftSession：非 ENOENT 读盘错误上抛（meta 损坏不静默�
   const created = await store.createSession({ model: "m1", title: "损坏" });
   writeFileSync(path.join(dir, `${created.meta.id}.meta.json`), "{ 坏 json");
   await expect(reloadOrDraftSession(store, created, "m3")).rejects.toThrow();
+});
+
+it("createSwitchedSession：/session 新建会话的主模型按重启同序解析（defaultModel 优先）", async () => {
+  const store = makeStore();
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }, { id: "m-2" }] }],
+    modelChain: ["m-1"],
+    defaultModel: "m-2",
+  });
+  const session = await createSwitchedSession(store, config);
+  expect(session.meta.model).toBe("m-2"); // Ctrl+S 写盘的 defaultModel 立即用于新建会话
+});
+
+it("createSwitchedSession：无 defaultModel 时回落链首与可用首模型", async () => {
+  const store = makeStore();
+  const provider = { id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }, { id: "m-2" }] };
+  const chained = await createSwitchedSession(store, configSchema.parse({ providers: [provider], modelChain: ["m-2"] }));
+  expect(chained.meta.model).toBe("m-2");
+  const bare = await createSwitchedSession(store, configSchema.parse({ providers: [provider] }));
+  expect(bare.meta.model).toBe("m-1");
 });
 
 it("createStartupModels：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {

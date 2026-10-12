@@ -116,6 +116,14 @@ export async function reloadOrDraftSession(
   }
 }
 
+/** /session 面板「新建会话」：主模型按重启同序从配置重解析
+ *  （defaultModel > modelChain[0] > 兜底，见 resolveMainModel）。
+ *  /model 面板 Ctrl+S 改默认模型只写盘、不重装配，故这里取最新配置重解析，
+ *  不沿用装配期解析的旧主模型。纯函数便于层 1 测试。 */
+export async function createSwitchedSession(store: SessionStore, config: Config): Promise<Session> {
+  return store.createSession({ model: resolveMainModel(config) });
+}
+
 /** 纯草稿会话在无模型时的占位模型 id（不落盘：连接成功后 reconfigure 重建草稿） */
 export const NO_MODEL_ID = "";
 
@@ -247,7 +255,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
       config = await loadConfig();
       session =
         result.switchTo === NEW_SESSION_ID
-          ? await store.createSession({ model: modelId })
+          ? await createSwitchedSession(store, config)
           : await store.loadSession(result.switchTo);
       sessionStartReason = result.switchTo === NEW_SESSION_ID ? "cold" : "resume";
       resetView = true;
