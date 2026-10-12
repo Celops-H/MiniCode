@@ -209,8 +209,6 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
     expect(readOnlyWriteShell("icacls f /setowner Administrators", "cmd")).toMatch(/icacls/);
     expect(readOnlyWriteShell("icacls f /substitute old new", "cmd")).toMatch(/icacls/);
     expect(readOnlyWriteShell("icacls file.txt", "cmd")).toBeUndefined();
-    // sc 跨 shell 二义（PS 的 Set-Content 别名与 cmd 的服务控制），不入黑名单，查询放行
-    expect(readOnlyWriteShell("sc query wuauserv", "cmd")).toBeUndefined();
   });
 
   it("空设备重定向不误拦：cmd/PowerShell 的 nul 豁免，bash 语义下 nul 是普通文件", () => {
@@ -328,6 +326,121 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
+  });
+});
+
+describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
+  it("下载落盘拒绝：curl 输出旗标、wget 整体、iwr/irm 的 -OutFile；curl 裸用与查询形态放行", () => {
+    for (const command of [
+      "curl -o f.txt http://x",
+      "curl -O http://x",
+      "curl -sO http://x",
+      "curl -ofile.txt http://x",
+      "curl --output f.txt http://x",
+      "curl --output=f.txt http://x",
+      "curl --remote-name http://x",
+      "wget http://x",
+      "wget -q https://x",
+      "wget.exe -O f.txt http://x",
+      "iwr -OutFile f.txt http://x",
+      "Invoke-WebRequest -OutFile f http://x",
+      "irm -OutFile f http://x",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/下载落盘|写命令 wget/);
+    }
+    for (const command of [
+      "curl http://x",
+      "curl -s https://x/api",
+      "curl -I http://x",
+      "curl -H 'Accept: x' http://x",
+      "iwr http://x",
+      "irm https://x/api",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("sort 输出写文件拒绝（cmd /o 与 POSIX -o/--output），无输出选项放行", () => {
+    for (const command of [
+      "sort /o out.txt in.txt",
+      "sort /O out.txt",
+      "sort -o out.txt in.txt",
+      "sort --output=out.txt in.txt",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/输出写文件/);
+    }
+    for (const command of ["sort in.txt", "sort -n in.txt", "sort -r -k2 f", "sort /R f"]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("注册表、计划任务、环境变量持久化写拒绝，查询形态放行", () => {
+    for (const command of [
+      "reg add HKLM /v a /d b",
+      "REG ADD HKLM /v a /d b",
+      "reg delete HKLM /f",
+      "reg save HKLM f.hiv",
+      "reg restore HKLM f.hiv",
+      "reg export HKLM f.reg",
+      "reg import f.reg",
+      "setx FOO bar",
+      "SETX FOO bar",
+      "schtasks /create /tn t /tr x",
+      "schtasks /delete /tn t /f",
+      "schtasks /change /tn t /tr y",
+      "schtasks /run /tn t",
+      "schtasks /end /tn t",
+      "schtasks /CREATE /tn t",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeDefined();
+    }
+    for (const command of [
+      "reg query HKLM",
+      "reg query HKLM /v a",
+      "reg compare HKLM HKLM2",
+      "schtasks /query /tn t",
+      "schtasks /query /v /fo list",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("sc 跨 shell 二义：PowerShell 裸 sc 按 Set-Content 拒绝，sc.exe 与 cmd 读子命令放行", () => {
+    // PS 5.1 语义：裸 sc 是 Set-Content 别名，任何用法按写拒绝；显式 sc.exe 拼写按服务控制判
+    expect(readOnlyWriteShell("sc query wuauserv", "powershell")).toMatch(/Set-Content/);
+    expect(readOnlyWriteShell("sc f.txt hello", "powershell")).toMatch(/Set-Content/);
+    expect(readOnlyWriteShell("sc.exe query wuauserv", "powershell")).toBeUndefined();
+    // cmd/bash 语义：sc.exe 服务控制，读子命令白名单放行、其余按写拒绝
+    for (const command of [
+      "sc start wuauserv",
+      "sc stop wuauserv",
+      "sc config x binPath= y",
+      "sc create x binPath= y",
+      "sc delete x",
+      "sc sdset s d",
+      "sc failure x reset= 0",
+    ]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toMatch(/服务控制写操作/);
+    }
+    for (const command of [
+      "sc query wuauserv",
+      "sc queryex Spooler",
+      "sc qc Spooler",
+      "sc qdescription Spooler",
+      "sc qfailure Spooler",
+      "sc qsidtype Spooler",
+      "sc interrogate Spooler",
+      "sc enumdepend Spooler",
+      "sc sdshow Spooler",
+      "sc getdisplayname Spooler",
+      "sc getkeyname Spooler",
+      "sc",
+    ]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
+    }
+    // Windows Git Bash 下 sc 经 sc.exe 解析，同 cmd 口径
+    expect(readOnlyWriteShell("sc query wuauserv", "bash")).toBeUndefined();
+    expect(readOnlyWriteShell("sc start wuauserv", "bash")).toMatch(/服务控制写操作/);
   });
 });
 

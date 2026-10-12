@@ -69,7 +69,7 @@ function bashWriteViolation(command: string, shell: CommandShellKind): string | 
   if (/>{1,2}(?!&\d)(?!\()/.test(stripped)) return "命令含重定向写文件";
   for (const segment of stripped.split(/[|;&\n]/)) {
     const words = segment.trim().split(/\s+/).filter(Boolean);
-    const verdict = segmentWriteVerdict(words);
+    const verdict = segmentWriteVerdict(words, shell);
     if (verdict) return verdict;
   }
   return undefined;
@@ -83,6 +83,18 @@ const PREFIX_VALUE_FLAGS = new Set([
 
 /** shell 家族与 Windows 脚本宿主：调用即执行内层代码（-c 内联、脚本文件、stdin），整体拒绝 */
 const SCRIPT_HOST_WORDS = new Set(["sh", "bash", "dash", "zsh", "ksh", "fish", "cscript", "wscript"]);
+
+/** reg 写子命令：注册表持久化写，query/compare 等查询形态放行 */
+const REG_WRITE_SUBCOMMANDS = new Set(["add", "delete", "copy", "save", "restore", "load", "unload", "import", "export"]);
+
+/** schtasks 写操作旗标：计划任务持久化写，/query 等查询保持放行 */
+const SCHTASKS_WRITE_FLAGS = new Set(["/create", "/delete", "/change", "/run", "/end"]);
+
+/** sc.exe 只读子命令（查询与显示形态），其余子命令按服务控制写拒绝 */
+const SC_READ_SUBCOMMANDS = new Set([
+  "query", "queryex", "qc", "qdescription", "qfailure", "qsidtype", "interrogate",
+  "enumdepend", "sdshow", "showsid", "getdisplayname", "getkeyname", "querylock",
+]);
 
 /** 脚本解释器：带脚本操作数即按脚本文件执行拒绝；内联代码形态走一行流边界 */
 const INTERPRETER_WORDS = new Set(["python", "python3", "py", "node", "perl", "ruby", "php", "lua"]);
@@ -109,9 +121,10 @@ function normalizeCommandWord(word: string): string {
  * 单个命令段的写判定：跳过变量赋值前缀与 sudo/env/nohup 等包装命令
  * （含其选项与选项参数），按真实命令词查黑名单。
  * @param words 命令段分词（非空）
+ * @param shell 命令实际执行方的 shell 语义（sc 的别名二义判定用）
  * @returns 违规原因；只读安全返回 undefined
  */
-function segmentWriteVerdict(words: string[]): string | undefined {
+function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
   let rest = [...words];
   // 外层循环：连乘的包装（sudo env FOO=1 cmd）逐层剥开
   while (rest.length > 0) {
@@ -163,6 +176,14 @@ function segmentWriteVerdict(words: string[]): string | undefined {
   if (first === "powershell" || first === "pwsh" || first === "wsl" || first === "start") {
     return `写命令 ${first}（内层命令无法核验）`;
   }
+  // sc 跨 shell 二义：PowerShell 5.1 里裸 sc 是 Set-Content 别名，按写拒绝；
+  // sc.exe 拼写与 cmd/bash 语义下是 sc.exe 服务控制，读子命令白名单放行、其余拒绝
+  if (first === "sc") {
+    if (shell === "powershell" && !/\.exe$/i.test(rest[0]!)) return "写命令 sc（PowerShell 别名 Set-Content）";
+    const sub = rest[1]?.toLowerCase();
+    if (sub === undefined || SC_READ_SUBCOMMANDS.has(sub)) return undefined;
+    return `写命令 sc ${sub}（服务控制写操作）`;
+  }
   // xargs 的真实命令是首选项后的词；脚本执行体与解释器隔着 xargs 调用同样按写拒绝
   if (first === "xargs") {
     const target = rest.slice(1).find((w) => !w.startsWith("-"));
@@ -173,6 +194,27 @@ function segmentWriteVerdict(words: string[]): string | undefined {
     return undefined;
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
+  // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
+  // 下载落盘——curl 裸用输出 stdout 是只读，-o/-O/--output/--remote-name（含 -so 组合与 -oFILE
+  // 粘连）写文件；iwr/irm 的 -OutFile 同理
+  if (first === "curl" && rest.slice(1).some((w) => /^-[A-Za-z]*[oO]/.test(w) || /^--(output|remote-name)(=|$)/.test(w))) {
+    return "写命令 curl（下载落盘）";
+  }
+  if ((first === "iwr" || first === "invoke-webrequest" || first === "irm" || first === "invoke-restmethod") &&
+      rest.slice(1).some((w) => /^-outfile(=|:|$)/i.test(w))) {
+    return `写命令 ${first}（下载落盘）`;
+  }
+  // sort 输出写文件：cmd 的 /o、POSIX 的 -o/--output（无该选项输出 stdout 是只读）
+  if (first === "sort" && rest.slice(1).some((w) => /^\/o/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {
+    return "写命令 sort（输出写文件）";
+  }
+  if (first === "reg") {
+    const sub = rest[1]?.toLowerCase();
+    return sub !== undefined && REG_WRITE_SUBCOMMANDS.has(sub) ? `写命令 reg ${sub}` : undefined;
+  }
+  if (first === "schtasks" && rest.slice(1).some((w) => SCHTASKS_WRITE_FLAGS.has(w.toLowerCase()))) {
+    return "写命令 schtasks（改计划任务）";
+  }
   // awk/sed 的 -f/--file：程序来自脚本文件，同 python x.py 类，无法核验一律拒绝（awk 的 -F 字段分隔符不匹配）
   if ((first === "awk" || first === "gawk" || first === "mawk" || first === "sed") &&
       rest.slice(1).some((w) => /^-f/.test(w) || /^--file(=|$)/.test(w))) {
@@ -256,13 +298,16 @@ const WRITE_COMMAND_WORDS = new Set([
   "rm", "rmdir", "mv", "cp", "ln", "mkdir", "touch", "chmod", "chown", "chgrp",
   "dd", "tee", "truncate", "shred", "mkfifo", "install", "patch",
   // cmd 内建与随附工具：del/erase、ren/rename、rd/md 与 mkdir/rmdir 互为同义词；
-  // xcopy/robocopy 是 copy 的递归形态；mklink 建链接；takeown 无纯显示形态
+  // xcopy/robocopy 是 copy 的递归形态；mklink 建链接；takeown 无纯显示形态；
+  // setx 写用户级环境变量（持久化）
   "del", "erase", "copy", "xcopy", "robocopy", "move", "ren", "rename",
-  "rd", "md", "mklink", "format", "takeown",
+  "rd", "md", "mklink", "format", "takeown", "setx",
   // PowerShell 写类 cmdlet 与标准别名（rm/del/erase/rd/copy/move/mv/cp/mkdir/tee 等
-  // 别名已被上面词覆盖）。sc 是唯一例外：PS 5.1 里是 Set-Content 别名，cmd 里是 sc.exe
-  // （服务控制），二义且 sc query 是常见只读诊断，不入表（缺口记录 request.md E179）
+  // 别名已被上面词覆盖）。sc 按 shell 语义单独判定、curl 按输出旗标判定，见
+  // segmentWriteVerdict 对应分支，不入表
   "remove-item", "copy-item", "move-item", "new-item", "set-content", "add-content",
   "clear-content", "out-file", "set-itemproperty", "export-csv", "export-clixml", "set-acl",
   "ri", "ni", "cpi", "mi", "ac", "clc", "sp",
+  // 下载落盘：wget 默认写文件（输出到 stdout 的 -O - 形态罕见，只读取内容用 curl 即可，保守整体拒绝）
+  "wget",
 ]);
