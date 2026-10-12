@@ -138,14 +138,16 @@ export async function createSwitchedSession(store: SessionStore, config: Config)
 }
 
 /**
- * 启动模型客户端装配：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
- * 由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
+ * 模型客户端装配（启动与 reconfigure 重装配共用）：零可用厂商不报错——返回空模型集合
+ * + needsConnect，由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
+ * 引导态下 /settings、/mcp 应用也到达 reconfigure，按上述口径返回空模型集合与占位模型，
+ * 不让 NO_PROVIDER_ERROR 逃出入口层退出进程。
  * modelChain 死条目等装配告警收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
  * @param config 已加载配置（可省略，等同零厂商）
  * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、
  *   needsConnect 是否进连接引导、warnings 装配告警列表
  */
-export function createStartupModels(config?: Config): {
+export function createModelsOrGuide(config?: Config): {
   models: Models;
   modelId: string;
   needsConnect: boolean;
@@ -165,6 +167,16 @@ export function createStartupModels(config?: Config): {
   }
 }
 
+/** reconfigure 后会话模型归位：主模型可解析（有可用厂商）且会话模型不可解析（空占位或
+ *  已下线）时归位为当前主模型，免得已连接仍报「未知模型」；主模型为占位空串
+ *  （零可用厂商，引导态）时保持会话原值——归位成空串会丢掉会话原有的模型选择。
+ *  纯函数便于层 1 测试。 */
+export function resolveSessionModel(models: Models, sessionModel: string, mainModelId: string): string {
+  if (!models.resolve(mainModelId)) return sessionModel;
+  if (!sessionModel || !models.resolve(sessionModel)) return mainModelId;
+  return sessionModel;
+}
+
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
 export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 全局配置播种：独立启动（dev 入口）也要装配配置前检测；
@@ -177,7 +189,7 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 会话按启动工作目录隔离存储：各目录只看自己的会话
   const store = new SessionStore(resolveSessionsDir({ cwd: process.cwd(), root: config.sessionsDir }));
   // 零可用厂商：正常启动进 /connect 引导；CLI 宿主非交互，保持报错退出
-  const startup = createStartupModels(config);
+  const startup = createModelsOrGuide(config);
   let models: Models = startup.models;
   let modelId: string = startup.modelId;
   // 装配告警（modelChain 死条目等）：每个会话轮经 startupNotices 提示一次，
@@ -227,14 +239,17 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // toast 不清——carry 续接保留界面内容，新轮 runTui 会给遗留 toast 重新挂过期定时器，
         // 成功提示（模型已切换/已连接/配置已写入）正常显示、到期自然消失
         setSharedState({ modal: undefined });
-        // reconfigure（/connect 或 /model）原位重建配置链：重读 config + .env、重建模型客户端；
+        // reconfigure（/connect 连接成功、/model 切换、/mcp 与 /settings 应用）原位重建配置链：
+        // 重读 config + .env、重建模型客户端；引导态下 /settings、/mcp 应用同链到达，
+        // 零可用厂商不报错退出，回到空模型集合的引导态继续（不重开连接弹窗）。
         // 会话内视图不按盘上消息重建（store 内容原样续接，历史固定）；切会话/新建草稿才重建视图。
         // 装配告警随重建重置重收
         await loadDotEnv();
         config = await loadConfig();
-        modelWarnings = [];
-        models = buildModelClient(config, undefined, { onWarning: (w) => modelWarnings.push(w) });
-        modelId = resolveMainModel(config);
+        const rebuilt = createModelsOrGuide(config);
+        models = rebuilt.models;
+        modelId = rebuilt.modelId;
+        modelWarnings = rebuilt.warnings;
         // switchTo===NEW_SESSION_ID 分支实际不可达（reconfigure 不带 switchTo），保留作防御
         if (result.switchTo === NEW_SESSION_ID) {
           session = await store.createSession({ model: modelId });
@@ -250,10 +265,9 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
           sessionStartReason = reloaded.resumed ? "resume" : "cold";
           // 引导态先发消息后连接：草稿可能以空模型落盘，
           // 载入的会话模型在新配置里不可解析时归位为当前主模型，免得已连接仍报「未知模型」；
+          // 零可用厂商（引导态应用设置）不归位，会话模型保持原值；
           // 内存归位即可，下一轮落盘自然纠正盘上 meta
-          if (!session.meta.model || !models.resolve(session.meta.model)) {
-            session.meta.model = modelId;
-          }
+          session.meta.model = resolveSessionModel(models, session.meta.model, modelId);
           resetView = false;
         }
         continue;

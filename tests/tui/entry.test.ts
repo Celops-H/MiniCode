@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SessionStore } from "../../src/storage/index.js";
 import { configSchema } from "../../src/config/index.js";
-import { NO_MODEL_ID, createStartupModels, createSwitchedSession, resolveInitialSession, reloadOrDraftSession } from "../../src/tui/index.js";
+import { NO_MODEL_ID, createModelsOrGuide, createSwitchedSession, resolveInitialSession, resolveSessionModel, reloadOrDraftSession } from "../../src/tui/index.js";
 
 let dir = "";
 
@@ -165,28 +165,53 @@ it("createSwitchedSession：零可用厂商（连接引导态）回占位模型�
   expect(bare.meta.model).toBe(NO_MODEL_ID);
 });
 
-it("createStartupModels：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {
-  const startup = createStartupModels(undefined);
+it("createModelsOrGuide：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {
+  const startup = createModelsOrGuide(undefined);
   expect(startup.needsConnect).toBe(true);
   expect(startup.modelId).toBe(NO_MODEL_ID);
   expect(startup.models.listModels()).toEqual([]);
 });
 
-it("createStartupModels：落盘 apiKey 的厂商正常装配（与环境变量同权）", () => {
+it("createModelsOrGuide：落盘 apiKey 的厂商正常装配（与环境变量同权）", () => {
   const config = configSchema.parse({
     providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
   });
-  const startup = createStartupModels(config);
+  const startup = createModelsOrGuide(config);
   expect(startup.needsConnect).toBe(false);
   expect(startup.modelId).toBe("m-1");
   expect(startup.models.listModels().map((m) => m.id)).toEqual(["m-1"]);
 });
 
-it("createStartupModels：modelChain 死条目收进 warnings 供界面提示", () => {
+it("createModelsOrGuide：modelChain 死条目收进 warnings 供界面提示", () => {
   const config = configSchema.parse({
     providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
     modelChain: ["m-1", "ghost-1"],
   });
-  const startup = createStartupModels(config);
+  const startup = createModelsOrGuide(config);
   expect(startup.warnings).toEqual([expect.stringContaining("ghost-1")]);
+});
+
+it("resolveSessionModel：有可用厂商时会话模型可解析则保持原值", () => {
+  const { models } = createModelsOrGuide(
+    configSchema.parse({
+      providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }, { id: "m-2" }] }],
+    }),
+  );
+  expect(resolveSessionModel(models, "m-1", "m-2")).toBe("m-1");
+});
+
+it("resolveSessionModel：会话模型空占位或已下线则归位主模型", () => {
+  const { models } = createModelsOrGuide(
+    configSchema.parse({
+      providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }, { id: "m-2" }] }],
+    }),
+  );
+  expect(resolveSessionModel(models, "", "m-2")).toBe("m-2");
+  expect(resolveSessionModel(models, "ghost", "m-2")).toBe("m-2");
+});
+
+it("resolveSessionModel：零可用厂商（引导态）保持载入会话的模型，不归位成空串", () => {
+  const { models } = createModelsOrGuide(undefined);
+  expect(resolveSessionModel(models, "m-1", NO_MODEL_ID)).toBe("m-1");
+  expect(resolveSessionModel(models, NO_MODEL_ID, NO_MODEL_ID)).toBe(NO_MODEL_ID);
 });
