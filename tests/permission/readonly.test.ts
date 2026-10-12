@@ -47,6 +47,9 @@ describe("只读 agent 写拦截判定", () => {
       "sed -i.bak s/a/b/ f.txt",
       "sed --in-place=.bak s/a/b/ f.txt",
       "sed -ni 'p' f.txt",
+      "sed -Ei 's/a/b/' f.txt",
+      "sed -I.bak 's/a/b/' f.txt",
+      "sed -I .bak 's/a/b/' f.txt",
       "find . -name '*.ts' -delete",
       "find . -name '*.ts' -exec rm {} \\;",
       "git add .",
@@ -408,6 +411,13 @@ describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {
     expect(readOnlyWriteShell("command rm x", "cmd")).toBeDefined();
     expect(readOnlyWriteShell("command -p rm x", "cmd")).toBeDefined();
     expect(readOnlyWriteShell("command -p git log", "cmd")).toBeUndefined();
+    // -- 结束选项标记：剥掉后按后续命令词判定（黑名单与形态分支都要走到）；带 -v 时仍是查询
+    expect(readOnlyWriteShell("command -- rm x", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -p -- rm x", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -- git add .", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -- curl -o f http://x", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -v -- rm", "cmd")).toBeUndefined();
+    expect(readOnlyWriteShell("command -p -- git log", "cmd")).toBeUndefined();
   });
 });
 
@@ -469,15 +479,29 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
       "xargs -I {} rm {}",
       "xargs sc start x",
       "xargs schtasks /create /tn t",
-      // 取值选项的参数被引号剔除后消失的形态：跳过取值会把真目标词吞掉，靠首个非选项词兜底
+      // 取值选项的参数被引号剔除后消失的形态：跳过取值会把真目标词吞掉，靠多线索兜底
       "xargs -I '{}' rm '{}'",
       "xargs -d '\\n' rm x",
       "xargs -E '' rm x",
       "xargs --process-slot-var VAR rm x",
+      // 多个取值选项叠加、词序按消失的值前移的形态
+      "xargs -P 4 -d '\\n' rm",
+      "xargs -d '\\n' -n 1 rm x",
+      "xargs -I '{}' -P 4 rm -rf '{}'",
+      "xargs -P 4 -I '{}' rm -rf '{}'",
+      "xargs -n 2 rm",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
     }
-    for (const command of ["xargs grep foo", "xargs -n 2 echo", "xargs -n1 echo", "xargs -I {} echo {}"]) {
+    for (const command of [
+      "xargs grep foo",
+      "xargs -n 2 echo",
+      "xargs -n1 echo",
+      "xargs -I {} echo {}",
+      // 取值选项后的实参不是目标：grep 是目标、rm 是模式，不因取值链误拦
+      "xargs -n 2 grep rm f",
+      "xargs -a list.txt grep rm f",
+    ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }
   });

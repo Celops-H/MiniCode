@@ -192,6 +192,8 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
         if (/[vV]/.test(rest[i]!)) queried = true;
         i++;
       }
+      // bash 内建的 -- 结束选项标记：与旗标一并剥掉后按后续命令词判定
+      if (rest[i] === "--") i++;
       if (queried) return undefined;
       rest.splice(0, i);
       continue;
@@ -259,18 +261,31 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     return `写命令 sc ${sub}（服务控制写操作）`;
   }
   // xargs 的真实命令是首选项后的词。取值选项的参数可能仍在词表（-n 2），也可能被
-  // 引号剔除后消失（-I '{}' rm 只剩 -I rm），两条线索都取：按取值跳过定位的目标、
-  // 首个非选项词，任一判写即拒绝
+  // 引号剔除后消失（-I '{}' rm 只剩 -I rm），词序按数量前移，单条线索定不准目标。
+  // 多线索取并集，任一判写即拒绝：按取值跳过定位的目标、首个非选项词、每个取值选项
+  // 的参数位之后的下一个非选项词（值消失时真目标落在这一位）。误拦面：取值恰为写命令
+  // 词，或多个取值被引号剔除后目标的实参落在写命令词（如 xargs -I '{}' -d '\n' grep rm），
+  // 形态罕见，按保守拒绝接受
   if (first === "xargs") {
     const tail = rest.slice(1);
+    const candidates = new Set<number>();
+    const plainIdx = tail.findIndex((w) => !w.startsWith("-"));
+    if (plainIdx !== -1) candidates.add(plainIdx);
     const skipIdx = xargsTargetIndex(tail);
-    if (skipIdx !== -1) {
-      const verdict = xargsVerdict(tail, skipIdx, shell);
+    if (skipIdx !== -1) candidates.add(skipIdx);
+    for (let i = 0; i < tail.length; i++) {
+      if (!(tail[i]!.startsWith("-") && XARGS_VALUE_FLAGS.has(tail[i]!))) continue;
+      let v = i + 1;
+      while (v < tail.length && tail[v]!.startsWith("-")) v++;
+      let next = v + 1;
+      while (next < tail.length && tail[next]!.startsWith("-")) next++;
+      if (v < tail.length && next < tail.length) candidates.add(next);
+    }
+    for (const idx of [...candidates].sort((a, b) => a - b)) {
+      const verdict = xargsVerdict(tail, idx, shell);
       if (verdict) return verdict;
     }
-    const plainIdx = tail.findIndex((w) => !w.startsWith("-"));
-    if (plainIdx === -1 || plainIdx === skipIdx) return undefined;
-    return xargsVerdict(tail, plainIdx, shell);
+    return undefined;
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
   // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
@@ -307,7 +322,9 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (first === "find" && /-(delete|exec|execdir|okdir|ok|fprint|fprintf|fprint0|fls)\b/.test(rest.join(" "))) {
     return "写命令 find（删除/执行/输出到文件）";
   }
-  if (first === "sed" && rest.some((w) => /^-[a-z]*i/.test(w) || /^--in-place(=|$)/.test(w))) {
+  // sed 大小写旗标一并认：GNU 的 -E/-i 与组合（-Ei/-ni），BSD/macOS 的 -I 系列同为
+  // 原地改写（GNU 下 -I 非法不落盘，放宽无代价）；perl/ruby 因 -M/-I 带值只认小写簇
+  if (first === "sed" && rest.some((w) => /^-[a-z]*i/i.test(w) || /^--in-place(=|$)/.test(w))) {
     return "写命令 sed -i（原地改写）";
   }
   // attrib / icacls 的显示形态是查询；带属性/ACL 修改旗标时改文件元数据或落盘（/save），按写拒绝
