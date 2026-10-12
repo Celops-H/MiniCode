@@ -121,6 +121,13 @@ function isScriptOperand(word: string): boolean {
   return word === "-" || (!word.startsWith("-") && !/^\d*[<>]/.test(word));
 }
 
+/** xargs 的取值选项：其后一个 token 是其参数（引号剔除后参数可能已消失，见 xargs 分支） */
+const XARGS_VALUE_FLAGS = new Set([
+  "-I", "-n", "-L", "-s", "-P", "-a", "-d", "-E",
+  "--replace", "--max-args", "--max-lines", "--max-chars", "--max-procs",
+  "--arg-file", "--delimiter", "--eof", "--process-slot-var",
+]);
+
 /**
  * xargs 目标命令词的下标：跳过选项；取值选项连其参数一并跳过
  * （xargs -I {} rm 的 {} 是 -I 的值，不是目标）。
@@ -128,19 +135,23 @@ function isScriptOperand(word: string): boolean {
  * @returns 目标词下标；无目标返回 -1
  */
 function xargsTargetIndex(words: string[]): number {
-  const valueFlags = new Set([
-    "-I", "-n", "-L", "-s", "-P", "-a", "-d", "-E",
-    "--replace", "--max-args", "--max-lines", "--max-chars", "--max-procs", "--arg-file", "--delimiter", "--eof",
-  ]);
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!;
     if (w.startsWith("-")) {
-      if (valueFlags.has(w)) i++;
+      if (XARGS_VALUE_FLAGS.has(w)) i++;
       continue;
     }
     return i;
   }
   return -1;
+}
+
+/** xargs 目标词的写判定：目标为 shell/解释器时其脚本参数来自输入流，整体拒绝；
+ *  其余目标按同一套段判定递归（xargs curl -o、xargs sort -o 同样命中） */
+function xargsVerdict(words: string[], idx: number, shell: CommandShellKind): string | undefined {
+  const target = normalizeCommandWord(words[idx]!);
+  if (SCRIPT_HOST_WORDS.has(target) || INTERPRETER_WORDS.has(target)) return `写命令 xargs ${words[idx]}`;
+  return segmentWriteVerdict(words.slice(idx), shell);
 }
 
 /**
@@ -171,12 +182,24 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
     if (rest.length === 0) break;
     const head = normalizeCommandWord(rest[0]!);
-    // command 的 -v/-V 只查询命令路径（-v 查路径、-V 查并输出描述），不执行后续词
-    if (head === "command" && /^-[vV]$/.test(rest[1] ?? "")) return undefined;
+    // command 的旗标只有 -p/-v/-V（可组合，如 -pv）：带 -v/-V 是查询命令路径，不执行
+    // 后续词，整体放行；只有 -p 时剥掉 command 与其旗标（-p 用默认 PATH 执行后续命令），
+    // 按后续命令词继续判定。单列处理避免共享取值旗标表把 -v 当成 -p 的参数吞掉
+    if (head === "command") {
+      let i = 1;
+      let queried = false;
+      while (i < rest.length && /^-[pvV]+$/.test(rest[i]!)) {
+        if (/[vV]/.test(rest[i]!)) queried = true;
+        i++;
+      }
+      if (queried) return undefined;
+      rest.splice(0, i);
+      continue;
+    }
     const isWrapper =
       /^[A-Za-z_][A-Za-z0-9_]*=/.test(head) ||
       head === "sudo" || head === "env" || head === "nohup" || head === "nice" ||
-      head === "stdbuf" || head === "timeout" || head === "command" || head === "call";
+      head === "stdbuf" || head === "timeout" || head === "call";
     if (!isWrapper) break;
     rest.shift();
     // timeout 的首参数是时长（timeout 10 rm x），随包装一并剥掉
@@ -204,8 +227,9 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   // 解释器脚本文件执行（python x.py、node x.js）：脚本内容同属无法核验的内层代码，拒绝。
   // 一行流（-c/-e 等内联旗标）沿用既有边界：引号内代码与字面文本无法区分，不检测
   if (INTERPRETER_WORDS.has(first)) {
-    // perl/ruby 的 -i 原地改写文件（含 -pi/-pie 组合与 -i.bak 后缀），先于一行流判定
-    if ((first === "perl" || first === "ruby") && rest.slice(1).some((w) => /^-[A-Za-z]*i/.test(w))) {
+    // perl/ruby 的 -i 原地改写文件（含 -pi/-pie 组合与 -i.bak 后缀），先于一行流判定。
+    // 只认小写旗标簇：-Mstrict、-Ilib 的带值选项词面含 i 但非 -i，不误拦
+    if ((first === "perl" || first === "ruby") && rest.slice(1).some((w) => /^-[a-z]*i/.test(w))) {
       return `写命令 ${first} -i（原地改写）`;
     }
     const isInline = INTERPRETER_INLINE_FLAGS[first]!;
@@ -234,15 +258,19 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     if (sub === undefined || sub === "/?" || SC_READ_SUBCOMMANDS.has(sub)) return undefined;
     return `写命令 sc ${sub}（服务控制写操作）`;
   }
-  // xargs 的真实命令是首选项后的词。目标为 shell/解释器时其脚本参数来自输入流，
-  // 无法核验，整体拒绝；其余目标按同一套段判定递归（xargs curl -o、xargs sort -o 同样命中）
+  // xargs 的真实命令是首选项后的词。取值选项的参数可能仍在词表（-n 2），也可能被
+  // 引号剔除后消失（-I '{}' rm 只剩 -I rm），两条线索都取：按取值跳过定位的目标、
+  // 首个非选项词，任一判写即拒绝
   if (first === "xargs") {
     const tail = rest.slice(1);
-    const idx = xargsTargetIndex(tail);
-    if (idx === -1) return undefined;
-    const target = normalizeCommandWord(tail[idx]!);
-    if (SCRIPT_HOST_WORDS.has(target) || INTERPRETER_WORDS.has(target)) return `写命令 xargs ${tail[idx]}`;
-    return segmentWriteVerdict(tail.slice(idx), shell);
+    const skipIdx = xargsTargetIndex(tail);
+    if (skipIdx !== -1) {
+      const verdict = xargsVerdict(tail, skipIdx, shell);
+      if (verdict) return verdict;
+    }
+    const plainIdx = tail.findIndex((w) => !w.startsWith("-"));
+    if (plainIdx === -1 || plainIdx === skipIdx) return undefined;
+    return xargsVerdict(tail, plainIdx, shell);
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
   // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
@@ -279,7 +307,7 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (first === "find" && /-(delete|exec|execdir|okdir|ok|fprint|fprintf|fprint0|fls)\b/.test(rest.join(" "))) {
     return "写命令 find（删除/执行/输出到文件）";
   }
-  if (first === "sed" && rest.some((w) => w === "-i" || w === "--in-place")) {
+  if (first === "sed" && rest.some((w) => /^-[a-z]*i/.test(w) || /^--in-place(=|$)/.test(w))) {
     return "写命令 sed -i（原地改写）";
   }
   // attrib / icacls 的显示形态是查询；带属性/ACL 修改旗标时改文件元数据或落盘（/save），按写拒绝

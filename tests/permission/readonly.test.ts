@@ -44,6 +44,9 @@ describe("只读 agent 写拦截判定", () => {
       "echo hi | tee out.txt",
       "sed -i 's/a/b/' file.txt",
       "sed --in-place s/a/b/ file.txt",
+      "sed -i.bak s/a/b/ f.txt",
+      "sed --in-place=.bak s/a/b/ f.txt",
+      "sed -ni 'p' f.txt",
       "find . -name '*.ts' -delete",
       "find . -name '*.ts' -exec rm {} \\;",
       "git add .",
@@ -306,8 +309,11 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
       "perl -E 'print 1'",
       "perl -pe 's/a/b/'",
       "perl -lane 'print $F[0]'",
+      "perl -Mstrict -e 'print 1'",
+      "perl -MList::Util -e 'x'",
       "ruby -e 'puts 1'",
       "ruby -we 'puts 1'",
+      "ruby -Ilib -e 'puts 1'",
       "php -r 'echo 1;'",
       "php -R 'echo 1;'",
       "php -B 'echo 1;'",
@@ -387,12 +393,21 @@ describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {
     for (const command of ["call ( del x", "call @ del x"]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
     }
-    // command -v/-V 只查询命令路径，不执行后续命令词；sudo 包装叠加同样放行
-    for (const command of ["command -v rm", "command -V rm", "sudo command -v rm", "command -v git"]) {
+    // command -v/-V 只查询命令路径，不执行后续命令词；旗标可组合、sudo 包装叠加同样放行
+    for (const command of [
+      "command -v rm",
+      "command -V rm",
+      "command -pv rm",
+      "command -p -v rm",
+      "sudo command -v rm",
+      "command -v git",
+    ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }
-    // command 不带 -v/-V 时后续命令词照常判定
+    // command 不带 -v/-V 时后续命令词照常判定（-p 用默认 PATH 执行后续命令，照拦）
     expect(readOnlyWriteShell("command rm x", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -p rm x", "cmd")).toBeDefined();
+    expect(readOnlyWriteShell("command -p git log", "cmd")).toBeUndefined();
   });
 });
 
@@ -454,10 +469,15 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
       "xargs -I {} rm {}",
       "xargs sc start x",
       "xargs schtasks /create /tn t",
+      // 取值选项的参数被引号剔除后消失的形态：跳过取值会把真目标词吞掉，靠首个非选项词兜底
+      "xargs -I '{}' rm '{}'",
+      "xargs -d '\\n' rm x",
+      "xargs -E '' rm x",
+      "xargs --process-slot-var VAR rm x",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
     }
-    for (const command of ["xargs grep foo", "xargs -n 2 echo", "xargs -n1 echo"]) {
+    for (const command of ["xargs grep foo", "xargs -n 2 echo", "xargs -n1 echo", "xargs -I {} echo {}"]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }
   });
