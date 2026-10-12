@@ -108,13 +108,15 @@ function isScriptOperand(word: string): boolean {
 }
 
 /**
- * 命令词归一：取路径基名、剥 Windows 可执行后缀、转小写。
+ * 命令词归一：取路径基名、剥首尾分组符号与 cmd 的 @ 静默前缀、剥 Windows 可执行后缀、转小写。
  * Windows 的可执行名查找不分大小写与分隔符（cmd.exe / C:\...\cmd.exe 与 cmd 等效），
- * 统一归一后比较，防拼写变体绕过；POSIX 下多余的大写形态本就不存在，按写拦不误伤。
+ * 统一归一后比较，防拼写变体绕过（@del、括号包住的首词同为常见拼写形态）；
+ * POSIX 下多余的大写形态本就不存在，按写拦不误伤。
  */
 function normalizeCommandWord(word: string): string {
   const base = word.split(/[\\/]/).pop()!;
-  return base.replace(/\.(exe|com|cmd|bat)$/i, "").toLowerCase();
+  const cleaned = base.replace(/^[@({]+/, "").replace(/[)}]+$/, "");
+  return cleaned.replace(/\.(exe|com|cmd|bat)$/i, "").toLowerCase();
 }
 
 /**
@@ -126,6 +128,8 @@ function normalizeCommandWord(word: string): string {
  */
 function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
   let rest = [...words];
+  // 先剥独立的纯分组符号词（( rm x)、{ rm x、@ del x），首词判定看其后真实命令词
+  while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
   // 外层循环：连乘的包装（sudo env FOO=1 cmd）逐层剥开
   while (rest.length > 0) {
     const head = normalizeCommandWord(rest[0]!);

@@ -329,6 +329,35 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
   });
 });
 
+describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {
+  it("括号/花括号分组与 cmd @ 静默前缀的写命令照常命中", () => {
+    for (const command of [
+      "(rm x)",
+      "( rm x)",
+      "(del x)",
+      "(rm -rf build)",
+      "((rm x))",
+      "{ rm x",
+      "@del x",
+      "@ del x",
+      "@rm -rf build",
+      "@git commit -m x",
+      "timeout 10 @del x",
+      "(sudo rm x)",
+      "(rm x 2>/dev/null)",
+      "(curl -o f.txt http://x)",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeDefined();
+    }
+  });
+
+  it("查询形态不误伤（括号包住的只读命令照常放行）", () => {
+    for (const command of ["(ls)", "@echo hi", "@echo off", "{ ls", "echo (x)", "git log --oneline", "@where git"]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+});
+
 describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
   it("下载落盘拒绝：curl 输出旗标、wget 整体、iwr/irm 的 -OutFile；curl 裸用与查询形态放行", () => {
     for (const command of [
