@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
@@ -809,6 +809,244 @@ describe("交互循环", () => {
     // checkpoint 已落盘的 user/assistant 不被 finally 重复追加，出错轮只补 tool_result
     const loaded = await store.loadSession(session.meta.id);
     expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "assistant", "tool_result"]);
+  });
+
+  it("会话收尾注入收件箱滞留消息：Esc 打断的中断标记随会话结束落盘（恢复会话有迹可循）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+    // 中断收尾窗口：子 agent 的中断标记已投递但未被消费（收件箱只在轮起点消费）
+    agent.deliver({
+      type: "INTERRUPTED",
+      from: AgentPath.parse("/root/task_1") as AgentPath,
+      content: "子代理 task_1 已中断，任务未完成。",
+      triggerTurn: false,
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "/exit";
+    }
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+
+    // 会话收尾把滞留的中断标记注入历史并落盘
+    expect(agent.getMessages().some((m) => m.role === "user" && m.agentPath === "/root/task_1")).toBe(true);
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages().at(-1)).toMatchObject({
+      role: "user",
+      source: "system",
+      agentPath: "/root/task_1",
+      content: "【中断】from /root/task_1:\n子代理 task_1 已中断，任务未完成。",
+    });
+  });
+
+  it("轮起点已消费的收件箱消息不重复落盘（收尾注入只补滞留增量）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手", tools: [] });
+    agent.deliver({
+      type: "MESSAGE",
+      from: AgentPath.parse("/root/task_1") as AgentPath,
+      content: "进度汇报",
+      triggerTurn: false,
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "你好";
+      yield "/exit";
+    }
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+
+    const loaded = await store.loadSession(session.meta.id);
+    const occurrences = loaded.getMessages().filter((m) => m.role === "user" && m.agentPath === "/root/task_1");
+    expect(occurrences).toHaveLength(1);
+    expect(occurrences[0]).toMatchObject({ content: "【消息】from /root/task_1:\n进度汇报" });
+  });
+
+  it("退出时后台轮在途：等其收尾再收尾注入，落盘不产生悬空工具调用", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 工具响应中断信号（模拟 bash 类）：打断后立即收尾，无需看门狗等待
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      maxResultSizeChars: 1000,
+      execute: (_input, options) =>
+        new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+        }),
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "后台轮结论" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      // 与 TUI 宿主同款 checkpoint：工具执行前把已产生消息落盘
+      checkpoint: async (messages) => {
+        for (const message of messages.slice(session.getMessages().length)) {
+          await store.appendMessage(session, message);
+        }
+        await store.flush();
+      },
+    });
+    // 后台轮（模拟子 agent 唤醒 root 续跑）：驱动到工具执行中（checkpoint 已落盘含工具调用的 assistant）
+    agent.start("后台任务");
+    const background = (async () => {
+      for await (const _ of agent.resume()) {
+        // 消费
+      }
+    })();
+    for (let i = 0; i < 200 && !session.getMessages().some((m) => m.role === "assistant"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(session.getMessages().some((m) => m.role === "assistant")).toBe(true);
+    // Esc 收尾窗口：另一子 agent 的中断标记已投递、后台轮仍在工具执行中
+    agent.deliver({
+      type: "INTERRUPTED",
+      from: AgentPath.parse("/root/task_1") as AgentPath,
+      content: "子代理 task_1 已中断，任务未完成。",
+      triggerTurn: false,
+    });
+    // 用户退出：输入循环立即结束，收尾等后台轮收尾后再注入落盘
+    async function* inputs(): AsyncIterable<string> {}
+    const interacting = interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+    setTimeout(() => agent.interrupt(), 50);
+    await interacting;
+    await background;
+
+    // 盘上顺序：assistant(工具调用) → tool_result → 中断注入——注入不插队到
+    // 工具调用与结果之间，恢复请求不会出现悬空 tool_call（厂商 400）
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "assistant", "tool_result", "user"]);
+    expect(loaded.getMessages().at(-1)).toMatchObject({ role: "user", agentPath: "/root/task_1" });
+  });
+
+  it("退出时后台轮超限未收尾：跳过收尾注入，不落畸形历史", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    // 无人打断时永不返回的工具：后台轮停在工具执行中，等待窗口内无法收尾
+    // （收尾清理时配合 agent.interrupt 立即收尾，测试不留悬挂轮次）
+    const hungTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      maxResultSizeChars: 1000,
+      execute: (_input, options) =>
+        new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+        }),
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+          yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+          yield { type: "toolcall_end", index: 0 };
+          yield { type: "done", stopReason: "tool_calls" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [hungTool],
+      checkpoint: async (messages) => {
+        for (const message of messages.slice(session.getMessages().length)) {
+          await store.appendMessage(session, message);
+        }
+        await store.flush();
+      },
+    });
+    agent.start("后台任务");
+    const background = (async () => {
+      for await (const _ of agent.resume()) {
+        // 消费
+      }
+    })();
+    for (let i = 0; i < 200 && !session.getMessages().some((m) => m.role === "assistant"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(session.getMessages().some((m) => m.role === "assistant")).toBe(true);
+    agent.deliver({
+      type: "INTERRUPTED",
+      from: AgentPath.parse("/root/task_1") as AgentPath,
+      content: "子代理 task_1 已中断，任务未完成。",
+      triggerTurn: false,
+    });
+    // 收尾等待窗口用假定时器快进：超限仍在途 → 跳过注入
+    vi.useFakeTimers();
+    try {
+      async function* inputs(): AsyncIterable<string> {}
+      const interacting = interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await interacting;
+
+      // 未注入、未落畸形：收件箱保留，盘上仍是 checkpoint 的两条
+      expect(agent.hasPendingMail()).toBe(true);
+      expect(agent.getMessages().some((m) => m.role === "user" && m.agentPath === "/root/task_1")).toBe(false);
+      expect(session.getMessages().map((m) => m.role)).toEqual(["user", "assistant"]);
+    } finally {
+      // 先还原真实定时器再打断：中断看门狗是定时器，假定时器下打断不会收尾
+      vi.useRealTimers();
+      agent.interrupt();
+      await background;
+    }
+  });
+
+  it("退出时后台轮改写过历史（撞线压缩）未消费：收尾按内存整份重写落盘", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const isSummary = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+          );
+          if (isSummary) {
+            yield { type: "text_delta", text: "压缩后的摘要" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          yield { type: "text_delta", text: "回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+    // 后台轮（模拟子 agent 唤醒）：长输入撞线压缩，改写历史且无人消费改写标记
+    agent.start("很长的问题".repeat(100));
+    for await (const _ of agent.resume()) {
+      // 消费
+    }
+    // 退出：收尾发现历史被改写，按内存整份重写（此前游标停在压缩前，压缩结果全丢）
+    async function* inputs(): AsyncIterable<string> {}
+    await interact({ agent, store, session, inputs: inputs(), write: () => {}, onEvent: () => {} });
+
+    const loaded = await store.loadSession(session.meta.id);
+    expect(String(loaded.getMessages()[0]?.content)).toContain("【会话摘要】");
+    // 盘上与内存一致（压缩后的回复也在）
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(agent.getMessages().map((m) => m.role));
   });
 
   it("/exit 退出交互，后续输入不再处理", async () => {

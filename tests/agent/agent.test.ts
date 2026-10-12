@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Agent } from "../../src/agent/index.js";
+import { Agent, AgentPath } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
+import { HookBus } from "../../src/hooks/index.js";
 import { PRUNED_MARKER, MEMORY_REQUEST_MARKER } from "../../src/context/index.js";
 import { assistantMessage, toolResultMessage, userMessage, type Message, type UserMessage, type Context, type ThinkingLevel } from "../../src/core/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
@@ -1467,5 +1468,48 @@ describe("只读工具执行超时定时器清理", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("收尾注入收件箱（会话结束前滞留消息落进历史）", () => {
+  it("drainMailboxIntoHistory：中断标记按注入口径进历史并镜像事件，重复调用为空操作", async () => {
+    const mirrored: Message[] = [];
+    const hooks = new HookBus();
+    hooks.on("MessageAppended", (event) => {
+      mirrored.push(event.message);
+    });
+    const agent = new Agent({
+      modelClient: mockTextClient("回复"),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+    });
+    agent.deliver({
+      type: "INTERRUPTED",
+      from: AgentPath.parse("/root/task_1") as AgentPath,
+      content: "子代理 task_1 已中断，任务未完成。",
+      triggerTurn: false,
+    });
+    const injected = await agent.drainMailboxIntoHistory();
+    expect(injected).toBe(1);
+    // 与 runTurn 起点消费收件箱同一口径注入：source system、发送方路径随消息
+    expect(agent.getMessages().at(-1)).toMatchObject({
+      role: "user",
+      source: "system",
+      agentPath: "/root/task_1",
+      content: "【中断】from /root/task_1:\n子代理 task_1 已中断，任务未完成。",
+    });
+    // 镜像 MessageAppended：轨迹与恢复重建能拿到这条注入消息
+    expect(mirrored.some((m) => m.role === "user" && m.agentPath === "/root/task_1")).toBe(true);
+    // 收件箱已排空：重复调用不再重复注入
+    expect(agent.hasPendingMail()).toBe(false);
+    expect(await agent.drainMailboxIntoHistory()).toBe(0);
+    expect(agent.getMessages()).toHaveLength(1);
+  });
+
+  it("drainMailboxIntoHistory：收件箱为空时不产生消息", async () => {
+    const agent = new Agent({ modelClient: mockTextClient("回复"), modelId: "mock", systemPrompt: "助手" });
+    expect(await agent.drainMailboxIntoHistory()).toBe(0);
+    expect(agent.getMessages()).toHaveLength(0);
   });
 });

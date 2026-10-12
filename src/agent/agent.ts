@@ -385,6 +385,24 @@ export class Agent {
     this.mailbox.drain();
   }
 
+  /**
+   * 收尾注入收件箱全部未消费消息并镜像事件（宿主在会话结束前调用）。
+   * 常规消费只发生在 runTurn 起点：Esc 级联打断后到达的中断标记、迟到消息
+   * 会滞留收件箱等下次输入，会话到此结束直接丢收件箱会让恢复会话看不到
+   * 「子 agent 被中断」的任何记录（被打断的子 agent 静默消失）。
+   * 这里按常规注入口径（source: "system"、发送方路径随消息）把滞留消息
+   * 接进上下文，由宿主随既有落盘游标持久化。
+   * @returns 注入的消息条数（0 表示收件箱为空）
+   */
+  async drainMailboxIntoHistory(): Promise<number> {
+    if (!this.mailbox.hasPending()) return 0;
+    const mails = this.mailbox.drain();
+    for (const mail of mails) {
+      await this.appendMessage(userMessage(formatMailMessage(mail), "system", undefined, undefined, mail.from.toString()));
+    }
+    return mails.length;
+  }
+
 /**
    * 会话驱动入口（宿主调用）：推进 turn 直到会话结束。
    * 会话级 Hook（SessionStart / UserPromptSubmit）由宿主触发——

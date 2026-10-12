@@ -6,6 +6,10 @@ import type { HookBus } from "../hooks/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { modelErrorText } from "../core/index.js";
 
+/** 收尾等待窗口（ms）：会话结束前等待 root 后台轮收尾的上限。退出路径通常已中断
+ *  在途轮，看门狗 3s 内必然收尾；等待超限视为仍在途，放弃本轮收尾注入 */
+const TEARDOWN_SETTLE_MS = 4_000;
+
 export interface InteractOptions {
   agent: Agent;
   store: SessionStore;
@@ -185,6 +189,32 @@ export async function interact(options: InteractOptions): Promise<void> {
       if (message.role === "tool_result") {
         write(`\n[工具结果] ${message.content}\n`);
       }
+    }
+  }
+  // 输入循环结束（退出/切换/重装配都经此）：补齐 root 历史落盘 + 注入收件箱滞留消息。
+  // 先有界等待后台轮（子 agent 唤醒续跑的 root 轮）收尾：注入消息若插在在途轮的
+  // 工具调用与结果之间，落盘会留下悬空 tool_call，恢复后的请求会被厂商拒绝（400）；
+  // 等待超限仍在途则跳过本轮收尾（收件箱随后被团队清理丢弃，不落畸形历史）
+  const settleDeadline = Date.now() + TEARDOWN_SETTLE_MS;
+  while (agent.isActive() && Date.now() < settleDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!agent.isActive()) {
+    // 后台轮改写过历史（撞线压缩/剥组）且无人消费改写标记：按内存整份重写（与轮末分支同口径）；
+    // 否则按游标补落盘尾部（后台轮结论、下面注入的中断标记等）
+    if (agent.consumeHistoryRewritten()) {
+      await store.rewriteMessages(session, agent.getMessages());
+    }
+    // 收件箱滞留消息（Esc 打断到达的中断标记、迟到结论）注入历史：收件箱只在
+    // runTurn 起点消费，会话到此结束直接丢弃会让恢复会话缺少「子 agent 被中断」的
+    // 记录（被打断的子 agent 静默消失）
+    await agent.drainMailboxIntoHistory();
+    const newMessages = agent.getMessages().slice(session.getMessages().length);
+    if (newMessages.length > 0) {
+      for (const message of newMessages) {
+        await store.appendMessage(session, message);
+      }
+      await store.flush();
     }
   }
 }
