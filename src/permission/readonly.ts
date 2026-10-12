@@ -4,6 +4,8 @@
  * 与危险命令检查同为轻量守卫，不做完整 shell 解析，已知边界：
  * - awk/perl/python -c 等一行流脚本引号内的写行为不检测（引号段剔除是为
  *   「echo "rm" 不误拦」服务的，一行流里的真实代码无法与字面文本区分）；
+ *   同源边界：引号包住的命令词、脚本路径与旗标也随引号段剔除而逃过判定
+ *   （"bash x.sh" 整串、"C:\...\bash.exe" -c、python "x.py"、curl "-o"）；
  * - $( ) 命令替换内的写命令不检测，由权限管线的危险命令检查兜底
  *   （该检查随管线存在，无管线的 agent 无此兜底）。兜底按实际 shell 语义生效：
  *   cmd 归类下 bash -c 引号内的替换不被危险命令检查拦，只读侧由 shell 执行体
@@ -96,11 +98,22 @@ const SC_READ_SUBCOMMANDS = new Set([
   "enumdepend", "sdshow", "showsid", "getdisplayname", "getkeyname", "querylock",
 ]);
 
-/** 脚本解释器：带脚本操作数即按脚本文件执行拒绝；内联代码形态走一行流边界 */
-const INTERPRETER_WORDS = new Set(["python", "python3", "py", "node", "perl", "ruby", "php", "lua"]);
-
-/** 解释器的一行流旗标：python -c、node -e/-p/--eval/--print、perl -e/-pe、ruby/lua -e、php -r/-R/-B */
-const INLINE_SCRIPT_FLAG_RE = /^-([A-Za-z]*[eE]|[cprRB])$|^--(eval|print)/;
+/** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
+ *  变量，perl 的 -E 才是内联执行），按命令词分设；命中一行流即放行，否则出现脚本操作数即拒绝 */
+const INTERPRETER_INLINE_FLAGS: Record<string, (word: string) => boolean> = {
+  // python 内联只有 -c（-m 执行模块、-E/-B 均非内联，带脚本操作数按文件执行拦）
+  python: (w) => w === "-c",
+  python3: (w) => w === "-c",
+  py: (w) => w === "-c",
+  node: (w) => w === "-e" || w === "-p" || /^--(eval|print)(=|$)/.test(w),
+  // perl 的 -e/-E 与组合形态（-pe/-ne/-lane）
+  perl: (w) => /^-[a-zA-Z]*[eE]$/.test(w),
+  // ruby 的 -e 与组合形态（-we）；-E 是外部编码带值，不以 e 结尾不误判
+  ruby: (w) => /^-[a-zA-Z]*e$/.test(w),
+  php: (w) => w === "-r" || w === "-R" || w === "-B" || w === "-E",
+  lua: (w) => w === "-e",
+};
+const INTERPRETER_WORDS = new Set(Object.keys(INTERPRETER_INLINE_FLAGS));
 
 /** 脚本操作数：非选项词与 stdin 的「-」（重定向词如 2>&1、< f 除外） */
 function isScriptOperand(word: string): boolean {
@@ -164,7 +177,12 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   // 解释器脚本文件执行（python x.py、node x.js）：脚本内容同属无法核验的内层代码，拒绝。
   // 一行流（-c/-e 等内联旗标）沿用既有边界：引号内代码与字面文本无法区分，不检测
   if (INTERPRETER_WORDS.has(first)) {
-    if (!rest.slice(1).some((w) => INLINE_SCRIPT_FLAG_RE.test(w)) && rest.slice(1).some(isScriptOperand)) {
+    // perl/ruby 的 -i 原地改写文件（含 -pi/-pie 组合与 -i.bak 后缀），先于一行流判定
+    if ((first === "perl" || first === "ruby") && rest.slice(1).some((w) => /^-[A-Za-z]*i/.test(w))) {
+      return `写命令 ${first} -i（原地改写）`;
+    }
+    const isInline = INTERPRETER_INLINE_FLAGS[first]!;
+    if (!rest.slice(1).some(isInline) && rest.slice(1).some(isScriptOperand)) {
       return `写命令 ${first}（脚本文件执行无法核验）`;
     }
     return undefined;

@@ -274,10 +274,18 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
       "python ./tool.py",
       "python -m json.tool in.json",
       "python -V x.py",
+      "python -E tool.py",
+      "python -B x.py",
+      "python -OO x.py",
       "node x.js",
       "node --experimental-strip-types x.ts",
+      "node -r ./pre.js app.js",
+      "node --require ./pre.js app.js",
       "perl x.pl",
+      "perl -C script.pl",
       "ruby x.rb",
+      "ruby -E UTF-8 run.rb",
+      "ruby -w script.rb",
       "php x.php",
       "lua x.lua",
       "python -",
@@ -295,13 +303,30 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
       "python --version",
       "python -c 'import sys; print(sys.argv)' a b",
       "perl -e 'print 1'",
+      "perl -E 'print 1'",
       "perl -pe 's/a/b/'",
+      "perl -lane 'print $F[0]'",
       "ruby -e 'puts 1'",
+      "ruby -we 'puts 1'",
       "php -r 'echo 1;'",
+      "php -R 'echo 1;'",
+      "php -B 'echo 1;'",
       "lua -e 'print(1)'",
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
+  });
+
+  it("perl/ruby 的 -i 原地改写拒绝（含组合与后缀形态）", () => {
+    for (const command of [
+      "perl -i -pe 's/a/b/' f.txt",
+      "perl -pi -e 's/a/b/' f.txt",
+      "perl -i.bak -pe 's/a/b/' f.txt",
+      "ruby -i -pe 'puts 1' f.txt",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/原地改写/);
+    }
+    expect(readOnlyWrite("ruby -e 'puts 1'")).toBeUndefined();
   });
 
   it("awk/sed 的 -f/--file 脚本文件拒绝，内联程序与 -F 字段分隔符放行", () => {

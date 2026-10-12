@@ -109,6 +109,7 @@ describe("只读 agent 写拦截", () => {
       });
       await runOne(agent, "执行");
       expect(lastToolResult(agent), command).toContain("只读 agent 不允许写操作");
+      expect(executed, command).toHaveLength(0);
     }
 
     const readAgent = new Agent({
