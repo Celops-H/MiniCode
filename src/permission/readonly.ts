@@ -94,8 +94,9 @@ const SCHTASKS_WRITE_FLAGS = new Set(["/create", "/delete", "/change", "/run", "
 
 /** sc.exe 只读子命令（查询与显示形态），其余子命令按服务控制写拒绝 */
 const SC_READ_SUBCOMMANDS = new Set([
-  "query", "queryex", "qc", "qdescription", "qfailure", "qsidtype", "interrogate",
-  "enumdepend", "sdshow", "showsid", "getdisplayname", "getkeyname", "querylock",
+  "query", "queryex", "qc", "qdescription", "qfailure", "qfailureflag", "qsidtype", "qprivs",
+  "qtriggerinfo", "qpreferrednode", "qmanagedaccount", "qprotection", "quserservice",
+  "interrogate", "enumdepend", "sdshow", "showsid", "getdisplayname", "getkeyname", "querylock",
 ]);
 
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
@@ -118,6 +119,28 @@ const INTERPRETER_WORDS = new Set(Object.keys(INTERPRETER_INLINE_FLAGS));
 /** 脚本操作数：非选项词与 stdin 的「-」（重定向词如 2>&1、< f 除外） */
 function isScriptOperand(word: string): boolean {
   return word === "-" || (!word.startsWith("-") && !/^\d*[<>]/.test(word));
+}
+
+/**
+ * xargs 目标命令词的下标：跳过选项；取值选项连其参数一并跳过
+ * （xargs -I {} rm 的 {} 是 -I 的值，不是目标）。
+ * @param words xargs 之后的词
+ * @returns 目标词下标；无目标返回 -1
+ */
+function xargsTargetIndex(words: string[]): number {
+  const valueFlags = new Set([
+    "-I", "-n", "-L", "-s", "-P", "-a", "-d", "-E",
+    "--replace", "--max-args", "--max-lines", "--max-chars", "--max-procs", "--arg-file", "--delimiter", "--eof",
+  ]);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (w.startsWith("-")) {
+      if (valueFlags.has(w)) i++;
+      continue;
+    }
+    return i;
+  }
+  return -1;
 }
 
 /**
@@ -199,32 +222,38 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     return `写命令 ${first}（内层命令无法核验）`;
   }
   // sc 跨 shell 二义：PowerShell 5.1 里裸 sc 是 Set-Content 别名，按写拒绝；
-  // sc.exe 拼写与 cmd/bash 语义下是 sc.exe 服务控制，读子命令白名单放行、其余拒绝
+  // sc.exe 拼写与 cmd/bash 语义下是 sc.exe 服务控制，读子命令白名单放行、其余拒绝。
+  // 子命令前可带 \\server 形态（sc \\srv query svc），跳过服务器词再判
   if (first === "sc") {
     if (shell === "powershell" && !/\.exe$/i.test(rest[0]!)) return "写命令 sc（PowerShell 别名 Set-Content）";
-    const sub = rest[1]?.toLowerCase();
-    if (sub === undefined || SC_READ_SUBCOMMANDS.has(sub)) return undefined;
+    const sub = rest.slice(1).find((w) => !w.startsWith("\\"))?.toLowerCase();
+    if (sub === undefined || sub === "/?" || SC_READ_SUBCOMMANDS.has(sub)) return undefined;
     return `写命令 sc ${sub}（服务控制写操作）`;
   }
-  // xargs 的真实命令是首选项后的词；脚本执行体与解释器隔着 xargs 调用同样按写拒绝
+  // xargs 的真实命令是首选项后的词。目标为 shell/解释器时其脚本参数来自输入流，
+  // 无法核验，整体拒绝；其余目标按同一套段判定递归（xargs curl -o、xargs sort -o 同样命中）
   if (first === "xargs") {
-    const target = rest.slice(1).find((w) => !w.startsWith("-"));
-    if (target) {
-      const t = normalizeCommandWord(target);
-      if (WRITE_COMMAND_WORDS.has(t) || SCRIPT_HOST_WORDS.has(t) || INTERPRETER_WORDS.has(t)) return `写命令 xargs ${target}`;
-    }
-    return undefined;
+    const tail = rest.slice(1);
+    const idx = xargsTargetIndex(tail);
+    if (idx === -1) return undefined;
+    const target = normalizeCommandWord(tail[idx]!);
+    if (SCRIPT_HOST_WORDS.has(target) || INTERPRETER_WORDS.has(target)) return `写命令 xargs ${tail[idx]}`;
+    return segmentWriteVerdict(tail.slice(idx), shell);
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
   // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
-  // 下载落盘——curl 裸用输出 stdout 是只读，-o/-O/--output/--remote-name（含 -so 组合与 -oFILE
-  // 粘连）写文件；iwr/irm 的 -OutFile 同理
-  if (first === "curl" && rest.slice(1).some((w) => /^-[A-Za-z]*[oO]/.test(w) || /^--(output|remote-name)(=|$)/.test(w))) {
-    return "写命令 curl（下载落盘）";
+  // curl 裸用输出 stdout 是只读，但下列旗标把内容写入本地文件：-o/-O/--output/--remote-name
+  // （含 -so 组合与 -oFILE 粘连）、-D/--dump-header、-c/--cookie-jar、--stderr、--trace(-ascii)、
+  // --etag-save、--libcurl、--alt-svc、--hsts；iwr/irm 的 -OutFile（含 PowerShell 前缀缩写 -OutF）同理
+  if (first === "curl" &&
+      rest.slice(1).some((w) =>
+        /^-[A-Za-z]*[oODc]/.test(w) ||
+        /^--(output|remote-name(-all)?|dump-header|cookie-jar|stderr|trace|trace-ascii|etag-save|libcurl|alt-svc|hsts)(=|$)/.test(w))) {
+    return "写命令 curl（落盘写文件）";
   }
   if ((first === "iwr" || first === "invoke-webrequest" || first === "irm" || first === "invoke-restmethod") &&
-      rest.slice(1).some((w) => /^-outfile(=|:|$)/i.test(w))) {
-    return `写命令 ${first}（下载落盘）`;
+      rest.slice(1).some((w) => /^-(outf|outfi|outfil|outfile)(=|:|$)/i.test(w))) {
+    return `写命令 ${first}（落盘写文件）`;
   }
   // sort 输出写文件：cmd 的 /o、POSIX 的 -o/--output（无该选项输出 stdout 是只读）
   if (first === "sort" && rest.slice(1).some((w) => /^\/o/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {

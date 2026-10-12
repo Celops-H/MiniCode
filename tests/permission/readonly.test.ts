@@ -393,24 +393,59 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
       "curl --output f.txt http://x",
       "curl --output=f.txt http://x",
       "curl --remote-name http://x",
+      "curl --remote-name-all http://x",
+      "curl -D h.txt http://x",
+      "curl -c jar.txt http://x",
+      "curl -sD h.txt http://x",
+      "curl --dump-header h.txt http://x",
+      "curl --cookie-jar j.txt http://x",
+      "curl --stderr e.log http://x",
+      "curl --trace t.log http://x",
+      "curl --trace-ascii t.log http://x",
+      "curl --etag-save e.txt http://x",
+      "curl --libcurl out.c http://x",
+      "curl --alt-svc a.txt http://x",
+      "curl --hsts h.txt http://x",
       "wget http://x",
       "wget -q https://x",
       "wget.exe -O f.txt http://x",
       "iwr -OutFile f.txt http://x",
-      "Invoke-WebRequest -OutFile f http://x",
       "irm -OutFile f http://x",
+      "Invoke-WebRequest -OutFile f http://x",
+      "iwr -OutF f.txt http://x",
+      "Invoke-WebRequest -OutFi f http://x",
     ]) {
-      expect(readOnlyWrite(command), command).toMatch(/下载落盘|写命令 wget/);
+      expect(readOnlyWrite(command), command).toMatch(/落盘写文件|写命令 wget/);
     }
     for (const command of [
       "curl http://x",
       "curl -s https://x/api",
       "curl -I http://x",
       "curl -H 'Accept: x' http://x",
+      "curl -b jar.txt http://x",
+      "curl -C - http://x",
+      "curl -A agent http://x",
       "iwr http://x",
       "irm https://x/api",
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("xargs 后的目标走同一套段判定，落盘与持久化形态不再穿越", () => {
+    for (const command of [
+      "xargs reg add HKLM /v a /d b",
+      "echo x | xargs reg add HKLM",
+      "xargs sort -o f",
+      "xargs curl -o f http://x",
+      "xargs -I {} rm {}",
+      "xargs sc start x",
+      "xargs schtasks /create /tn t",
+    ]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
+    }
+    for (const command of ["xargs grep foo", "xargs -n 2 echo", "xargs -n1 echo"]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }
   });
 
@@ -482,16 +517,30 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
       "sc qc Spooler",
       "sc qdescription Spooler",
       "sc qfailure Spooler",
+      "sc qfailureflag Spooler",
       "sc qsidtype Spooler",
+      "sc qprivs Spooler",
+      "sc qtriggerinfo Spooler",
+      "sc qpreferrednode Spooler",
+      "sc qmanagedaccount Spooler",
+      "sc qprotection Spooler",
+      "sc quserservice Spooler",
       "sc interrogate Spooler",
       "sc enumdepend Spooler",
       "sc sdshow Spooler",
       "sc getdisplayname Spooler",
       "sc getkeyname Spooler",
+      "sc /?",
       "sc",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }
+    // 子命令前的 \\server 形态（sc \\srv query svc）：读子命令放行、写子命令照拦
+    expect(readOnlyWriteShell("sc \\\\srv query wuauserv", "cmd")).toBeUndefined();
+    expect(readOnlyWriteShell("sc \\\\srv qc Spooler", "cmd")).toBeUndefined();
+    expect(readOnlyWriteShell("sc \\\\srv start wuauserv", "cmd")).toMatch(/服务控制写操作/);
+    // PS 语义下显式 sc.exe 拼写按服务控制判：写子命令照拦
+    expect(readOnlyWriteShell("sc.exe create x binPath= y", "powershell")).toMatch(/服务控制写操作/);
     // Windows Git Bash 下 sc 经 sc.exe 解析，同 cmd 口径
     expect(readOnlyWriteShell("sc query wuauserv", "bash")).toBeUndefined();
     expect(readOnlyWriteShell("sc start wuauserv", "bash")).toMatch(/服务控制写操作/);
