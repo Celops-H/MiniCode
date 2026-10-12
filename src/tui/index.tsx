@@ -116,12 +116,16 @@ export async function reloadOrDraftSession(
   }
 }
 
+/** 纯草稿会话在无模型时的占位模型 id（不落盘：连接成功后 reconfigure 重建草稿） */
+export const NO_MODEL_ID = "";
+
 /** /session 面板「新建会话」：主模型按重启同序从配置重解析
  *  （defaultModel > modelChain[0] > 兜底，见 resolveMainModel）。
  *  /model 面板 Ctrl+S 改默认模型只写盘、不重装配，故这里取最新配置重解析，
  *  不沿用装配期解析的旧主模型。
- *  零可用厂商（连接引导态）按占位模型建会话，不报错退出——连接成功后
- *  reconfigure 的模型归位会给它换上真模型。纯函数便于层 1 测试。 */
+ *  defaultModel、modelChain[0]、可用首模型全取不到时（连接引导态）回占位模型
+ *  建会话，不抛错退出；连接成功后 reconfigure 的模型归位会给它换上真模型。
+ *  纯函数便于层 1 测试。 */
 export async function createSwitchedSession(store: SessionStore, config: Config): Promise<Session> {
   let modelId: string;
   try {
@@ -132,9 +136,6 @@ export async function createSwitchedSession(store: SessionStore, config: Config)
   }
   return store.createSession({ model: modelId });
 }
-
-/** 纯草稿会话在无模型时的占位模型 id（不落盘：连接成功后 reconfigure 重建草稿） */
-export const NO_MODEL_ID = "";
 
 /**
  * 启动模型客户端装配：零可用厂商不再启动失败——返回空模型集合 + needsConnect，
