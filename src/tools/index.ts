@@ -1,4 +1,4 @@
-export { validateInput } from "./base.js";
+export { validateInput, outputLimitNote } from "./base.js";
 export { truncateOutput } from "./truncate.js";
 export { spillOutput } from "./overflow.js";
 export type { SpillResult } from "./overflow.js";

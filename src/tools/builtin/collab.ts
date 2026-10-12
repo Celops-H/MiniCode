@@ -1,10 +1,11 @@
 /**
- * 多 Agent 协作工具：spawn_agent / send_message / followup_task / list_agents。
+ * 多 Agent 协作工具：spawn_agent / send_message / followup_task / list_agents / wait_agent / interrupt_agent。
  * 只在多 agent 环境注册（AgentOptions.team 传入时由 Agent 构造注册），普通单 agent 会话不可见。
  * 权限：send_message / list_agents 免审批（skipsPermission）；
- * spawn_agent / followup_task 走正常审批链。
+ * spawn_agent / followup_task / wait_agent / interrupt_agent 走正常审批链。
  */
 import { z } from "zod";
+import { outputLimitNote } from "../base.js";
 import type { Tool } from "../base.js";
 import type { Agent } from "../../agent/agent.js";
 import { AgentPath } from "../../agent/agent-path.js";
@@ -33,6 +34,11 @@ export const READONLY_SUBAGENT_PROMPT =
 
 /** agent 名命名约束（与 agent-path.ts 的段名校验一致，schema 层前置拦截） */
 const AGENT_NAME_PATTERN = /^[a-z0-9_]+$/;
+
+/** 协作工具结果上限：回执与守卫失败是单行文本，500 足够 */
+const MAX_RESULT_CHARS = 500;
+/** list_agents 结果上限：成员列表随团队规模增长，单独放宽 */
+const MAX_LIST_AGENTS_RESULT_CHARS = 2000;
 
 /**
  * 失败结果：协作工具的守卫失败（名字/路径/深度等）统一按失败回灌，
@@ -87,15 +93,19 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       "避免并行写冲突；纯只读任务不必。隔离不可用时子 agent 与你共享工作目录，结果中会注明。" +
       "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
       "多个互不依赖的子任务可在同一轮并行派生，等待期间可继续做不依赖它们结果的本地工作，" +
-      "需要等结果时用 wait_agent",
+      "需要等结果时用 wait_agent。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      agentName: z.string().regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线"),
-      prompt: z.string(),
-      worktree: z.boolean().optional(),
-      readOnly: z.boolean().optional(),
+      agentName: z
+        .string()
+        .regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线")
+        .describe("子 agent 名，只能用小写字母、数字和下划线，成为其路径末段"),
+      prompt: z.string().describe("初始任务内容，子 agent 看不到你的历史，须自带完整上下文与证据要求"),
+      worktree: z.boolean().optional().describe("true 时给子 agent 独立 git worktree 工作区；缺省随全局设置"),
+      readOnly: z.boolean().optional().describe("true 时子 agent 只读：写类工具与 bash 写命令会被拒绝"),
     }),
     isReadOnly: false,
-    maxResultSizeChars: 500,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     execute: async (input) => {
       const { agentName, prompt, worktree, readOnly } = input as {
         agentName: string;
@@ -144,14 +154,15 @@ function sendMessageTool(deps: CollabDeps): Tool {
   return {
     name: "send_message",
     description:
-      "给指定 agent 发消息（排队投递，不唤醒对方）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）",
+      "给指定 agent 发消息（排队投递，不唤醒对方）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string(),
-      message: z.string(),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      message: z.string().describe("消息内容，排队投递，不唤醒对方"),
     }),
     isReadOnly: false,
     skipsPermission: true,
-    maxResultSizeChars: 500,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     execute: async (input) => {
       const { target, message } = input as { target: string; message: string };
       if (!message.trim()) return failure("消息内容不能为空");
@@ -174,13 +185,14 @@ function followupTaskTool(deps: CollabDeps): Tool {
     name: "followup_task",
     description:
       "给指定 agent 投递新任务（投递并唤醒对方开始执行）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）。" +
-      "消息里写明证据要求：回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径",
+      "消息里写明证据要求：回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string(),
-      message: z.string(),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      message: z.string().describe("任务内容，投递后唤醒对方开始执行"),
     }),
     isReadOnly: false,
-    maxResultSizeChars: 500,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     execute: async (input) => {
       const { target, message } = input as { target: string; message: string };
       if (!message.trim()) return failure("任务内容不能为空");
@@ -201,11 +213,12 @@ function followupTaskTool(deps: CollabDeps): Tool {
 function listAgentsTool(deps: CollabDeps): Tool {
   return {
     name: "list_agents",
-    description: "列出团队中的成员（层级路径，含自己与尚未激活的成员）",
+    description:
+      "列出团队中的成员（层级路径，含自己与尚未激活的成员）。" + outputLimitNote(MAX_LIST_AGENTS_RESULT_CHARS),
     inputSchema: z.object({}),
     isReadOnly: true,
     skipsPermission: true,
-    maxResultSizeChars: 2000,
+    maxResultSizeChars: MAX_LIST_AGENTS_RESULT_CHARS,
     execute: () => {
       const members = deps.team.listAgents();
       if (members.length === 0) return "团队暂无其他成员";
@@ -234,13 +247,14 @@ function waitAgentTool(deps: CollabDeps): Tool {
     description:
       "挂起等待目标 agent 完成当前任务（空闲且收件箱无消息），或超时返回；" +
       "返回区分「调用前已空闲」与「等待后完成」，目标被中断时明确告知未完成；" +
-      "目标结论由完成通知自动回灌，本工具只返回等待结果",
+      "目标结论由完成通知自动回灌，本工具只返回等待结果。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string(),
-      timeoutMs: z.number().optional(),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      timeoutMs: z.number().optional().describe("等待毫秒数，到点返回超时；缺省 30000"),
     }),
     isReadOnly: false,
-    maxResultSizeChars: 500,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     execute: async (input) => {
       const { target, timeoutMs } = input as { target: string; timeoutMs?: number };
       const targetPath = resolveTarget(deps, target);
@@ -278,12 +292,13 @@ function interruptAgentTool(deps: CollabDeps): Tool {
     name: "interrupt_agent",
     description:
       "中断目标 agent：立即停止其当前任务（正在进行的模型生成/工具执行会中止，已产出保留）；" +
-      "收件箱已有排队消息时新任务会继续处理，后续 followup_task 可让它复活",
+      "收件箱已有排队消息时新任务会继续处理，后续 followup_task 可让它复活。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string(),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
     }),
     isReadOnly: false,
-    maxResultSizeChars: 500,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     execute: async (input) => {
       const { target } = input as { target: string };
       const targetPath = resolveTarget(deps, target);

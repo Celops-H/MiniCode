@@ -3,7 +3,7 @@ import type { Dirent } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import type { Tool } from "../tools/index.js";
+import { outputLimitNote, type Tool } from "../tools/index.js";
 
 /** 单个技能条目 */
 export interface SkillInfo {
@@ -116,21 +116,27 @@ export function buildSkillsPromptSection(skills: SkillInfo[]): string {
   ].join("\n");
 }
 
+/** skill 工具结果上限：正文是技能文件全文，可能超出 */
+const MAX_RESULT_CHARS = 20_000;
+
 /**
  * 内置 skill 工具：入参 { name }，执行返回该技能 SKILL.md 正文（模型照做）。
  * 只读纯读文件，权限快速放行；正文超限由执行层按 maxResultSizeChars 统一截断。
  */
 export function createSkillTool(skills: SkillInfo[]): Tool {
   const byName = new Map(skills.map((s) => [s.name, s]));
-  const nameSchema = z.object({ name: z.string().min(1) });
+  const nameSchema = z.object({
+    name: z.string().min(1).describe("技能名，必须是系统提示词【可用技能】清单中列出的名字"),
+  });
   return {
     name: "skill",
     description:
       "获取技能的完整指令正文。入参 { name }，name 必须是系统提示词【可用技能】清单中列出的技能名；" +
-      "取回后按正文内容执行该技能。",
+      "取回后按正文内容执行该技能。" +
+      outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: nameSchema,
     isReadOnly: true,
-    maxResultSizeChars: 20_000,
+    maxResultSizeChars: MAX_RESULT_CHARS,
     async execute(input) {
       const { name } = nameSchema.parse(input);
       const skill = byName.get(name);
