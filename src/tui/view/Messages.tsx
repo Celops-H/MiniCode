@@ -192,9 +192,13 @@ function durationText(b: { durationMs?: number }): string {
   return ` · 耗时 ${(b.durationMs / 1000).toFixed(1)}s`;
 }
 
+/** 工具卡在创建后不重建（store 就地合并更新，见 AgentView 注释）：状态图标、折叠判定、
+ *  输出行数必须走 createMemo——组件体在 createComponent 的 untrack 中只求值一次，
+ *  直接读取 store 不建立订阅，更新后不重算：图标停在创建时的 …、
+ *  「输出 N 行」停在 0、点开不出现 */
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const b = props.b;
-  const status = toolStatus(b);
+  const status = createMemo(() => toolStatus(b));
   const mode = toolDisplayMode(b.name);
   const h = useFoldHover(props.onFold);
   const foldBox = {
@@ -205,25 +209,25 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   };
 
   if (mode === "compact") {
-    const expanded = !b.collapsedOutput;
-    const outputLines = b.output ? b.output.trimEnd().split("\n").length : 0;
+    const expanded = createMemo(() => !b.collapsedOutput);
+    const outputLines = createMemo(() => (b.output ? b.output.trimEnd().split("\n").length : 0));
     return (
       <box flexDirection="column" {...foldBox}>
         <text fg={h.fg()}>
-          <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
+          <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
           {b.args ? ` ${argsDigest(b.args)}` : ""}
           {durationText(b)}
           {b.status === "running" ? (
             ""
-          ) : hasOutput(b) && !expanded ? ` · 输出 ${outputLines} 行 · 点击展开` : ""}
+          ) : hasOutput(b) && !expanded() ? ` · 输出 ${outputLines()} 行 · 点击展开` : ""}
         </text>
-        <Show when={expanded && b.args}>
+        <Show when={expanded() && b.args}>
           <text fg={theme.textMuted}>{b.args}</text>
         </Show>
-        <Show when={expanded && b.output}>
+        <Show when={expanded() && b.output}>
           <text fg={theme.textMuted}>{b.output}</text>
         </Show>
-        <Show when={expanded && b.error}>
+        <Show when={expanded() && b.error}>
           <text fg={theme.error}>{b.error}</text>
         </Show>
       </box>
@@ -234,7 +238,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
     return (
       <box flexDirection="column" {...foldBox}>
         <text>
-          <span style={{ fg: status.fg }}>{status.icon}</span> <span style={{ fg: h.fg() }}>Bash</span>{" "}
+          <span style={{ fg: status().fg }}>{status().icon}</span> <span style={{ fg: h.fg() }}>Bash</span>{" "}
           {b.args ? argsDigest(b.args, 60) : ""}
           {durationText(b)}
         </text>
@@ -257,7 +261,7 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   return (
     <box flexDirection="column" {...foldBox}>
       <text fg={h.fg()}>
-        <span style={{ fg: status.fg }}>{status.icon}</span> {b.name ?? "tool"}
+        <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
         {durationText(b)}
         {/* generic（含协作工具 send_message 等）摘要行补「输出 N 行」；只有错误无输出时显「错误详情」 */}

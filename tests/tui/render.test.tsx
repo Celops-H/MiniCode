@@ -8,7 +8,7 @@ import { createStore, reconcile } from "solid-js/store";
 import { describe, it, expect, afterEach } from "vitest";
 import { App } from "../../src/tui/view/App.js";
 import { createChannel } from "../../src/tui/loop.js";
-import { initState, reduceAction, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
 import { messageScroller } from "../../src/tui/scroll.js";
 import { assistantMessage } from "../../src/core/index.js";
 
@@ -266,6 +266,156 @@ describe("view/App 渲染链", () => {
     frame = setup.captureCharFrame();
     expect(frame).toContain("完成");
     expect(frame).toContain("结论：冒烟通过");
+  });
+
+  it("live 工具卡就地合并更新：状态图标、输出行数与点击展开随 store 刷新（reconcile 路径）", async () => {
+    // 走生产路径：runTui 的 commit 是 setState(reconcile(next))，For 行创建后不重建——
+    // 组件体常量会把创建时的图标/折叠判定/输出行数冻结（卡片创建时无输出：
+    // 图标停在 …、「输出 N 行」停在 0、点开不出现），本用例钉住三项都是响应式读取
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const commit = (next: TuiState): void => setState(reconcile(next));
+    const setup = await testRender(
+      () => (
+        <App
+          state={state}
+          model="m"
+          onAction={(a) => {
+            if (a.type === "fold-at") commit(reduceAction(state, a));
+          }}
+        />
+      ),
+      { width: 70, height: 14 },
+    );
+    await setup.waitForVisualIdle();
+    // 工具调用开始：卡片以 pending 创建（图标 …）
+    commit(reduceEvent(state, { type: "toolcall_start", index: 0, id: "c1", name: "read" }));
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("…");
+    // 进入执行态：图标 … → ⠋（组件体常量实现下停在创建时的 …）
+    commit(reduceEvent(state, { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' }));
+    commit(reduceHook(state, { type: "PreToolUse", toolCallId: "c1", toolName: "read", input: { path: "a.ts" }, agentPath: "/root" }));
+    await setup.waitForVisualIdle();
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("⠋");
+    expect(frame).not.toContain("…");
+    // 完成：图标 → ✓（绿）、摘要输出行数按实际输出（常量实现下「输出 0 行」）
+    commit(
+      reduceHook(state, {
+        type: "PostToolUse",
+        toolCallId: "c1",
+        toolName: "read",
+        input: { path: "a.ts" },
+        output: "line1\nline2",
+        isError: false,
+        durationMs: 120,
+        agentPath: "/root",
+      }),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("✓ read a.ts");
+    expect(frame).toContain("输出 2 行 · 点击展开");
+    expect(frame).not.toContain("输出 0 行");
+    expect(textFg(setup.captureSpans(), "✓")).toBe("#7fd88f");
+    // 点卡 → 展开：输出全文可见、折叠提示消失（常量实现下点不开）
+    await setup.mockMouse.click(30, 1);
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("line1");
+    expect(frame).toContain("line2");
+    expect(frame).not.toContain("点击展开");
+    // 失败收尾的新卡：图标 → ✕ 红（与成功同走 status memo，另一终态就地刷新）
+    commit(reduceEvent(state, { type: "toolcall_start", index: 1, id: "c2", name: "grep" }));
+    commit(reduceHook(state, { type: "PreToolUse", toolCallId: "c2", toolName: "grep", input: { pattern: "x" }, agentPath: "/root" }));
+    commit(
+      reduceHook(state, {
+        type: "PostToolUseFailure",
+        toolCallId: "c2",
+        toolName: "grep",
+        input: { pattern: "x" },
+        error: "模式非法",
+        agentPath: "/root",
+      }),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("✕ grep");
+    expect(textFg(setup.captureSpans(), "✕")).toBe("#e06c75");
+  });
+
+  it("live bash 与 generic 工具卡：点开收起与状态图标随 store 刷新（reconcile 路径）", async () => {
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const commit = (next: TuiState): void => setState(reconcile(next));
+    const setup = await testRender(
+      () => (
+        <App
+          state={state}
+          model="m"
+          onAction={(a) => {
+            if (a.type === "fold-at") commit(reduceAction(state, a));
+          }}
+        />
+      ),
+      { width: 70, height: 16 },
+    );
+    await setup.waitForVisualIdle();
+    // bash 卡：执行完成带输出，折叠摘要 → 点开显示输出全文
+    commit(reduceEvent(state, { type: "toolcall_start", index: 0, id: "b1", name: "bash" }));
+    commit(reduceEvent(state, { type: "toolcall_delta", index: 0, partialJson: '{"command":"pnpm test"}' }));
+    commit(reduceHook(state, { type: "PreToolUse", toolCallId: "b1", toolName: "bash", input: { command: "pnpm test" }, agentPath: "/root" }));
+    commit(
+      reduceHook(state, {
+        type: "PostToolUse",
+        toolCallId: "b1",
+        toolName: "bash",
+        input: { command: "pnpm test" },
+        output: "BASHOUT1\nBASHOUT2",
+        isError: false,
+        durationMs: 3000,
+        agentPath: "/root",
+      }),
+    );
+    await setup.waitForVisualIdle();
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("✓ Bash pnpm test");
+    expect(frame).toContain("输出 2 行");
+    expect(frame).not.toContain("BASHOUT1");
+    await setup.mockMouse.click(30, 1);
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("BASHOUT1");
+    expect(frame).toContain("BASHOUT2");
+    // generic 卡：完成带输出，折叠摘要 → 点开显示输出全文（第二块，头部在 y=3）
+    commit(reduceEvent(state, { type: "toolcall_start", index: 1, id: "w1", name: "write" }));
+    commit(reduceEvent(state, { type: "toolcall_delta", index: 1, partialJson: '{"path":"x.ts"}' }));
+    commit(reduceHook(state, { type: "PreToolUse", toolCallId: "w1", toolName: "write", input: { path: "x.ts" }, agentPath: "/root" }));
+    commit(
+      reduceHook(state, {
+        type: "PostToolUse",
+        toolCallId: "w1",
+        toolName: "write",
+        input: { path: "x.ts" },
+        output: "WRITTEN-OUT",
+        isError: false,
+        durationMs: 30,
+        agentPath: "/root",
+      }),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("✓ write x.ts");
+    expect(frame).toContain("输出 1 行 · 点击展开");
+    expect(frame).not.toContain("WRITTEN-OUT");
+    // bash 卡展开后占 3 行（摘要 + 输出 2 行），generic 卡头部行在 y=5
+    await setup.mockMouse.click(30, 5);
+    await setup.waitForVisualIdle();
+    expect(setup.captureCharFrame()).toContain("WRITTEN-OUT");
+    // 再点 bash 卡收起：输出全文隐去、折叠提示回来（折叠判定 memo 双向切换）
+    await setup.mockMouse.click(30, 1);
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("BASHOUT1");
+    expect(frame).toContain("输出 2 行 · 点击展开");
   });
 
   it("AgentInterrupted 后底栏树显示 (×) 名、消息区显示中断活动行", async () => {
