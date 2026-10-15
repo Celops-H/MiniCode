@@ -146,8 +146,24 @@ describe("只读 agent 写拦截判定", () => {
 
   it("已知边界：一行流脚本引号内的写行为不检测（记录口径，非期望行为）", () => {
     // awk/python -c 引号内是会被执行的真实代码，但与字面文本无法区分——
-    // 轻量守卫不解析脚本，注释边界如实钉住当前行为
-    expect(readOnlyWrite("awk '{print $1 > \"out.txt\"}' f")).toBeUndefined();
+    // 轻量守卫不解析脚本，注释边界如实钉住当前行为。按 bash 语义取值：
+    // 单引号在 bash 里是引号，整段随引号段剔除，命令判只读
+    expect(readOnlyWriteShell("awk '{print $1 > \"out.txt\"}' f", "bash")).toBeUndefined();
+  });
+
+  it("引号语义随 shell 区分：cmd 不把单引号当引号，bash 与 PowerShell 当引号", () => {
+    // cmd 不把单引号当引号，'>>' 仍是重定向符号，真实落盘 → 判写
+    expect(readOnlyWriteShell("echo hi '>' out.txt", "cmd")).toMatch(/重定向/);
+    expect(readOnlyWriteShell("echo hi '>>' out.txt", "cmd")).toMatch(/重定向/);
+    // 同形态在 bash/PowerShell 里 '>' 是字面文本，不拦
+    expect(readOnlyWriteShell("echo hi '>' out.txt", "bash")).toBeUndefined();
+    expect(readOnlyWriteShell("echo hi '>' out.txt", "powershell")).toBeUndefined();
+    // 双引号三 shell 都当引号，剥除后不误拦
+    expect(readOnlyWriteShell('echo hi ">" out.txt', "cmd")).toBeUndefined();
+    expect(readOnlyWriteShell('echo hi ">" out.txt', "bash")).toBeUndefined();
+    expect(readOnlyWriteShell('echo hi ">" out.txt', "powershell")).toBeUndefined();
+    // 同一行流脚本形态在 cmd 语义下 '>' 被当真重定向，照常判写
+    expect(readOnlyWriteShell("awk '{print $1 > \"out.txt\"}' f", "cmd")).toMatch(/重定向/);
   });
 
   it("已知边界：取值旗标的引号参数被剔除后真命令词被吞（记录口径，非期望行为）", () => {

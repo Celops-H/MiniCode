@@ -6,6 +6,9 @@
  *   「echo "rm" 不误拦」服务的，一行流里的真实代码无法与字面文本区分）；
  *   同源边界：引号包住的命令词、脚本路径与旗标也随引号段剔除而逃过判定
  *   （"bash x.sh" 整串、"C:\...\bash.exe" -c、python "x.py"、curl "-o"）；
+ * - 引号段按 shell 语义剥除（见 stripQuotedSpans）：bash 与 PowerShell 把单引号当引号，
+ *   cmd 不把单引号当引号。同一条命令在 cmd 与非 cmd 语义下判定不同：echo hi '>' out.txt
+ *   在 cmd 语义下判「命令含重定向写文件」，在 bash/PowerShell 语义下放行；
  * - 取值旗标的参数被引号包住时随引号段剔除消失，剥包装把真命令词当该旗标的参数
  *   吞掉，同样判只读放行（stdbuf -o "L" rm x、sudo -r "x" rm y），与上条同源；
  * - $( ) 命令替换内的写命令不检测，由权限管线的危险命令检查兜底
@@ -69,7 +72,7 @@ export function readOnlyToolViolation(
  * @returns 违规原因；只读安全返回 undefined
  */
 function bashWriteViolation(command: string, shell: CommandShellKind): string | undefined {
-  let stripped = stripQuotedSpans(command);
+  let stripped = stripQuotedSpans(command, shell);
   // 丢弃输出的重定向不是写（cmd 2>/dev/null、cmd 2>nul），先摘除再判定，防高频安全用法误拦
   // nul 不认扩展名形态（nul.txt 在 NT 上是普通文件）；nul: 带冒号的设备写法一并豁免
   stripped = stripped.replace(/>{1,2}\s*\/dev\/null\b/g, " ");

@@ -56,9 +56,16 @@ const DANGEROUS_PATTERNS: Array<{
   { pattern: /\/proc\//, reason: "访问 /proc 敏感路径", shells: ["bash"] },
 ];
 
-/** 剔除引号段（单/双，双引号容忍转义），供引号内不生效的模式匹配用：
- *  引号不配对时残段留在原文里照常参与匹配，不会漏检 */
-export function stripQuotedSpans(command: string): string {
+/**
+ * 剔除引号段（双引号容忍转义），供引号内不生效的模式匹配用。
+ * 单引号按 shell 语义区分：bash 与 PowerShell 把单引号当引号，一并剥除；cmd 不把单引号
+ * 当引号（echo hi '>' out.txt 里的 '>' 仍是重定向符号），只剥双引号，否则重定向漏判。
+ * 引号不配对时残段留在原文里照常参与匹配，不会漏检。双引号段各 shell 沿用同一转义口径
+ * （\" 视为转义引号），cmd 不把 \ 当转义符，echo "a\"> f 这类形态可能漏判重定向，属已知边界。
+ * @param shell 命令实际执行方的 shell 语义，缺省按 bash（单双都剥）
+ */
+export function stripQuotedSpans(command: string, shell: CommandShellKind = "bash"): string {
+  if (shell === "cmd") return command.replace(/"(?:[^"\\]|\\.)*"/g, " ");
   return command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, " ");
 }
 
@@ -85,7 +92,7 @@ export function checkDangerousCommand(command: string, shell: CommandShellKind =
 
   for (const { pattern, reason, quoteStrippedCommand, shells } of DANGEROUS_PATTERNS) {
     if (shells && !shells.includes(shell)) continue;
-    const target = quoteStrippedCommand ? stripQuotedSpans(command) : command;
+    const target = quoteStrippedCommand ? stripQuotedSpans(command, shell) : command;
     if (pattern.test(target)) {
       return { dangerous: true, reason };
     }
