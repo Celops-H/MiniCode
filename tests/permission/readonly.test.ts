@@ -993,6 +993,47 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
     expect(readOnlyWrite("xzcat f.xz")).toBeUndefined();
     expect(readOnlyWrite("zstdcat f.zst")).toBeUndefined();
   });
+
+  it("白名单命令的写旗标对齐 bash.ts：date/history/tree/file 命中判写，显示形态放行", () => {
+    for (const command of [
+      "date -s 2020-01-01",
+      "date -s2020-01-01",
+      "date --set=2020-01-01",
+      "date --set 2020-01-01",
+      "history -w h.txt",
+      "history -a",
+      "history -rw h.txt",
+      "tree -o out.txt src",
+      "tree -oout.txt src",
+      "tree --output=out.txt src",
+      "tree --output out.txt src",
+      "file -C",
+      "file -C -m magic",
+      "file --compile -m magic",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/写命令 (date|history|tree|file)/);
+    }
+    for (const command of [
+      "date",
+      "date +%Y-%m-%d",
+      "date -u",
+      "date -Iseconds",
+      "date -d yesterday",
+      "date -r file.txt",
+      "history",
+      "history -c",
+      "history -r h.txt",
+      "history 20",
+      "tree src",
+      "tree -L 2 src",
+      "tree -J",
+      "file a.txt",
+      "file -b a.txt",
+      "file -c -m magic",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
 });
 
 describe("只读 agent 写拦截判定（git 子命令形态）", () => {

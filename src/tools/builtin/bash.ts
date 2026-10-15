@@ -33,8 +33,8 @@ const READ_ONLY_COMMANDS = new Set([
 
 /**
  * 白名单内命令的写选项：命中即写文件或改系统状态，判非只读。
- * sort/tree/file 的输出旗标落盘（只读守卫的 sort 分支同口径），date 的 -s/--set 设系统时间，
- * history 的 -w/-a 写历史文件。短选项取值可与旗标同词（sort -oout.txt、date -s2020-01-01），
+ * sort/tree/file 的输出旗标落盘（只读守卫的 sort/date/history/tree/file 分支同口径），
+ * date 的 -s/--set 设系统时间，history 的 -w/-a 写历史文件。短选项取值可与旗标同词（sort -oout.txt、date -s2020-01-01），
  * 按前缀匹配。只覆盖旗标形态：操作数落盘（uniq 的第二操作数）与包装命令（env 后跟写命令）
  * 不在此判定内。
  */

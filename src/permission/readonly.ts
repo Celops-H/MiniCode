@@ -23,6 +23,7 @@
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
  *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
  *   压缩族非 -c/-t/-l 旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
+ *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
  *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
  *   见 segmentWriteVerdict 各分支；
@@ -387,6 +388,20 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   // /o 按整词匹配，不误伤以 /o 开头的路径操作数（sort /opt/data.txt），与 bash.ts 同口径
   if (first === "sort" && rest.slice(1).some((w) => /^\/o$/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {
     return "写命令 sort（输出写文件）";
+  }
+  // 白名单命令的写旗标，与 bash.ts 的 WRITE_OPTION_RE 同口径：date -s/--set 设系统时间，
+  // history -w/-a 写历史文件，tree -o/--output 与 file -C/--compile 落盘
+  if (first === "date" && rest.slice(1).some((w) => /^-s|^--set(=|$)/.test(w))) {
+    return "写命令 date（设系统时间）";
+  }
+  if (first === "history" && rest.slice(1).some((w) => /^-[A-Za-z]*[wa]$/.test(w))) {
+    return "写命令 history（写历史文件）";
+  }
+  if (first === "tree" && rest.slice(1).some((w) => /^-[A-Za-z]*o|^--output(=|$)/.test(w))) {
+    return "写命令 tree（输出写文件）";
+  }
+  if (first === "file" && rest.slice(1).some((w) => /^-[A-Za-z]*C|^--compile(=|$)/.test(w))) {
+    return "写命令 file（编译魔数库落盘）";
   }
   // uniq 的输出位有文件操作数即落盘（uniq in.txt out.txt），见 uniqWriteVerdict
   if (first === "uniq") return uniqWriteVerdict(rest.slice(1));
