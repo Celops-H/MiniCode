@@ -72,6 +72,9 @@ describe("只读 agent 写拦截判定", () => {
       "sudo -u root rm x",
       "env -i rm x",
       "timeout 10 rm x",
+      "timeout 0.5 rm x",
+      "timeout -k 5 0.5 rm x",
+      "timeout 1.5s rm x",
       "nice -n 5 rm x",
       // 包装命令的取值旗标剥净后仍按真实命令词判写（-k/-s、-h/-r/-t/-U、-i/-o/-e）
       "timeout -k 5 10 rm x",
@@ -126,6 +129,7 @@ describe("只读 agent 写拦截判定", () => {
       // 取值旗标剥净后是只读命令，照常放行；无参旗标不误吞后继命令词
       "timeout -k 5 10 ls",
       "timeout -s 9 10 ls",
+      "timeout 0.5 ls",
       "sudo -r sysadm git log",
       "sudo -h host git status",
       "stdbuf -o L ls",

@@ -31,6 +31,13 @@ describe("stripCommandPrefix（段首包装剥离）", () => {
     expect(stripCommandPrefix(["timeout", "-k", "5", "10", "rm", "x"])).toEqual({ rest: ["rm", "x"], queried: false });
   });
 
+  it("timeout 的时长接受小数秒（含单位后缀）", () => {
+    expect(stripCommandPrefix(["timeout", "0.5", "rm", "x"])).toEqual({ rest: ["rm", "x"], queried: false });
+    expect(stripCommandPrefix(["timeout", "-k", "5", "0.5", "rm", "x"])).toEqual({ rest: ["rm", "x"], queried: false });
+    expect(stripCommandPrefix(["timeout", "1.5m", "rm", "x"])).toEqual({ rest: ["rm", "x"], queried: false });
+    expect(stripCommandPrefix(["timeout", "0.5s", "ls"])).toEqual({ rest: ["ls"], queried: false });
+  });
+
   it("command -v/-V 是查询形态，按 queried 标记返回", () => {
     expect(stripCommandPrefix(["command", "-v", "rm"]).queried).toBe(true);
     expect(stripCommandPrefix(["command", "-pV", "rm"]).queried).toBe(true);
