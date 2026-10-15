@@ -76,6 +76,45 @@ describe("isReadOnlyBashCommand（bash 只读判定）", () => {
     expect(isReadOnlyBashCommand("history")).toBe(true);
   });
 
+  it("段首包装命令剥开后按真实命令词判定（env rm x 判非只读，env ls 放行）", () => {
+    // 包装后的真实命令词不在白名单 → 非只读
+    expect(isReadOnlyBashCommand("env rm x")).toBe(false);
+    expect(isReadOnlyBashCommand("env -i rm x")).toBe(false);
+    expect(isReadOnlyBashCommand("env find . -delete")).toBe(false);
+    expect(isReadOnlyBashCommand("sudo mv a b")).toBe(false);
+    expect(isReadOnlyBashCommand("timeout 10 rm x")).toBe(false);
+    expect(isReadOnlyBashCommand("nice -n 5 rm x")).toBe(false);
+    // 包装后的真实命令词在白名单且无写选项 → 只读
+    expect(isReadOnlyBashCommand("env ls")).toBe(true);
+    expect(isReadOnlyBashCommand("env -i ls")).toBe(true);
+    expect(isReadOnlyBashCommand("env -u FOO ls")).toBe(true);
+    expect(isReadOnlyBashCommand("sudo -u root ls")).toBe(true);
+    expect(isReadOnlyBashCommand("timeout 10 ls")).toBe(true);
+    expect(isReadOnlyBashCommand("nice -n 5 cat file.txt")).toBe(true);
+    // 包装叠加白名单命令的写选项仍判非只读
+    expect(isReadOnlyBashCommand("env sort -o out.txt in.txt")).toBe(false);
+    // command -v/-V 只查询命令路径、不执行命令，无真实命令词，判非只读（保守）
+    expect(isReadOnlyBashCommand("command -v ls")).toBe(false);
+    // command 不带 -v/-V 时按其后的真实命令词判定
+    expect(isReadOnlyBashCommand("command -p ls")).toBe(true);
+    expect(isReadOnlyBashCommand("command -p rm x")).toBe(false);
+    // 裸包装命令无真实命令词，判非只读（保守）
+    expect(isReadOnlyBashCommand("env")).toBe(false);
+    expect(isReadOnlyBashCommand("sudo")).toBe(false);
+  });
+
+  it("uniq 的第二操作数落盘判非只读，输出位是 stdout 或无输出位放行", () => {
+    expect(isReadOnlyBashCommand("uniq in.txt out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("uniq -c in.txt out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("uniq -f 1 in.txt out.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("uniq - in.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("uniq in.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("uniq -c in.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("uniq -f 2 report.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("uniq in.txt -")).toBe(true);
+    expect(isReadOnlyBashCommand("uniq")).toBe(true);
+  });
+
   it("多行命令（含换行）判为非只读（第二行可写）", () => {
     expect(isReadOnlyBashCommand("echo hi\nrm file.txt")).toBe(false);
     expect(isReadOnlyBashCommand("ls\r\nrm file.txt")).toBe(false);

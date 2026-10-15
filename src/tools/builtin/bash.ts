@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
+import { normalizeCommandWord, stripCommandPrefix, uniqWritesToFile } from "../../core/index.js";
 import { validateInput, outputLimitNote, type ExecuteContext } from "../base.js";
 import type { ExecuteResult, Tool } from "../base.js";
 import { currentCwd } from "../file-state.js";
@@ -23,11 +24,12 @@ const schema = z.object({
 /**
  * 只读命令白名单：这些命令本身不修改系统状态，可并发执行。
  * 常见写命令（rm/mv/cp/mkdir/touch/git commit 等）不在其中，保持保守。
+ * 包装命令（sudo/env/timeout 等）不入表：剥开按真实命令词判定。
  */
 const READ_ONLY_COMMANDS = new Set([
   "ls", "cat", "head", "tail", "grep", "find", "wc", "pwd", "echo",
   "printf", "file", "stat", "du", "df", "sort", "uniq", "cut", "tr",
-  "history", "date", "env", "which", "whereis", "type", "realpath",
+  "history", "date", "which", "whereis", "type", "realpath",
   "dirname", "basename", "tree", "diff", "comm", "cmp",
 ]);
 
@@ -35,8 +37,8 @@ const READ_ONLY_COMMANDS = new Set([
  * 白名单内命令的写选项：命中即写文件或改系统状态，判非只读。
  * sort/tree/file 的输出旗标落盘（只读守卫的 sort/date/history/tree/file 分支同口径），
  * date 的 -s/--set 设系统时间，history 的 -w/-a 写历史文件。短选项取值可与旗标同词（sort -oout.txt、date -s2020-01-01），
- * 按前缀匹配。只覆盖旗标形态：操作数落盘（uniq 的第二操作数）与包装命令（env 后跟写命令）
- * 不在此判定内。
+ * 按前缀匹配。只收旗标形态：uniq 的第二操作数落盘见 uniqWritesToFile，
+ * 包装命令由 stripCommandPrefix 剥开按真实命令词判。
  */
 const WRITE_OPTION_RE: Record<string, RegExp> = {
   // cmd 的 /o 与 POSIX 的 -o/--output：输出写入文件；/o 按整词匹配，
@@ -56,7 +58,8 @@ const WRITE_OPTION_RE: Record<string, RegExp> = {
  * 判断 bash 命令是否只读安全（可并发执行）。
  * 只认简单命令 + 命令名在白名单；出现重定向、管道、连接符、后台、
  * 子 shell、命令替换、变量赋值前缀等任何可能修改状态的结构，一律非只读（保守）。
- * 白名单内的命令带写选项（sort -o、date -s 等）同样判非只读。
+ * 段首包装命令（sudo/env/timeout 等）剥开后按真实命令词判定（env rm x 判非只读）。
+ * 白名单内的命令带写选项（sort -o、date -s 等）或 uniq 的第二操作数落盘，同样判非只读。
  * @param command 命令原文
  * @returns 是否只读安全
  */
@@ -69,9 +72,11 @@ export function isReadOnlyBashCommand(command: string): boolean {
   if (/[<>|;&()]/.test(trimmed)) return false;
   // 命令替换（$() / 反引号）、变量赋值前缀（VAR=x cmd）→ 改变状态
   if (/\$\(|\x60|^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed)) return false;
-  const words = trimmed.split(/\s+/);
-  const first = words[0];
-  if (!first) return false;
+  // 剥开段首包装与分组符号，按真实命令词判定；command -v/-V 只查询路径、不执行命令，判非只读（保守）
+  const { rest, queried } = stripCommandPrefix(trimmed.split(/\s+/));
+  if (queried || rest.length === 0) return false;
+  const first = normalizeCommandWord(rest[0]!);
+  const args = rest.slice(1);
   // find 的写操作（delete/exec/execdir/okdir/ok/print 到文件等）→ 改变状态
   if (
     first === "find" &&
@@ -79,10 +84,13 @@ export function isReadOnlyBashCommand(command: string): boolean {
   ) {
     return false;
   }
+  if (!READ_ONLY_COMMANDS.has(first)) return false;
   // 白名单命令带写选项 → 写文件或改系统状态
   const writeOption = WRITE_OPTION_RE[first];
-  if (writeOption && words.slice(1).some((word) => writeOption.test(word))) return false;
-  return READ_ONLY_COMMANDS.has(first);
+  if (writeOption && args.some((word) => writeOption.test(word))) return false;
+  // uniq 的第二操作数落盘 → 写文件
+  if (first === "uniq" && uniqWritesToFile(args)) return false;
+  return true;
 }
 
 /** 执行 shell 命令，返回标准输出与错误输出；非零退出或超时返回错误信息 */
