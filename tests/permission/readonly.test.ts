@@ -1102,6 +1102,48 @@ describe("只读 agent 写拦截判定（git 子命令形态）", () => {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });
+
+  it("全局选项排在子命令之前时取真实子命令判定，只读全局选项形态照常放行", () => {
+    for (const command of [
+      "git -C /repo commit -m x",
+      "git -C /repo add .",
+      "git -c core.pager=cat add .",
+      "git -ccore.pager=cat add .",
+      "git --git-dir=/r/.git push",
+      "git --git-dir /r/.git commit -m x",
+      "git --work-tree=/w reset --hard",
+      "git --namespace ns add .",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeDefined();
+    }
+    for (const command of [
+      "git -C /repo status",
+      "git -C /repo log --oneline",
+      "git -c core.pager=cat show HEAD",
+      "git --git-dir=/r/.git diff HEAD",
+      "git --work-tree=/w status",
+      "git --no-pager log -1",
+      "git --version",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("查询豁免子命令的前置只读旗标不误判写，旗标后的写模式照常拒绝", () => {
+    for (const command of [
+      "git remote -vv",
+      "git remote --verbose",
+      "git reflog --all",
+      "git reflog -n 5",
+      "git submodule --quiet status",
+      "git submodule -q status",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+    expect(readOnlyWrite("git remote -v add origin https://x")).toBeDefined();
+    expect(readOnlyWrite("git submodule --quiet add https://x lib")).toBeDefined();
+    expect(readOnlyWrite("git reflog --all delete HEAD@{1}")).toBeDefined();
+  });
 });
 
 /** bash 判定捷径（只读元数据 + bash 命令 + 指定 shell 语义） */

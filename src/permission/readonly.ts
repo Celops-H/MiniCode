@@ -483,17 +483,60 @@ function gitConfigOperandCount(words: string[]): number {
   return count;
 }
 
+/** git 全局选项里取值的一类：排在子命令之前，其后一个词是选项值（-C 目录、-c 配置、--git-dir 仓库路径） */
+const GIT_GLOBAL_VALUE_FLAGS = new Set([
+  "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix", "--config-env",
+]);
+
+/**
+ * git 子命令词的下标：跳过排在子命令之前的全局选项。取值选项（-C/-c/--git-dir 等）
+ * 连其值一并跳过；短选项的粘连形态（-C/repo、-ccore.pager=cat）本身是一个 token，直接跳过。
+ * @param words 以 git 开头的命令段分词
+ * @returns 子命令词下标；无子命令返回 -1
+ */
+function gitSubcommandIndex(words: string[]): number {
+  let i = 1;
+  while (i < words.length) {
+    const w = words[i]!;
+    if (!w.startsWith("-")) return i;
+    i += GIT_GLOBAL_VALUE_FLAGS.has(w) ? 2 : 1;
+  }
+  return -1;
+}
+
+/** git 查询豁免子命令（remote/submodule/reflog）前置旗标里带值的：其后一个词是旗标参数，不是模式词 */
+const GIT_QUERY_VALUE_FLAGS = new Set([
+  "-n", "--max-count", "--since", "--until", "--date", "--pretty", "--format", "--grep",
+  "--skip", "--depth", "-g",
+]);
+
+/**
+ * git 查询豁免子命令的模式词：跳过前置旗标取首个非旗标词。取值旗标（-n/--since 等）
+ * 连其参数一并跳过；全是旗标时返回 undefined，按无子命令的查询形态处理。
+ * @param words 子命令之后的词
+ * @returns 模式词；无模式词返回 undefined
+ */
+function gitQueryMode(words: string[]): string | undefined {
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (!w.startsWith("-")) return w;
+    if (GIT_QUERY_VALUE_FLAGS.has(w)) i++;
+  }
+  return undefined;
+}
+
 /**
  * git 子命令写判定：变更子命令直接拒绝；branch/tag/worktree/stash/config/remote/submodule/reflog
  * 区分查询形态，其余写子命令命中即拒绝。
- * @param words 以 git 开头的命令段分词
+ * @param words 以 git 开头的命令段分词（含可能的全局选项）
  * @returns 违规原因；只读安全返回 undefined
  */
 function gitWriteVerdict(words: string[]): string | undefined {
-  const sub = words[1];
-  if (!sub) return undefined;
+  const idx = gitSubcommandIndex(words);
+  if (idx === -1) return undefined;
+  const sub = words[idx]!;
   if (!GIT_WRITE_SUBCOMMANDS.has(sub)) return undefined;
-  const rest = words.slice(2);
+  const rest = words.slice(idx + 1);
   if (sub === "worktree") {
     // 仅 list 是查询；add/remove/move/prune/lock 均改仓库
     return rest[0] === "list" ? undefined : "写命令 git worktree";
@@ -519,20 +562,20 @@ function gitWriteVerdict(words: string[]): string | undefined {
     return gitConfigOperandCount(rest) > 1 ? "写命令 git config" : undefined;
   }
   if (sub === "remote") {
-    // 查询：无参数（列出远程名）、-v/--verbose（显示 URL 列表）、show、get-url；
+    // 查询：无参数（列出远程名）、只带旗标（-v/-vv/--verbose 显示 URL 列表）、show、get-url；
     // add/remove/rename/set-url/prune/update 等改配置
-    const mode = rest[0];
-    const isQuery = mode === undefined || mode === "-v" || mode === "--verbose" || mode === "show" || mode === "get-url";
+    const mode = gitQueryMode(rest);
+    const isQuery = mode === undefined || mode === "show" || mode === "get-url";
     return isQuery ? undefined : "写命令 git remote";
   }
   if (sub === "submodule") {
-    // 查询：无参数（列出子模块）、status；add/init/update/deinit/sync 等改仓库
-    const mode = rest[0];
+    // 查询：无参数（列出子模块）、只带旗标（--quiet）、status；add/init/update/deinit/sync 等改仓库
+    const mode = gitQueryMode(rest);
     return mode === undefined || mode === "status" ? undefined : "写命令 git submodule";
   }
   if (sub === "reflog") {
-    // 查询：无参数（默认 show）与 show；delete/expire 改写 reflog
-    const mode = rest[0];
+    // 查询：无参数（默认 show）、只带旗标（--all/-n 5）与 show；delete/expire 改写 reflog
+    const mode = gitQueryMode(rest);
     return mode === undefined || mode === "show" ? undefined : "写命令 git reflog";
   }
   return `写命令 git ${sub}`;
