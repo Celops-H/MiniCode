@@ -1701,7 +1701,6 @@ describe("收尾注入收件箱（会话结束前滞留消息落进历史）", (
     // 镜像 MessageAppended：轨迹与恢复重建能拿到这条注入消息
     expect(mirrored.some((m) => m.role === "user" && m.agentPath === "/root/task_1")).toBe(true);
     // 收件箱已排空：重复调用不再重复注入
-    expect(agent.hasPendingMail()).toBe(false);
     expect(await agent.drainMailboxIntoHistory()).toBe(0);
     expect(agent.getMessages()).toHaveLength(1);
   });

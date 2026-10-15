@@ -85,7 +85,7 @@ describe("Mailbox（agent 邮箱）", () => {
 });
 
 describe("Agent 邮箱集成与消息注入", () => {
-  it("deliver 后 hasPendingMail 为真；runTurn 把消息以 source:system 注入上下文", async () => {
+  it("runTurn 把投递消息以 source:system 注入上下文，消费后收件箱清空", async () => {
     let sawSystem = false;
     const agent = new Agent({
       modelClient: {
@@ -106,13 +106,12 @@ describe("Agent 邮箱集成与消息注入", () => {
       content: "你好",
       triggerTurn: false,
     });
-    expect(agent.hasPendingMail()).toBe(true);
     agent.start("跑");
     for await (const _ of agent.run()) {
       // 消费
     }
     expect(sawSystem).toBe(true);
-    expect(agent.hasPendingMail()).toBe(false);
+    expect(await agent.drainMailboxIntoHistory()).toBe(0);
   });
 
   it("已结束 agent 收到唤醒消息（triggerTurn）后续跑，消息注入新一轮上下文", async () => {
@@ -188,7 +187,6 @@ describe("Agent 邮箱集成与消息注入", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls).toBe(1);
-    expect(agent.hasPendingMail()).toBe(true);
     // 用户再次 run：排队消息一并消费注入
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -196,7 +194,7 @@ describe("Agent 邮箱集成与消息注入", () => {
     }
     expect(calls).toBe(2);
     expect(secondContextHasMail).toBe(true);
-    expect(agent.hasPendingMail()).toBe(false);
+    expect(await agent.drainMailboxIntoHistory()).toBe(0);
   });
 });
 
@@ -217,7 +215,7 @@ describe("Team 投递与唤醒驱动", () => {
       triggerTurn: false,
     });
     expect(error).toBeUndefined();
-    expect(child.hasPendingMail()).toBe(true);
+    expect(await child.drainMailboxIntoHistory()).toBe(1);
 
     const missing = await team.sendMessage(AgentPath.parse("/root/none") as AgentPath, {
       type: "MESSAGE",
@@ -268,7 +266,7 @@ describe("Team 投递与唤醒驱动", () => {
     await new Promise((resolve) => setTimeout(resolve, 30)); // 等后台驱动完成
     expect(calls).toBe(2);
     expect(sawMail).toBe(true);
-    expect(child.hasPendingMail()).toBe(false);
+    expect(await child.drainMailboxIntoHistory()).toBe(0);
   });
 
   it("并发满时唤醒投递进待驱动队列，槽位释放后自动驱动", async () => {
@@ -323,7 +321,7 @@ describe("Team 投递与唤醒驱动", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(slowCalls).toBe(1); // 唯一并发槽位，只能跑一轮
     expect(fastCalls).toBe(1); // 槽位释放后自动驱动
-    expect(fast.hasPendingMail()).toBe(false); // 消息已消费
+    expect(await fast.drainMailboxIntoHistory()).toBe(0); // 消息已消费
   });
 
   it("忙（活跃续跑循环中）时投递排队消息不重复驱动，活跃循环自行消费", async () => {
@@ -374,6 +372,6 @@ describe("Team 投递与唤醒驱动", () => {
     // 活跃循环在每轮结束因收件箱非空继续：模型被调用 2 次，排队消息注入第二轮
     expect(calls).toBe(2);
     expect(sawMail).toBe(true);
-    expect(agent.hasPendingMail()).toBe(false);
+    expect(await agent.drainMailboxIntoHistory()).toBe(0);
   });
 });

@@ -140,17 +140,16 @@ describe("Team（注册表与并发限制）", () => {
     expect(team.resolveAgent(AgentPath.root())).toBeUndefined();
   });
 
-  it("clear 清空成员收件箱：排队消息不再让中断 agent 复活续跑", () => {
+  it("clear 清空成员收件箱：排队消息不再让中断 agent 复活续跑", async () => {
     const team = new Team();
     team.registerRoot(makeAgent());
     const child = makeAgent();
     const path = team.reserveSpawn(AgentPath.root(), "task_1") as AgentPath;
     team.commitSpawn(path, child);
-    // 投递排队消息（不唤醒）：收件箱有内容
+    // 投递排队消息（不唤醒）：收件箱有内容，clear 后一并排空
     void team.sendMessage(path, { type: "MESSAGE", from: AgentPath.root(), content: "hi", triggerTurn: false });
-    expect(child.hasPendingMail()).toBe(true);
     team.clear();
-    expect(child.hasPendingMail()).toBe(false);
+    expect(await child.drainMailboxIntoHistory()).toBe(0);
   });
 });
 
@@ -194,7 +193,6 @@ describe("子 agent 结论回灌终态口径", () => {
     // 中断终态：AgentInterrupted 发出；标记消息只排队不唤醒父（父闲置、零消息，
     // 唤醒会顶着打断意图重启父）
     expect(interrupted).toEqual(["/root/worker"]);
-    expect(root.hasPendingMail()).toBe(true);
     expect(root.getMessages()).toHaveLength(0);
     // 父下一轮输入消费标记：模型据此知晓任务未完成，不把中途文本当结论
     root.start("继续");
@@ -525,7 +523,7 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(interrupted!.parentPath).toBe("/root");
     expect(events.some((e) => e.type === "AgentCompleted")).toBe(false);
     // 注册表已清空：不向父投递中断标记（父收件箱保持空，进程不被回灌吊住）
-    expect(root.hasPendingMail()).toBe(false);
+    expect(await root.drainMailboxIntoHistory()).toBe(0);
   });
 
   it("中断标记不顶着打断重启父：父 unwind 窗口内到达只排队，轮末不再续跑", async () => {
@@ -605,7 +603,6 @@ describe("子 agent 结论回灌终态口径", () => {
     // 子按中断回灌，标记只排队；父被打断后保持终态退出，不再发起新模型调用
     expect(interruptedPaths).toEqual(["/root/worker"]);
     expect(rootCalls).toBe(1);
-    expect(root.hasPendingMail()).toBe(true);
     // 父下次输入消费标记
     root.start("继续");
     for await (const _ of root.run()) {

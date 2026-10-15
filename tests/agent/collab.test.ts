@@ -283,7 +283,7 @@ describe("协作工具集（多 agent 环境）", () => {
     const result = root.getMessages().find((m) => m.role === "tool_result");
     expect(typeof result?.content).toBe("string");
     expect(String(result?.content)).toContain("已发送给 /root/worker");
-    expect(worker.hasPendingMail()).toBe(true);
+    expect(await worker.drainMailboxIntoHistory()).toBe(1);
   });
 
   it("followup_task：投递并唤醒（驱动目标续跑）", async () => {
@@ -318,7 +318,7 @@ describe("协作工具集（多 agent 环境）", () => {
     // followup_task 唤醒 worker：其模型被驱动调用
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(workerCalls).toBe(1);
-    expect(worker.hasPendingMail()).toBe(false);
+    expect(await worker.drainMailboxIntoHistory()).toBe(0);
   });
 
   it("list_agents：列出团队成员", async () => {

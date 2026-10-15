@@ -1054,8 +1054,7 @@ describe("交互循环", () => {
       await vi.advanceTimersByTimeAsync(5_000);
       await interacting;
 
-      // 未注入、未落畸形：收件箱保留，盘上仍是 checkpoint 的两条
-      expect(agent.hasPendingMail()).toBe(true);
+      // 未注入、未落畸形：盘上仍是 checkpoint 的两条
       expect(agent.getMessages().some((m) => m.role === "user" && m.agentPath === "/root/task_1")).toBe(false);
       expect(session.getMessages().map((m) => m.role)).toEqual(["user", "assistant"]);
     } finally {

@@ -376,11 +376,6 @@ export class Agent {
     this.mailbox.enqueue(mail);
   }
 
-  /** 收件箱是否有未消费消息（调度器 runnable 判定） */
-  hasPendingMail(): boolean {
-    return this.mailbox.hasPending();
-  }
-
   /** 清空收件箱（Team 会话收尾调用）：排队消息会让中断的 agent 在 resume 里复活续跑——
    *  重新拉起模型流吊住进程 */
   clearMailbox(): void {
