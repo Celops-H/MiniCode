@@ -81,6 +81,9 @@ export class AnthropicMessagesProtocol implements Protocol {
     const tagFilters = new Map<number, InlineTagFilter>();
     // 已开始且未 stop 的 text 块（流尾 flush 标签残料用）
     const openTextBlocks = new Set<number>();
+    // 已开始且未收到 content_block_stop 的 tool_use 块（统一序号）：流内 error 终止路径
+    // 补发 toolcall_end 用，防在途工具调用在事件流里没有结束标记
+    const openToolCalls = new Set<number>();
 
     /** 块的正文清洗链：标签状态机 */
     const pushText = (blockIndex: number, text: string): StreamEvent[] => {
@@ -107,6 +110,13 @@ export class AnthropicMessagesProtocol implements Protocol {
       }
     };
 
+    /** 未收到 content_block_stop 的工具调用补发结束（流内 error 终止路径用） */
+    const flushOpenToolCalls = function* (): Generator<StreamEvent> {
+      for (const index of openToolCalls) {
+        yield { type: "toolcall_end", index };
+      }
+    };
+
     try {
       for await (const chunk of stream) {
         if (typeof chunk !== "object" || chunk === null) continue;
@@ -119,6 +129,7 @@ export class AnthropicMessagesProtocol implements Protocol {
             if (block.type === "tool_use") {
               const toolIndex = nextToolIndex++;
               toolIndexByBlock.set(blockIndex, toolIndex);
+              openToolCalls.add(toolIndex);
               yield {
                 type: "toolcall_start",
                 index: toolIndex,
@@ -175,6 +186,7 @@ export class AnthropicMessagesProtocol implements Protocol {
             const toolIndex = toolIndexByBlock.get(blockIndex);
             if (toolIndex !== undefined) {
               yield { type: "toolcall_end", index: toolIndex };
+              openToolCalls.delete(toolIndex);
             }
             if (openTextBlocks.has(blockIndex)) {
               // 块结束：该块的标签残料按原文发出
@@ -218,6 +230,10 @@ export class AnthropicMessagesProtocol implements Protocol {
             };
             return;
           case "error":
+            // 流内 error 是终止事件：先收尾再返回——未 stop 的 text 块标签残料按原文发出
+            //（与 message_stop 收尾一致），并补在途工具调用的 toolcall_end
+            yield* flushOpenTextBlocks();
+            yield* flushOpenToolCalls();
             yield { type: "error", message: anthropicErrorMessage((chunk as { error?: unknown }).error) };
             return;
           default:

@@ -316,6 +316,89 @@ describe("parseStream：SSE → 统一事件", () => {
     expect(await collect({ type: "error" })).toEqual([{ type: "error", message: "未知错误" }]);
   });
 
+  it("流内 error 终止：在途工具调用补发 toolcall_end 再发 error", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":' } },
+        { type: "error", error: { type: "overloaded_error" } },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 未收到 content_block_stop 与 message_stop：在途调用先补 end，再以 error 收尾
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "toolcall_end", index: 0 },
+      { type: "error", message: "overloaded_error" },
+    ]);
+  });
+
+  it("流内 error 终止：已 stop 的工具调用不重复补 toolcall_end", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_stop", index: 0 },
+        { type: "error", error: "过载" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_end", index: 0 },
+      { type: "error", message: "过载" },
+    ]);
+  });
+
+  it("流内 error 终止：未闭合 text 块的标签残料按原文先发出", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "前文<thinking>推理</think" } },
+        { type: "error", error: { type: "overloaded_error" } },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 闭合标签被拆开：已确定部分即时发出，尾部候选前缀留在状态机里，error 终止时按原文收尾
+    expect(events).toEqual([
+      { type: "text_delta", text: "前文" },
+      { type: "thinking_delta", thinking: "推理" },
+      { type: "thinking_delta", thinking: "</think" },
+      { type: "error", message: "overloaded_error" },
+    ]);
+  });
+
+  it("流内 error 终止：标签残料与在途工具调用一并收尾，残料在前", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "前文<thinking>推理</think" } },
+        { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"path":' } },
+        { type: "error", error: "过载" },
+      ),
+    )) {
+      events.push(e);
+    }
+    // 两条收尾路径都在：text 块残料先发出，工具调用的 end 后补，error 收尾
+    expect(events).toEqual([
+      { type: "text_delta", text: "前文" },
+      { type: "thinking_delta", thinking: "推理" },
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "thinking_delta", thinking: "</think" },
+      { type: "toolcall_end", index: 0 },
+      { type: "error", message: "过载" },
+    ]);
+  });
+
   it("流意外结束（未收到 message_stop）报 error 标记异常轮", async () => {
     const events: StreamEvent[] = [];
     for await (const e of protocol.parseStream(chunkGen())) {
