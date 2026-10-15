@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { validateInput, outputLimitNote } from "../base.js";
+import { validateInput, outputLimitNote, type ExecuteContext } from "../base.js";
 import type { Tool } from "../base.js";
 import type { BackgroundTask, BackgroundTaskStatus } from "./bash-background.js";
 import { getBackgroundTask, killBackgroundTask } from "./bash-background.js";
@@ -46,7 +46,7 @@ export const bashTaskTool: Tool = {
   inputSchema: schema,
   isReadOnly: false,
   maxResultSizeChars: MAX_RESULT_CHARS,
-  async execute(input) {
+  async execute(input, options: ExecuteContext | undefined) {
     const { task_id, action } = validateInput<{ task_id: string; action: "status" | "kill" }>(
       bashTaskTool,
       input,
@@ -64,10 +64,12 @@ export const bashTaskTool: Tool = {
       }
       return `任务 ${task_id} 已终止`;
     }
-    // status：状态行 + 自上次查询以来的新增输出（游标推进，旧输出不重复返回）
+    // status：状态行 + 自该消费者上次查询以来的新增输出（游标按 agentPath 各记一份，
+    // 子 agent 查询不推进父的游标；无上下文时视作 root）
+    const consumer = options?.agentPath ?? "/root";
     const line = `任务 ${task.id}：${taskStateText(task)}`;
-    const fresh = task.output.slice(task.readMark).trim();
-    task.readMark = task.output.length;
+    const fresh = task.output.slice(task.readMarks.get(consumer) ?? 0).trim();
+    task.readMarks.set(consumer, task.output.length);
     if (fresh) return `${line}\n自上次查询的新增输出：\n${fresh}`;
     if (task.status === "running") return `${line}\n（自上次查询无新增输出）`;
     return `${line}\n（任务已结束，无新增输出，无需再查询）`;

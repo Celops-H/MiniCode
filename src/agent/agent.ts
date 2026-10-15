@@ -1396,7 +1396,7 @@ export class Agent {
           withCwd(this.cwd, () =>
             withFileState(
               this.fileState,
-              () => tool.execute(call.input, { signal: this.interruptController.signal }),
+              () => tool.execute(call.input, { signal: this.interruptController.signal, agentPath }),
             ),
           ),
           ...deadlines,

@@ -25,6 +25,11 @@ export type ExecuteResult =
 /** 工具执行上下文：携带可中止信号（turn 内打断透传，bash 等长进程据此杀进程树） */
 export interface ExecuteContext {
   signal?: AbortSignal;
+  /**
+   * 消费者 agent 路径（如 `/root`、`/root/task_1`）：工具按消费者隔离的状态
+   * （如后台任务查询游标）据此区分。缺省视作 `/root`。
+   */
+  agentPath?: string;
 }
 
 /**

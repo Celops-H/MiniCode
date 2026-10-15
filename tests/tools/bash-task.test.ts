@@ -9,6 +9,7 @@ import {
   startBackgroundTask,
 } from "../../src/tools/index.js";
 import type { BackgroundTask } from "../../src/tools/index.js";
+import type { ExecuteContext } from "../../src/tools/base.js";
 import { taskStateText } from "../../src/tools/builtin/bash-task.js";
 
 // 起真实 shell/node 子进程，后台任务轮询受整机负载影响大：
@@ -86,6 +87,41 @@ describe("bash_task 工具", () => {
     expect(fourth).toContain("已完成");
     expect(fourth).toContain("无需再查询");
     expect(fourth).not.toContain("second");
+  });
+
+  it("查询游标按消费者隔离：子 agent 查询不推进父的游标", async () => {
+    const out = await bashTool.execute({
+      command: "node -e \"console.log('shared-out'); setInterval(() => {}, 1000)\"",
+      background: true,
+    });
+    const id = /任务 (b\d+)/.exec(out as string)?.[1]!;
+    await vi.waitFor(
+      () => {
+        expect(getBackgroundTask(id)?.output).toContain("shared-out");
+      },
+      { timeout: 5000 },
+    );
+
+    const parent: ExecuteContext = { agentPath: "/root" };
+    const child: ExecuteContext = { agentPath: "/root/task_1" };
+
+    // 父首查：拿到已有输出，父自己的游标推进到末尾
+    const parentFirst = await bashTaskTool.execute({ task_id: id, action: "status" }, parent);
+    expect(parentFirst).toContain("shared-out");
+
+    // 子首查：游标独立，仍拿到同一份输出（父的查询未推进子的游标）
+    const childFirst = await bashTaskTool.execute({ task_id: id, action: "status" }, child);
+    expect(childFirst).toContain("shared-out");
+
+    // 父再查：自己的游标已到末尾，无新增，不重复返回旧输出
+    const parentSecond = await bashTaskTool.execute({ task_id: id, action: "status" }, parent);
+    expect(parentSecond).toContain("无新增输出");
+    expect(parentSecond).not.toContain("shared-out");
+
+    // 子再查：独立游标同样已到末尾
+    const childSecond = await bashTaskTool.execute({ task_id: id, action: "status" }, child);
+    expect(childSecond).toContain("无新增输出");
+    expect(childSecond).not.toContain("shared-out");
   });
 
   it("kill 后再查 status：返回剩余新增输出与已终止状态", async () => {
