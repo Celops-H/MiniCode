@@ -114,6 +114,23 @@ it("compact 工具完成收敛单行摘要（点击展开全文）", async () =>
   expect(frame).not.toContain("line1"); // 输出隐藏
 });
 
+it("compact 失败卡（只有错误无输出）折叠摘要显示「错误详情」，与 bash/generic 同口径", async () => {
+  const setup = await app([
+    { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "failure", error: "文件不存在", collapsedArgs: true, collapsedOutput: true },
+  ]);
+  await setup.waitForVisualIdle();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("错误详情 · 点击展开");
+  expect(frame).not.toContain("输出 0 行"); // 无输出时不报「输出 0 行」
+  expect(frame).not.toContain("文件不存在"); // 折叠时错误全文不展示
+  // 有输出时仍按「输出 N 行」显示（与 generic 同优先级：输出在前、错误详情兜底）
+  const both = await app([
+    { kind: "tool", index: 0, turn: 0, name: "read", args: '{"path":"a.ts"}', status: "failure", error: "末尾告警", output: "line1\nline2", collapsedArgs: true, collapsedOutput: true },
+  ]);
+  await both.waitForVisualIdle();
+  expect(both.captureCharFrame()).toContain("输出 2 行 · 点击展开");
+});
+
 it("bash 紧凑块：命令首行 + 折叠输出行数提示，无边框", async () => {
   const setup = await app([
     { kind: "tool", index: 0, turn: 0, name: "bash", args: '{"command":"pnpm test"}', status: "success", collapsedArgs: true, collapsedOutput: true, output: "ok\npass" },

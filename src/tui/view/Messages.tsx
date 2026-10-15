@@ -217,9 +217,14 @@ function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
           <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
           {b.args ? ` ${argsDigest(b.args)}` : ""}
           {durationText(b)}
-          {b.status === "running" ? (
-            ""
-          ) : hasOutput(b) && !expanded() ? ` · 输出 ${outputLines()} 行 · 点击展开` : ""}
+          {/* 折叠摘要：有输出显「输出 N 行」，只有错误显「错误详情」——与 bash/generic 同口径 */}
+          {b.status === "running"
+            ? ""
+            : hasOutput(b) && !expanded()
+              ? b.output
+                ? ` · 输出 ${outputLines()} 行 · 点击展开`
+                : " · 错误详情 · 点击展开"
+              : ""}
         </text>
         <Show when={expanded() && b.args}>
           <text fg={theme.textMuted}>{b.args}</text>
