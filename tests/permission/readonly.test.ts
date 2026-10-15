@@ -520,6 +520,13 @@ describe("只读 agent 写拦截判定（包管理器与临时包执行）", () 
       "bun run dev",
       "bun x tsc",
       "bun test.ts",
+      "bun -",
+      "yarn",
+      "yarn --silent",
+      "npm audit fix",
+      "npm audit fix --force",
+      "npm audit --fix",
+      "pnpm audit fix",
       "corepack enable",
       "corepack prepare pnpm@9 --activate",
       "npx cowsay",
@@ -535,6 +542,8 @@ describe("只读 agent 写拦截判定（包管理器与临时包执行）", () 
     expect(readOnlyWrite("pnpm dlx cowsay")).toMatch(/脚本执行无法核验/);
     expect(readOnlyWrite("npx cowsay")).toMatch(/临时包执行无法核验/);
     expect(readOnlyWrite("pnpm test")).toMatch(/子命令无法核验/);
+    expect(readOnlyWrite("yarn")).toMatch(/默认 install/);
+    expect(readOnlyWrite("npm audit fix")).toMatch(/audit fix/);
     for (const command of [
       "pnpm ls",
       "pnpm list --depth 0",
@@ -557,6 +566,11 @@ describe("只读 agent 写拦截判定（包管理器与临时包执行）", () 
       "yarn list",
       "yarn info react",
       "corepack --version",
+      "yarn --version",
+      "yarn -v",
+      "yarn --help",
+      "npm audit",
+      "pnpm audit",
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }

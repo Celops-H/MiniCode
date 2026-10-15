@@ -114,7 +114,7 @@ const PACKAGE_MANAGER_WORDS = new Set(["npm", "pnpm", "yarn", "bun", "corepack"]
 /** 临时包执行器：包从远端取来即执行，包来源与脚本内容均无法核验，整体拒绝 */
 const PACKAGE_EXEC_WORDS = new Set(["npx", "pnpx", "bunx"]);
 
-/** 包管理器只读子命令：读本地清单或远端元数据，不落盘、不执行脚本 */
+/** 包管理器只读子命令：读本地清单或远端元数据，不落盘、不执行脚本（audit 的 fix 子形态见分支） */
 const PKG_READ_SUBCOMMANDS = new Set([
   "ls", "list", "ll", "la", "why", "view", "info", "show", "outdated", "audit", "doctor",
   "help", "root", "bin", "prefix", "explain", "repo", "search", "ping", "whoami", "fund",
@@ -320,8 +320,20 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   }
   if (PACKAGE_EXEC_WORDS.has(first)) return `写命令 ${first}（临时包执行无法核验）`;
   if (PACKAGE_MANAGER_WORDS.has(first)) {
-    const sub = rest.slice(1).find((w) => !w.startsWith("-"))?.toLowerCase();
-    if (sub === undefined || PKG_READ_SUBCOMMANDS.has(sub)) return undefined;
+    const args = rest.slice(1);
+    // 裸「-」是 stdin 脚本（bun -），按操作数位取，不随选项一起跳过
+    const sub = args.find((w) => w === "-" || !w.startsWith("-"))?.toLowerCase();
+    // 裸 yarn 与只带非查询旗标的调用等于 yarn install（npm/pnpm/corepack 裸用只打印帮助）
+    if (sub === undefined) {
+      const onlyQueryFlag = args.length > 0 && args.every((w) => /^(-v|--version|-h|--help)$/.test(w));
+      return first === "yarn" && !onlyQueryFlag ? "写命令 yarn（默认 install）" : undefined;
+    }
+    if (PKG_READ_SUBCOMMANDS.has(sub)) {
+      // audit 的 fix 子形态改依赖树与锁文件，其余查询形态放行
+      return sub === "audit" && args.some((w) => w === "fix" || w === "--fix")
+        ? `写命令 ${first} audit fix（安装写依赖）`
+        : undefined;
+    }
     if (PKG_INSTALL_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（安装写依赖）`;
     if (PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
     return `写命令 ${first} ${sub}（子命令无法核验）`;
