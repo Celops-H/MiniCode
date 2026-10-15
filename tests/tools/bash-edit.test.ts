@@ -46,6 +46,46 @@ describe("edit 工具", () => {
     expect(await readFile(file, "utf8")).toBe("l1\nl2\nconst a = 10;\nl4\nl5");
   });
 
+  it("改动块在文件首行时片段从第 1 行起", async () => {
+    const file = path.join(setup(), "a.txt");
+    writeFileSync(file, "first\nsecond\nthird");
+    const out = await editTool.execute({ path: file, oldString: "first", newString: "FIRST" });
+    expect(out).toContain("已替换 1 处（第 1 行）");
+    expect(out).toContain("1\tFIRST");
+    expect(await readFile(file, "utf8")).toBe("FIRST\nsecond\nthird");
+  });
+
+  it("改动块在文件末行时片段到末行为止", async () => {
+    const file = path.join(setup(), "a.txt");
+    writeFileSync(file, "a\nb\nlast");
+    const out = await editTool.execute({ path: file, oldString: "last", newString: "LAST" });
+    expect(out).toContain("已替换 1 处（第 3 行）");
+    expect(out).toContain("3\tLAST");
+    expect(out).not.toContain("4\t");
+  });
+
+  it("newString 多行时片段按新块行数接上下文", async () => {
+    const file = path.join(setup(), "a.txt");
+    writeFileSync(file, "l1\nl2\nl3\nl4\nl5\nl6\nl7");
+    const out = await editTool.execute({ path: file, oldString: "l3", newString: "x\ny\nz" });
+    expect(out).toContain("已替换 1 处（第 3 行）");
+    expect(out).toContain("3\tx");
+    expect(out).toContain("4\ty");
+    expect(out).toContain("5\tz");
+    expect(await readFile(file, "utf8")).toBe("l1\nl2\nx\ny\nz\nl4\nl5\nl6\nl7");
+  });
+
+  it("文件较长时片段只取改动块上下各若干行", async () => {
+    const file = path.join(setup(), "a.txt");
+    writeFileSync(file, Array.from({ length: 20 }, (_, i) => `l${i + 1}`).join("\n"));
+    const out = await editTool.execute({ path: file, oldString: "l10", newString: "L10" });
+    expect(out).toContain("10\tL10");
+    expect(out).toContain("7\tl7");
+    expect(out).toContain("13\tl13");
+    expect(out).not.toContain("6\tl6");
+    expect(out).not.toContain("14\tl14");
+  });
+
   it("待替换文本不唯一时抛错并附次数", async () => {
     const file = path.join(setup(), "a.txt");
     writeFileSync(file, "x = 1\nx = 2");
