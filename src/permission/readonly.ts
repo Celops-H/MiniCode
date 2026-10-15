@@ -287,7 +287,10 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     if ((interpreter === "perl" || interpreter === "ruby") && rest.slice(1).some((w) => /^-[a-z]*i/.test(w))) {
       return `写命令 ${first} -i（原地改写）`;
     }
-    if (!rest.slice(1).some(isInline) && rest.slice(1).some(isScriptOperand)) {
+    // deno 的内联是 eval 子命令，只在紧邻命令词时算（deno run eval 的 eval 是脚本操作数）
+    const args = rest.slice(1);
+    const inlined = interpreter === "deno" ? rest[1] === "eval" : args.some(isInline);
+    if (!inlined && args.some(isScriptOperand)) {
       return `写命令 ${first}（脚本文件执行无法核验）`;
     }
     return undefined;

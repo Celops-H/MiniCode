@@ -438,6 +438,8 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
       "deno run x.ts",
       "deno run --allow-read x.ts",
       "deno check main.ts",
+      // eval 只在子命令位算一行流，处在操作数位的是同名脚本文件
+      "deno run eval",
       "tsx script.ts",
       "tsx src/main.ts",
       "ls *.ts | xargs python3.12",
