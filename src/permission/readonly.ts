@@ -35,17 +35,16 @@ import {
   stripCommandPrefix,
   uniqWritesToFile,
 } from "../core/index.js";
+import { COLLAB_TOOL_NAMES } from "../tools/builtin/collab.js";
 import {
   resolveCommandShell,
   stripQuotedSpans,
   type CommandShellKind,
 } from "./dangerous.js";
 
-/** 无文件写副作用、只读 agent 可用的状态类工具（协作调度与会话内任务管理） */
-const STATE_TOOL_ALLOW = new Set([
-  "spawn_agent", "send_message", "followup_task", "list_agents", "interrupt_agent",
-  "todo", "bash_task",
-]);
+/** 无文件写副作用、只读 agent 可用的状态类工具（协作调度与会话内任务管理）：
+ *  协作工具名随 collab 清单派生，新增协作工具不必再改这里 */
+const STATE_TOOL_ALLOW = new Set<string>([...COLLAB_TOOL_NAMES, "todo", "bash_task"]);
 
 /**
  * 判定一次工具调用是否为只读 agent 不允许的写操作。

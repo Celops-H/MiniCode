@@ -6,7 +6,7 @@ import { AgentPath } from "../../src/agent/agent-path.js";
 import { Team } from "../../src/agent/team.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import { createCollaborationTools } from "../../src/tools/index.js";
-import { COLLAB_SUBAGENT_PROMPT, COLLAB_TOOL_NAMES } from "../../src/tools/builtin/collab.js";
+import { COLLAB_READONLY_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT, COLLAB_TOOL_NAMES } from "../../src/tools/builtin/collab.js";
 import type { Tool } from "../../src/tools/base.js";
 import type { ModelClient } from "../../src/agent/agent.js";
 
@@ -635,6 +635,25 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(spawn.description).toContain("直接结束本轮");
     expect(spawn.description).toContain("自动唤醒你");
     expect(spawn.description).not.toContain("wait_agent");
+  });
+
+  it("工具名单单一出处：名集合与只读集合都对照工具实例", () => {
+    const team = new Team();
+    const tools = createCollaborationTools({
+      team,
+      getAgentPath: () => undefined,
+      isReadOnly: () => false,
+      createChildAgent: () => {
+        throw new Error("本测试不派生子 agent");
+      },
+      sendMessage: (target, mail) => team.sendMessage(target, mail),
+      worktreeDefault: () => false,
+    });
+    // 清单与实现不一致（新增工具漏登记、只读标记抄错）即在此失败
+    expect([...COLLAB_TOOL_NAMES]).toEqual(tools.map((tool) => tool.name));
+    expect([...COLLAB_READONLY_TOOL_NAMES]).toEqual(
+      tools.filter((tool) => tool.isReadOnly).map((tool) => tool.name),
+    );
   });
 
   it("interrupt_agent：中断目标（当前 turn 结束后停止），root/自己不可中断", async () => {

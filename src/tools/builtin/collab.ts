@@ -13,14 +13,26 @@ import { AgentPath } from "../../agent/agent-path.js";
 import type { Team } from "../../agent/team.js";
 import type { MailMessage } from "../../agent/mailbox.js";
 
+/**
+ * 协作工具清单：名与只读元数据。协作工具只在 Agent 内部经 deps 构造，宿主拿不到实例，
+ * 名单只能静态给出。新增工具只改这张表，两个导出集合自动跟上；
+ * 与 createCollaborationTools 的一致性由测试钉住（tests/agent/collab.test.ts）。
+ */
+const COLLAB_TOOL_META: ReadonlyArray<{ name: string; readOnly: boolean }> = [
+  { name: "spawn_agent", readOnly: false },
+  { name: "send_message", readOnly: false },
+  { name: "followup_task", readOnly: false },
+  { name: "list_agents", readOnly: true },
+  { name: "interrupt_agent", readOnly: false },
+];
+
 /** 协作工具名集合（子 agent 工具集过滤与识别用，避免重复注册） */
-export const COLLAB_TOOL_NAMES = new Set([
-  "spawn_agent",
-  "send_message",
-  "followup_task",
-  "list_agents",
-  "interrupt_agent",
-]);
+export const COLLAB_TOOL_NAMES = new Set(COLLAB_TOOL_META.map((tool) => tool.name));
+
+/** 只读协作工具名集合（宿主侧 plan 模式只读放行名单并入用） */
+export const COLLAB_READONLY_TOOL_NAMES = new Set(
+  COLLAB_TOOL_META.filter((tool) => tool.readOnly).map((tool) => tool.name),
+);
 
 /** 团队工作 agent 系统提示词（fork_turns=none：全新上下文，无父历史） */
 export const COLLAB_SUBAGENT_PROMPT =

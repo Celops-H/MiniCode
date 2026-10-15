@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readOnlyToolViolation, type CommandShellKind } from "../../src/permission/index.js";
+import { COLLAB_TOOL_NAMES } from "../../src/tools/builtin/collab.js";
 
 describe("只读 agent 写拦截判定", () => {
   it("按工具元数据判定：只读工具与状态类工具放行，写工具与副作用未知工具拒绝", () => {
@@ -15,6 +16,12 @@ describe("只读 agent 写拦截判定", () => {
     expect(readOnlyToolViolation("mcp__server__tool", false)).toMatch(/写副作用/);
     // 元数据缺失按副作用未知拦
     expect(readOnlyToolViolation("unknown_tool", undefined)).toMatch(/副作用未知/);
+  });
+
+  it("协作工具放行集随 collab 清单派生：清单里每个工具都放行", () => {
+    for (const name of COLLAB_TOOL_NAMES) {
+      expect(readOnlyToolViolation(name, false), name).toBeUndefined();
+    }
   });
 
   it("bash 重定向写文件拒绝（> >> 2> &>），丢弃输出（/dev/null）不拦", () => {
