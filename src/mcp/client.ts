@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { McpServerConfig } from "../config/index.js";
+import { MINICODE_VERSION } from "../core/index.js";
 import { killProcessTree } from "../tools/index.js";
 
 /** MCP 传输协议版本（initialize 握手声明） */
@@ -124,7 +125,7 @@ export class McpClient {
       await this.request("initialize", {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "minicode", version: "0.0.1" },
+        clientInfo: { name: "minicode", version: MINICODE_VERSION },
       }, HANDSHAKE_TIMEOUT_MS);
       this.notify("notifications/initialized");
       const listed = await this.request<{ tools?: McpToolInfo[] }>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);

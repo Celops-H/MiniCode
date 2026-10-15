@@ -19,12 +19,12 @@ import {
   createFileLogger,
   createSessionAgent,
   resolveAgentsEnabled,
-  MINICODE_VERSION,
 } from "../bootstrap/assemble.js";
 import { attachRecorder, deleteTrace, readAgentOutcomes } from "../observability/index.js";
 import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { buildModelClient, NoProviderError, pickMainModel, resolveMainModel } from "../bootstrap/models.js";
 import { DEFAULT_CONTEXT_WINDOW, Models } from "../llm/index.js";
+import { MINICODE_VERSION } from "../core/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
 import { rebuildUsageFromTrace, usageFromMessages } from "./usage.js";
 import { createStore } from "solid-js/store";

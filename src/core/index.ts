@@ -12,6 +12,7 @@ export { normalizeCommandWord, stripCommandPrefix, uniqWritesToFile } from "./sh
 export type { StreamEvent, ModelFallbackReason } from "./events.js";
 export { assembleAssistantMessage } from "./assemble.js";
 export { modelErrorText } from "./errors.js";
+export { MINICODE_VERSION } from "./version.js";
 export type {
   ContentBlock,
   TextContent,

@@ -49,9 +49,6 @@ const COORDINATOR_PROMPT =
   "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。" +
   "下达任务的写法与证据要求见 spawn_agent 工具描述。";
 
-/** 项目版本号（轨迹 header、--version 用；与 package.json version 保持同步） */
-export const MINICODE_VERSION = "0.0.1";
-
 /** 会话扩展生态装配结果：需并入会话的工具与系统提示词段落 */
 export interface SessionExtensions {
   /** 追加到内置工具之后的工具（MCP 工具 + skill 工具） */

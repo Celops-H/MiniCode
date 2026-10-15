@@ -9,7 +9,8 @@ import path from "node:path";
  * flood（tools/call 先灌 2MB 无结构输出再正常回复，用于行缓冲超限后解析不失效的断言）、
  * bigtext（回复 7 万个多字节汉字，用于跨 chunk 边界解码断言）、
  * boom-long（tools/call 按失败回复 800 字错误文本，用于失败原因截断断言）、
- * boom-empty（tools/call 按失败回复空文本，用于失败原因回落断言）。
+ * boom-empty（tools/call 按失败回复空文本，用于失败原因回落断言）、
+ * clientinfo（tools/call 回复 initialize 收到的 clientInfo，用于握手声明断言）。
  * FAKE_TOOLS（JSON 数组）覆盖声明的工具清单。
  */
 export const FAKE_SERVER = `const rl = require("node:readline").createInterface({ input: process.stdin });
@@ -17,17 +18,19 @@ const tools = process.env.FAKE_TOOLS ? JSON.parse(process.env.FAKE_TOOLS) : [
   { name: "echo", description: "回声工具", inputSchema: { type: "object", properties: { text: { type: "string" } } } },
   { name: "boom", description: "必失败工具" },
 ];
+let clientInfo = null;
 function reply(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n"); }
 rl.on("line", (line) => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   if (typeof msg.id !== "number") return;
-  if (msg.method === "initialize") reply(msg.id, { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version: "0.0.0" } });
+  if (msg.method === "initialize") { clientInfo = msg.params?.clientInfo; reply(msg.id, { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "fake", version: "0.0.0" } }); }
   else if (msg.method === "tools/list") {
     reply(msg.id, { tools });
     if (process.env.FAKE_MODE === "crash-after-list") setTimeout(() => process.exit(0), 50);
   } else if (msg.method === "tools/call") {
     if (process.env.FAKE_MODE === "silent") return;
     if (process.env.FAKE_MODE === "crash-on-call") process.exit(0);
+    if (process.env.FAKE_MODE === "clientinfo") { reply(msg.id, { content: [{ type: "text", text: JSON.stringify(clientInfo) }] }); return; }
     if (process.env.FAKE_MODE === "bigtext") { reply(msg.id, { content: [{ type: "text", text: "汉".repeat(70000) }] }); return; }
     if (process.env.FAKE_MODE === "flood") { process.stdout.write("x".repeat(2 * 1024 * 1024) + "\\n"); reply(msg.id, { content: [{ type: "text", text: "洪水后正常" }] }); return; }
     const text = msg.params?.arguments?.text;

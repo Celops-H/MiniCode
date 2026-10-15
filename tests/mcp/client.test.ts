@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpClient } from "../../src/mcp/client.js";
 import type { McpServerConfig } from "../../src/config/index.js";
+import { MINICODE_VERSION } from "../../src/core/index.js";
 import { writeFakeServer } from "./helpers.js";
 
 // 起真实 stdio server 子进程，受整机负载影响大：按自身耗时设独立超时，不用全局默认 5s
@@ -37,6 +38,14 @@ describe("McpClient（stdio JSON-RPC）", () => {
     expect(tools).toHaveLength(2);
     expect(tools[0]).toMatchObject({ name: "echo", description: "回声工具" });
     expect(tools[0]?.inputSchema).toMatchObject({ type: "object" });
+  });
+
+  it("握手 clientInfo 声明项目版本号（与 package.json 同源常量）", async () => {
+    const client = makeClient("clientinfo");
+    clients.push(client);
+    await client.start();
+    const result = await client.callTool("echo", {});
+    expect(JSON.parse(result.output)).toEqual({ name: "minicode", version: MINICODE_VERSION });
   });
 
   it("callTool 返回 text 段拼接文本", async () => {

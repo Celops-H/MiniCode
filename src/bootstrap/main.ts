@@ -11,7 +11,7 @@ import { killAllMcpServers } from "../mcp/index.js";
 import { SessionStore } from "../storage/index.js";
 import { killAllBackgroundTasks } from "../tools/index.js";
 import { rebuildIfStale } from "./staleBuild.js";
-import { MINICODE_VERSION } from "./assemble.js";
+import { MINICODE_VERSION } from "../core/index.js";
 
 export const program = new Command();
 program
