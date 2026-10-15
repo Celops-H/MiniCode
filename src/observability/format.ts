@@ -2,12 +2,18 @@
  * 轨迹格式（本文即接口文档）：JSONL 一行一条，首行 header，
  * 之后消息行与事件行两类，`kind` 字段区分。读取按 kind 分流，未知 kind/event
  * 跳过不报错（事件类型是开放清单，前向兼容靠这条）。
+ *
+ * 顺序与时间戳：行序才是因果序，消费方按文件行序读，不按 timestamp 排序。
+ * 两类行的 timestamp 语义不同——事件行记采集时刻，消息行记消息自身创建时刻；
+ * 写入攒批会让落盘时刻晚于发生时刻，因此文件序里 timestamp 允许回退。
  */
 
 /** header 的 format 标识 */
 export const TRACE_FORMAT = "minicode-trace";
 /** 格式版本：字段只增不改，格式演进升版本号 */
 export const TRACE_FORMAT_VERSION = 1;
+/** 根 agent 的路径：会话级事件与 root 的消息行都归到它（轨迹按 agentPath 过滤的固定值） */
+export const ROOT_AGENT_PATH = "/root";
 
 /**
  * 轨迹首行 header：定长字段今后不再增加，扩展一律走 metadata
@@ -27,6 +33,7 @@ export interface TraceHeader {
  * 消息行：复用会话文件的消息结构原样嵌入（不发明第二套消息 schema），
  * 加 agentPath 标注归属（根 agent 为 /root）。消息自身字段（role/id/content/
  * meta/source/toolCallId 等）按原样平铺在行级。
+ * 行级 timestamp 取消息自身的创建时刻，与事件行的采集时刻语义不同。
  */
 export interface TraceMessageLine {
   kind: "message";
@@ -40,7 +47,10 @@ export interface TraceMessageLine {
 
 /**
  * 事件行：与 hook 事件同名同构（零映射），data 为事件负载（type 与 agentPath
- * 提升到行级），timestamp 由 Recorder 收到时打（总线顺序 await，到达序即发生序）。
+ * 提升到行级）。行级 timestamp 是采集时刻，由 Recorder 收到事件时打
+ * （总线顺序 await，到达序即发生序）；它不保证随文件序单调，因果序只看行序。
+ * agentPath 由 Recorder 恒写（payload 不带路径的会话级事件归 /root）；
+ * 声明成可选是兼容没有该键的旧轨迹，读取侧按缺省处理。
  */
 export interface TraceEventLine {
   kind: "event";

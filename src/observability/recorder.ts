@@ -3,7 +3,13 @@ import path from "node:path";
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { HOOK_EVENT_TYPES } from "../hooks/index.js";
 import { resolveTracesDir } from "../config/paths.js";
-import { buildHeaderLine, TRACE_FORMAT, TRACE_FORMAT_VERSION, type TraceHeader } from "./format.js";
+import {
+  buildHeaderLine,
+  ROOT_AGENT_PATH,
+  TRACE_FORMAT,
+  TRACE_FORMAT_VERSION,
+  type TraceHeader,
+} from "./format.js";
 import { TraceWriter } from "./trace-writer.js";
 import { cleanupStaleTraces } from "./trace-reader.js";
 
@@ -108,9 +114,10 @@ export class Recorder {
       const { type, ...data } = event;
       this.writeEventLine(type, (event as { path: string }).path, data);
     } else {
-      // 无 agentPath 的会话级事件（UserPromptSubmit / SessionStart / SessionEnd）：行级省略该键
+      // 无 agentPath 的会话级事件（UserPromptSubmit / SessionStart / SessionEnd）：
+      // 归到根 agent /root——按 agentPath 过滤轨迹时不丢运行分段与用户输入
       const { type, ...data } = event;
-      this.writeEventLine(type, undefined, data);
+      this.writeEventLine(type, ROOT_AGENT_PATH, data);
     }
     // 会话结束：冲刷收尾批次（冲刷触发点），等写完再返回
     if (event.type === "SessionEnd") await this.writer.flush();
@@ -120,13 +127,13 @@ export class Recorder {
     }
   }
 
-  /** 事件行统一序列化：agentPath 缺省时行级省略该键 */
-  private writeEventLine(event: string, agentPath: string | undefined, data: Record<string, unknown>): void {
+  /** 事件行统一序列化：行级 agentPath 恒有值（无路径负载的会话级事件归 /root） */
+  private writeEventLine(event: string, agentPath: string, data: Record<string, unknown>): void {
     this.writer.appendLine(
       JSON.stringify({
         kind: "event",
         event,
-        ...(agentPath !== undefined ? { agentPath } : {}),
+        agentPath,
         timestamp: new Date().toISOString(),
         data,
       }),

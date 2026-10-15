@@ -78,11 +78,20 @@ describe("Recorder：轨迹格式与落盘", () => {
         minicodeVersion: "0.0.1",
       });
       expect(typeof lines[0]!.startedAt).toBe("string");
-      // 事件行（无 agentPath 的会话级事件：行级省略该键）
-      expect(lines[1]).toMatchObject({ kind: "event", event: "SessionStart" });
-      expect(lines[1]).not.toHaveProperty("agentPath");
+      // 事件行（会话级事件归到根 agent：按 agentPath 过滤不丢分段与用户输入）
+      expect(lines[1]).toMatchObject({ kind: "event", event: "SessionStart", agentPath: "/root" });
       expect(typeof lines[1]!.timestamp).toBe("string");
-      expect(lines[2]).toMatchObject({ kind: "event", event: "UserPromptSubmit", data: { input: "你好" } });
+      expect(lines[2]).toMatchObject({
+        kind: "event",
+        event: "UserPromptSubmit",
+        agentPath: "/root",
+        data: { input: "你好" },
+      });
+      // 时间戳语义分两种：事件行是 Recorder 收到时的采集时刻（不早于构造时刻），
+      // 消息行是消息自身创建时刻（见下条断言）
+      expect(Date.parse(String(lines[1]!.timestamp))).toBeGreaterThanOrEqual(
+        Date.parse(String(lines[0]!.startedAt)),
+      );
       // 消息行：消息字段平铺（role/id/content/timestamp），agentPath 标注归属
       expect(lines[3]).toMatchObject({
         kind: "message",
@@ -106,7 +115,7 @@ describe("Recorder：轨迹格式与落盘", () => {
       });
       expect(lines[4]!.data).not.toHaveProperty("type");
       // 收尾事件
-      expect(lines.at(-1)).toMatchObject({ kind: "event", event: "SessionEnd" });
+      expect(lines.at(-1)).toMatchObject({ kind: "event", event: "SessionEnd", agentPath: "/root" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
