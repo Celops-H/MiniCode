@@ -735,4 +735,103 @@ describe("parseStream：补充边界情况", () => {
       { type: "done", stopReason: "end_turn" },
     ]);
   });
+
+  it("message_stop 前省略 content_block_stop：在途工具调用补发 toolcall_end 再 done", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":' } },
+        // 兼容端点省略 content_block_stop 直接收尾
+        { type: "message_delta", delta: { stop_reason: "tool_use" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_use" },
+    ]);
+  });
+
+  it("message_stop 前省略 content_block_stop：已 stop 的工具调用不重复补 toolcall_end", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "tool_use" } },
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_use" },
+    ]);
+  });
+
+  it("message_stop 收尾：标签残料先发出，在途工具调用的 end 后补", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "开头<thinking>残料" } },
+        { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "message_delta", delta: { stop_reason: "tool_use" } },
+        // 兼容端点省略 content_block_stop 直接收尾
+        { type: "message_stop" },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "text_delta", text: "开头" },
+      { type: "thinking_delta", thinking: "残料" },
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_use" },
+    ]);
+  });
+
+  it("流尾缺 message_stop 且已收 stop_reason：在途工具调用补发 toolcall_end 再 done", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+        { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":"a"}' } },
+        // 收尾宽限关流：停止原因已到，连接被关掉，message_stop 与 content_block_stop 都没来
+        { type: "message_delta", delta: { stop_reason: "tool_use" } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_delta", index: 0, partialJson: '{"path":"a"}' },
+      { type: "toolcall_end", index: 0 },
+      { type: "done", stopReason: "tool_use" },
+    ]);
+  });
+
+  it("流尾缺 message_stop 且无 stop_reason：在途工具调用补发 toolcall_end 再报 error", async () => {
+    const events: StreamEvent[] = [];
+    for await (const e of protocol.parseStream(
+      chunkGen(
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call_1", name: "read", input: {} } },
+      ),
+    )) {
+      events.push(e);
+    }
+    expect(events).toEqual([
+      { type: "toolcall_start", index: 0, id: "call_1", name: "read" },
+      { type: "toolcall_end", index: 0 },
+      { type: "error", message: "流意外结束（未收到 message_stop）" },
+    ]);
+  });
 });

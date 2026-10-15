@@ -81,7 +81,7 @@ export class AnthropicMessagesProtocol implements Protocol {
     const tagFilters = new Map<number, InlineTagFilter>();
     // 已开始且未 stop 的 text 块（流尾 flush 标签残料用）
     const openTextBlocks = new Set<number>();
-    // 已开始且未收到 content_block_stop 的 tool_use 块（统一序号）：流内 error 终止路径
+    // 已开始且未收到 content_block_stop 的 tool_use 块（统一序号）：各终止路径收尾时
     // 补发 toolcall_end 用，防在途工具调用在事件流里没有结束标记
     const openToolCalls = new Set<number>();
 
@@ -103,14 +103,14 @@ export class AnthropicMessagesProtocol implements Protocol {
       openTextBlocks.delete(blockIndex);
     };
 
-    /** 未 stop 的 text 块 flush 标签残料（正常 message_stop 与异常断流的流尾共用） */
+    /** 未 stop 的 text 块 flush 标签残料（各终止路径收尾共用） */
     const flushOpenTextBlocks = function* (): Generator<StreamEvent> {
       for (const blockIndex of openTextBlocks) {
         for (const out of tagFilters.get(blockIndex)?.flush() ?? []) yield out;
       }
     };
 
-    /** 未收到 content_block_stop 的工具调用补发结束（流内 error 终止路径用） */
+    /** 未收到 content_block_stop 的工具调用补发结束（各终止路径收尾共用） */
     const flushOpenToolCalls = function* (): Generator<StreamEvent> {
       for (const index of openToolCalls) {
         yield { type: "toolcall_end", index };
@@ -221,8 +221,10 @@ export class AnthropicMessagesProtocol implements Protocol {
             }
             break;
           case "message_stop":
-            // 兼容端点可能省略 content_block_stop 直接收尾：未 stop 的 text 块残料先 flush 再 done
+            // 兼容端点可能省略 content_block_stop 直接收尾：未 stop 的 text 块残料与
+            // 在途工具调用的结束标记先补发，再发 done
             yield* flushOpenTextBlocks();
+            yield* flushOpenToolCalls();
             yield {
               type: "done",
               stopReason: stopReason ?? "end_turn",
@@ -245,8 +247,9 @@ export class AnthropicMessagesProtocol implements Protocol {
       yield { type: "error", message: (err as Error).message ?? String(err) };
       throw err;
     }
-    // 流尾（断流）：未 stop 的 text 块 flush 标签残料
+    // 流尾（断流）：未 stop 的 text 块残料与在途工具调用的结束标记一并补发
     yield* flushOpenTextBlocks();
+    yield* flushOpenToolCalls();
     // 已收到 stop_reason（message_delta 已到，响应逻辑上已完整）：按正常完成收 done。
     // 收尾宽限关流场景（厂商发完 message_delta 后握着连接不发 message_stop）落到这里，
     // 整轮不因缺 message_stop 被误判异常
