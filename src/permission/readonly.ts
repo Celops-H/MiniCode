@@ -287,6 +287,10 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     if (PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
     return `写命令 ${first} ${sub}（子命令无法核验）`;
   }
+  // certutil 的编解码把结果写入文件（certutil -decode in.b64 out.bin）；-hashfile 等查询形态放行
+  if (first === "certutil" && rest.slice(1).some((w) => /^[-/](encode|decode|decodehex)$/i.test(w))) {
+    return "写命令 certutil（落盘写文件）";
+  }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
   // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
   // curl 裸用输出 stdout 是只读，但下列旗标把内容写入本地文件：-o/-O/--output/--remote-name

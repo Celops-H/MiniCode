@@ -681,6 +681,21 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
     }
   });
 
+  it("certutil 编解码落盘拒绝，hashfile 与显示形态放行", () => {
+    for (const command of [
+      "certutil -decode in.b64 out.bin",
+      "certutil -Decode in.b64 out.bin",
+      "certutil -decodehex in.hex out.bin",
+      "certutil -encode in.txt out.b64",
+      "certutil /decode in.b64 out.bin",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/certutil/);
+    }
+    for (const command of ["certutil -hashfile f.txt MD5", "certutil -dump f.txt", "certutil -?"]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
   it("注册表、计划任务、环境变量持久化写拒绝，查询形态放行", () => {
     for (const command of [
       "reg add HKLM /v a /d b",
