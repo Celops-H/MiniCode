@@ -30,29 +30,35 @@ describe("edit 工具", () => {
     return tmpDir;
   }
 
-  it("精确替换唯一文本", async () => {
+  it("精确替换唯一文本，回灌带行号与上下片段", async () => {
     const file = path.join(setup(), "a.ts");
-    writeFileSync(file, "const a = 1;\nconst b = 2;");
+    writeFileSync(file, "l1\nl2\nconst a = 1;\nl4\nl5");
     const out = await editTool.execute({
       path: file,
       oldString: "const a = 1;",
       newString: "const a = 10;",
     });
-    expect(out).toContain("已替换");
-    expect(await readFile(file, "utf8")).toBe("const a = 10;\nconst b = 2;");
+    expect(out).toContain("已替换 1 处（第 3 行）");
+    // 带行号的改动行与前后上下文（与 read 的 行号\t内容 同口径）
+    expect(out).toContain("3\tconst a = 10;");
+    expect(out).toContain("2\tl2");
+    expect(out).toContain("4\tl4");
+    expect(await readFile(file, "utf8")).toBe("l1\nl2\nconst a = 10;\nl4\nl5");
   });
 
-  it("待替换文本不唯一时拒绝", async () => {
+  it("待替换文本不唯一时抛错并附次数", async () => {
     const file = path.join(setup(), "a.txt");
     writeFileSync(file, "x = 1\nx = 2");
-    const out = await editTool.execute({ path: file, oldString: "x", newString: "y" });
-    expect(out).toContain("唯一匹配");
+    await expect(
+      editTool.execute({ path: file, oldString: "x", newString: "y" }),
+    ).rejects.toThrow(/待替换文本出现 2 次，须唯一匹配/);
   });
 
-  it("未找到待替换文本时报错", async () => {
+  it("未找到待替换文本时抛错并附原因", async () => {
     const file = path.join(setup(), "a.txt");
     writeFileSync(file, "hello");
-    const out = await editTool.execute({ path: file, oldString: "nope", newString: "y" });
-    expect(out).toContain("未找到");
+    await expect(
+      editTool.execute({ path: file, oldString: "nope", newString: "y" }),
+    ).rejects.toThrow(/未找到待替换的文本/);
   });
 });

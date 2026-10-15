@@ -25,7 +25,7 @@ describe("文件写冲突防护（per-agent 快照）", () => {
 
     await withFileState(state, () => readTool.execute({ path: file }));
     const out = await withFileState(state, () => editTool.execute({ path: file, oldString: "hello", newString: "bye" }));
-    expect(out).toBe("已替换 1 处");
+    expect(out).toContain("已替换 1 处");
     expect(await readFile(file, "utf8")).toBe("bye world");
   });
 
@@ -94,7 +94,7 @@ describe("文件写冲突防护（per-agent 快照）", () => {
     // 模拟抖动：内容不变但重写文件（mtime 变化）
     writeFileSync(file, "same content");
     const out = await withFileState(state, () => editTool.execute({ path: file, oldString: "same", newString: "same" }));
-    expect(out).toBe("已替换 1 处");
+    expect(out).toContain("已替换 1 处");
 
     // 内容真的变了 → 拒绝（等过 mtime 毫秒刻度，理由同上）
     await new Promise((resolve) => setTimeout(resolve, 5));
