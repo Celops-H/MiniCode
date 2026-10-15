@@ -20,7 +20,7 @@ import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig, Config } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, hasRunningAgent, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, agentsInFlight, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
@@ -464,23 +464,23 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     });
 
   /**
-   * 退出前中断在途工作：回合运行中或压缩在途（压缩期间 status 亦为 running，
-   * 见 setCompacting）都先中断。压缩在途时补置打断标记，否则压缩收尾会走
-   * 「未配置压缩或摘要不可用」分支，在退出瞬间弹出与实情不符的提示。
+   * 退出前中断在途工作：回合运行中、压缩在途或子 agent 活跃都先走 Esc 同链中断
+   * （级联中断全部子 agent、拒绝待批权限、忽略迟到增量、界面收尾）再退出。
+   * 子 agent 活跃时必须级联中断——否则退出收尾 team.clear() 清空注册表后，其终态
+   * 回调落入无成员分支，中断标记不投回 root 收件箱，中断记录丢失。
+   * 压缩在途时补置打断标记，否则压缩收尾会走「未配置压缩或摘要不可用」分支，
+   * 在退出瞬间弹出与实情不符的提示。
    */
   const interruptBeforeExit = (): void => {
-    if (state.status !== "running") return;
-    agent.interrupt();
+    if (!agentsInFlight(state)) return;
     if (compacting) compactInterrupted = true;
+    doInterrupt();
   };
 
   const handleCommand = (raw: string): void => {
     const command = raw.trim();
     if (command === "/exit") {
-      if (state.status === "running") {
-        interruptBeforeExit();
-        resolvePermission("deny");
-      }
+      interruptBeforeExit();
       exitLoop();
       return;
     }
@@ -1159,7 +1159,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         // 压缩优先于回合打断：打断的是压缩，历史不动（结论见 decideEsc 注释）
         const verdict = decideEsc({
           compacting,
-          running: state.status === "running" || hasRunningAgent(state.agents),
+          running: agentsInFlight(state),
           lastEscAt,
           now: Date.now(),
           windowMs: ESC_EXIT_WINDOW_MS,
@@ -1183,10 +1183,8 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       case "exit": {
-        if (state.status === "running") {
-          interruptBeforeExit();
-          resolvePermission("deny", "用户打断");
-        }
+        // Ctrl+D：在途工作先走 Esc 同链中断再退出（子 agent 活跃时主状态可能非 running）
+        interruptBeforeExit();
         exitLoop();
         return;
       }

@@ -16,6 +16,7 @@ import {
   cycleThinkingLevel,
   permissionModeLabel,
   hasRunningAgent,
+  agentsInFlight,
   isFoldable,
   formatTime,
   type TuiState,
@@ -338,7 +339,7 @@ it("Stop：子 agent 的 Stop 不把主界面打成空闲；主 agent（/root）
   expect(rootStop.status).toBe("idle");
 });
 
-it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 hasRunningAgent 判打断", () => {
+it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 agentsInFlight 判打断", () => {
   // 复刻 loop esc 分支的组合：running 并入 agent 树运行态
   const withSubRunning: TuiState = {
     ...initState([]),
@@ -347,8 +348,7 @@ it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 has
       { path: "/root/t", status: "running", spawnedAt: 1, completedAt: null },
     ],
   };
-  const escRunning = withSubRunning.status === "running" || hasRunningAgent(withSubRunning.agents);
-  expect(escRunning).toBe(true);
+  expect(agentsInFlight(withSubRunning)).toBe(true);
   // 子 agent 全部完成/中断：不再判打断（空闲双击退出逻辑恢复）
   const allDone: TuiState = {
     ...initState([]),
@@ -357,7 +357,7 @@ it("Esc 判定组合：主状态空闲 + 子 agent 运行中 → loop 并入 has
       { path: "/root/t", status: "completed", spawnedAt: 1, completedAt: 2 },
     ],
   };
-  expect(allDone.status === "running" || hasRunningAgent(allDone.agents)).toBe(false);
+  expect(agentsInFlight(allDone)).toBe(false);
 });
 
 it("initState 恢复历史消息：user/assistant 带创建时间戳（reconfigure 后时间不丢）", () => {

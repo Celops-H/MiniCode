@@ -934,10 +934,17 @@ export function hasRunningAgent(agents: AgentNode[]): boolean {
   return agents.some((a) => a.path !== "/root" && a.status === "running");
 }
 
-/** 重装配族命令守卫：root 运行中或任一子 agent 后台运行中都拦截——
+/** 有在途 agent 工作：主状态运行中，或任一子 agent 后台运行中。
+ *  Esc 打断、退出前中断、重装配族命令守卫共用此口径——子 agent 后台跑时主状态
+ *  可能非 running（主 agent 在等结论），只看主状态会漏 */
+export function agentsInFlight(state: TuiState): boolean {
+  return state.status === "running" || hasRunningAgent(state.agents);
+}
+
+/** 重装配族命令守卫：有在途 agent 工作时拦截——
  *  /session /connect /model /mcp /skills 的重建链会重建 agent，把全部 agent 的当前工作作废 */
 export function reassemblyBlocked(state: TuiState): boolean {
-  return state.status === "running" || hasRunningAgent(state.agents);
+  return agentsInFlight(state);
 }
 
 /** 追加消息块 */

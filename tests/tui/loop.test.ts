@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, errorMessage, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, setCompacting, hasRunningAgent, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, setCompacting, agentsInFlight, type BlockView, type TuiState } from "../../src/tui/state.js";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
 function withKeyModal(state: TuiState): TuiState {
@@ -406,6 +406,42 @@ describe("重装配族命令守卫：reassemblyBlocked 覆盖子 agent 后台运
   });
 });
 
+describe("退出前中断判定（Ctrl+D / /exit）：agentsInFlight 决定是否先走 Esc 同链中断", () => {
+  it("主状态运行中：先中断再退出", () => {
+    const s: TuiState = { ...initState([]), status: "running" };
+    expect(agentsInFlight(s)).toBe(true);
+  });
+
+  it("主状态空闲但子 agent 运行中：先中断再退出（原只看主状态的漏判点）", () => {
+    const s: TuiState = {
+      ...initState([]),
+      status: "idle",
+      agents: [
+        { path: "/root", status: "completed", spawnedAt: 1, completedAt: 2 },
+        { path: "/root/t", status: "running", spawnedAt: 1, completedAt: null },
+      ],
+    };
+    expect(agentsInFlight(s)).toBe(true);
+  });
+
+  it("主状态空闲且无子 agent：直接退出，不中断", () => {
+    const s: TuiState = { ...initState([]), status: "idle" };
+    expect(agentsInFlight(s)).toBe(false);
+  });
+
+  it("主状态空闲且子 agent 已中断：直接退出，不中断", () => {
+    const s: TuiState = {
+      ...initState([]),
+      status: "idle",
+      agents: [
+        { path: "/root", status: "completed", spawnedAt: 1, completedAt: 2 },
+        { path: "/root/t", status: "interrupted", spawnedAt: 1, completedAt: 2 },
+      ],
+    };
+    expect(agentsInFlight(s)).toBe(false);
+  });
+});
+
 describe("在途排队", () => {
   it("运行中 send：消息进排队条不混进消息区，输入框清空、状态保持 running", () => {
     let s = initState([]);
@@ -592,7 +628,7 @@ describe("/compact 期间的界面状态（setCompacting 纯函数）", () => {
     expect(
       decideEsc({
         compacting: sent.compacting,
-        running: sent.status === "running" || hasRunningAgent(sent.agents),
+        running: agentsInFlight(sent),
         lastEscAt: 0,
         now: 0,
       }),
