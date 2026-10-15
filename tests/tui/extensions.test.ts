@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { mapKey } from "../../src/tui/keymap.js";
-import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList } from "../../src/tui/extensions.js";
+import { buildMcpRows, buildSkillRows, diffExtensionRows, loadExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList } from "../../src/tui/extensions.js";
 import type { McpServerStatus } from "../../src/mcp/index.js";
 import type { SkillInfo } from "../../src/skills/index.js";
 
@@ -174,6 +174,57 @@ describe("setMcpServerEnabled / setSkillDisabled（写回定义层）", () => {
     expect(syncDisabledList(["a", "b"], [{ id: "b", enabled: true }])).toEqual(["a"]);
     // 已在名单里再关闭不重复加入
     expect(syncDisabledList(["a"], [{ id: "a", enabled: false }])).toEqual(["a"]);
+  });
+});
+
+describe("loadExtensionRows（面板行装载失败不抛出）", () => {
+  const noSkills = { disabled: [] as string[], scan: async () => [] };
+
+  it("技能扫描抛错：收成错误文案（loop 据此 toast，面板不开也不静默）", async () => {
+    const res = await loadExtensionRows("skill", { servers: {}, statuses: [] }, {
+      disabled: [],
+      scan: async () => {
+        throw new Error("EACCES: skills 目录不可读");
+      },
+    });
+    expect(res).toEqual({ ok: false, error: "EACCES: skills 目录不可读" });
+  });
+
+  it("非 Error 抛错：错误文案 String 化", async () => {
+    const res = await loadExtensionRows("skill", { servers: {}, statuses: [] }, {
+      disabled: [],
+      scan: async () => {
+        throw "boom";
+      },
+    });
+    expect(res).toEqual({ ok: false, error: "boom" });
+  });
+
+  it("mcp：按配置与装配状态合并出状态列", async () => {
+    const res = await loadExtensionRows(
+      "mcp",
+      { servers: { fs: { command: "npx" } }, statuses: [{ name: "fs", enabled: true, started: true, toolCount: 3 }] },
+      noSkills,
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.rows).toEqual([{ id: "fs", label: "fs", detail: "已连接 · 3 个工具", enabled: true }]);
+  });
+
+  it("skill：扫描结果按关闭名单标启用态并带来源层", async () => {
+    const res = await loadExtensionRows("skill", { servers: {}, statuses: [] }, {
+      disabled: ["deploy"],
+      scan: async () => [
+        { name: "review", description: "审查代码", source: "project", filePath: "/p/review/SKILL.md" },
+        { name: "deploy", description: "部署", source: "user", filePath: "/u/deploy/SKILL.md" },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.rows.map((r) => [r.id, r.enabled, r.source])).toEqual([
+        ["review", true, "project"],
+        ["deploy", false, "user"],
+      ]);
+    }
   });
 });
 

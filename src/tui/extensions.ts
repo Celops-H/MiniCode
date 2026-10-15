@@ -56,6 +56,26 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
+/** 面板行装载结果：失败收成错误文案，成功带行 */
+export type ExtensionRowsResult = { ok: true; rows: ExtensionRow[] } | { ok: false; error: string };
+
+/**
+ * 装载 /mcp 或 /skill 面板行。技能行现扫技能目录（scan 由调用方注入），
+ * 扫描或行构造失败收成错误文案返回，由 loop toast 提示——面板打开失败不能静默无反应。
+ */
+export async function loadExtensionRows(
+  kind: "mcp" | "skill",
+  mcp: { servers: Record<string, McpServerConfig>; statuses: McpServerStatus[] },
+  skill: { disabled: string[]; scan: () => Promise<SkillInfo[]> },
+): Promise<ExtensionRowsResult> {
+  try {
+    const rows = kind === "mcp" ? buildMcpRows(mcp.servers, mcp.statuses) : buildSkillRows(await skill.scan(), skill.disabled);
+    return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface WriteBackOptions {
   globalConfigFile?: string;
   projectConfigFile?: string;

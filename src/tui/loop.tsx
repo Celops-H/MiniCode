@@ -15,7 +15,7 @@ import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../con
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
 import { connectProvider, planConnectSubmit, PROVIDER_PRESETS, writeGlobalDefaultModel } from "./connect.js";
-import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList, type ExtensionRow } from "./extensions.js";
+import { diffExtensionRows, loadExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList, type ExtensionRow } from "./extensions.js";
 import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig, Config } from "../config/index.js";
@@ -404,6 +404,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       }, TOAST_MS);
     }
   };
+
+  /** 扩展面板打开失败统一提示：行装载失败与后续意外抛错同文案，都不静默无反应 */
+  const extensionsOpenFailed = (err: unknown): void =>
+    showToast(`打开扩展面板失败：${err instanceof Error ? err.message : String(err)}`);
+
   // hook stderr 通道指向 toast：命令 hook 的观测输出不再直写 stderr（全屏渲染
   // 下以裸文本插进渲染帧），改落界面 toast
   if (options.hookStderr) options.hookStderr.value = showToast;
@@ -613,7 +618,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         return;
       }
       commit({ ...state, prompt: { ...state.prompt, lines: [""], curCol: 0, curLine: 0, sel: null }, candidate: undefined });
-      void openExtensionsModal(command === "/mcp" ? "mcp" : "skill").catch(() => undefined);
+      void openExtensionsModal(command === "/mcp" ? "mcp" : "skill").catch(extensionsOpenFailed);
       return;
     }
     if (command === "/settings" || command === "/setting") {
@@ -758,18 +763,18 @@ export async function runTui(options: TuiLoopOptions): Promise<{
   /** 打开 /mcp 或 /skill 扩展面板：mcp 行来自配置+manager 装配状态，
    *  skill 行现扫技能目录（打开时新鲜扫描，改技能目录无需重开会话即可见） */
   const openExtensionsModal = async (kind: "mcp" | "skill"): Promise<void> => {
-    let rows: ExtensionRow[];
-    try {
-      rows = kind === "mcp"
-        ? buildMcpRows(options.mcpServers ?? {}, options.getMcpStatuses?.() ?? [])
-        : buildSkillRows(await scanSkills(), skillsDisabledLive);
-    } catch (err) {
-      showToast(`打开面板失败：${err instanceof Error ? err.message : String(err)}`);
+    const loaded = await loadExtensionRows(
+      kind,
+      { servers: options.mcpServers ?? {}, statuses: options.getMcpStatuses?.() ?? [] },
+      { disabled: skillsDisabledLive, scan: scanSkills },
+    );
+    if (!loaded.ok) {
+      extensionsOpenFailed(loaded.error);
       return;
     }
     // 基线快照：Enter 应用时按 id 比对，只把改动行写回配置
-    extensionsBaseline[kind] = rows.map((r) => ({ id: r.id, enabled: r.enabled }));
-    commit({ ...state, modal: { kind, rows, selected: 0 } });
+    extensionsBaseline[kind] = loaded.rows.map((r) => ({ id: r.id, enabled: r.enabled }));
+    commit({ ...state, modal: { kind, rows: loaded.rows, selected: 0 } });
   };
 
   /** 打开 /settings 设置面板：行 = 功能开关清单，启用态按合并配置的生效值展示 */
