@@ -152,7 +152,7 @@ export class Agent {
   private readonly fileState = new FileState();
   /** 归属的团队（多 Agent 协作）；不传则本 agent 独立运行、不展示协作工具 */
   private readonly team?: Team;
-  /** 只读 agent：写类工具与 bash 写命令在执行前拦截（readOnlyWriteViolation） */
+  /** 只读 agent：写类工具与 bash 写命令在执行前拦截（readOnlyToolViolation） */
   private readonly readOnly: boolean;
   /** 本 agent 在团队中的层级路径；注册进团队时由 Team 设置 */
   agentPath?: AgentPath;

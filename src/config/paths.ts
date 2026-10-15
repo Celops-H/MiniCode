@@ -104,7 +104,9 @@ export function resolveOutputsDir(opts: ResolvePathsOptions = {}): string {
 }
 
 /**
- * 解析运行轨迹目录：默认用户级 `~/.minicode/traces/`（config.observability.dir 可覆盖）。轨迹与会话存储独立目录、独立生命周期。
+ * 解析运行轨迹目录：默认用户级 `~/.minicode/traces/`，本函数不读配置。
+ * config.observability.dir 的覆盖由调用方决定（如 `src/tui/index.tsx` 按它取目录）。
+ * 轨迹与会话存储独立目录、独立生命周期。
  * @param opts 路径选项（homedir / xdgConfigHome 可注入，测试用）
  * @returns 轨迹目录
  */
