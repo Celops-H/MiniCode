@@ -73,6 +73,8 @@ describe("只读 agent 写拦截判定", () => {
       "env -i rm x",
       "timeout 10 rm x",
       "timeout 0.5 rm x",
+      "timeout .5 rm x",
+      "timeout 1e3 rm x",
       "timeout -k 5 0.5 rm x",
       "timeout 1.5s rm x",
       "nice -n 5 rm x",

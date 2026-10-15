@@ -86,8 +86,9 @@ export function stripCommandPrefix(words: string[]): { rest: string[]; queried: 
       }
     }
     // timeout 的时长排在选项之后（timeout 10 rm x、timeout -k 5 0.5 rm x），吞完选项再剥一次；
-    // 时长接受小数秒（timeout 0.5 rm x）
-    if (head === "timeout" && /^\d+(?:\.\d+)?[smhd]?$/.test(rest[0] ?? "")) rest.shift();
+    // 时长按 GNU timeout 的 strtod 取值口径认数值形态，含前导小数点与指数写法
+    // （timeout 0.5 rm x、timeout .5 rm x、timeout 1e3 rm x），后缀 s/m/h/d 保留
+    if (head === "timeout" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[smhd]?$/.test(rest[0] ?? "")) rest.shift();
   }
   return { rest, queried: false };
 }
