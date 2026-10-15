@@ -69,7 +69,8 @@ export function App(props: AppProps): JSX.Element {
 
   // 秒级时钟：agent 条完成条目的「10s 消失」由时间驱动，老化出树后 store 没有新通知，
   // 光标定位的 bottomRows 若只订阅 agents 会停在旧行。每秒翻一次时钟信号让 bottomRows 重算；
-  // 树没有完成条目时刷新结果不变，无额外渲染成本
+  // 时钟只此一处，AgentStrip 取相同时钟做可见性过滤——两处各起时钟会有相位差，
+  // 老化边界上占位行数与条实际渲染行数对不上（树没有完成条目时刷新结果不变，无额外渲染成本）
   const [now, setNow] = createSignal(Date.now());
   onMount(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -115,6 +116,7 @@ export function App(props: AppProps): JSX.Element {
           showCursor={props.state.modal?.kind !== "connect-key"}
           // 光标定位：输入框下方占用行数 = 底边框 1 + 状态行 1 + agent 条（含 paddingTop）；
           // agent 条行数带时钟参数——完成条目老化出树后行数随秒级节拍重算，光标跟着回移
+          // （时钟与传给 AgentStrip 的同一个，行数与条实际渲染同一拍）
           bottomRows={2 + agentRowCount(props.state.agents, now())}
         />
       </Show>
@@ -130,7 +132,7 @@ export function App(props: AppProps): JSX.Element {
           contextWindow={props.state.contextWindow}
           compactThreshold={props.state.compactThreshold}
         />
-        {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} /> : null}
+        {props.state.agents.length > 0 ? <AgentStrip agents={props.state.agents} now={now()} /> : null}
       </Show>
     </box>
   );

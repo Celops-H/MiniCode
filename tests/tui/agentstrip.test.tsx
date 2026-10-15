@@ -26,8 +26,8 @@ const failed = (path: string, spawnedAt: number, completedAt: number): AgentNode
   completedAt,
 });
 
-const render = (agents: AgentNode[]) =>
-  testRender(() => <AgentStrip agents={agents} />, { width: 40, height: 10 });
+const render = (agents: AgentNode[], now = Date.now()) =>
+  testRender(() => <AgentStrip agents={agents} now={now} />, { width: 40, height: 10 });
 
 /** 取首个含 text 的 span 的 fg（hex）；无匹配/无颜色返回 undefined */
 function spanFgOf(spans: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
@@ -71,6 +71,19 @@ it("完成超 10s 的条目从树消失（回到仅 main → 底栏不显示）"
   await setup.waitForVisualIdle();
   expect(setup.captureCharFrame()).not.toContain("task_1");
   expect(setup.captureCharFrame()).not.toContain("main");
+});
+
+it("可见性按传入时钟判定（时钟来自 App，组件不自起）：同一条目在不同 now 下存活或消失", async () => {
+  const t = Date.now();
+  const agents = [running("/root"), done("/root/task_1", t - 20_000, t - 10_000)];
+  // 传入时钟停在老化线前 5s：条目显示（组件若自取当前时刻会误判已老化）
+  const alive = await render(agents, t - 5000);
+  await alive.waitForVisualIdle();
+  expect(alive.captureCharFrame()).toContain("(√) task_1");
+  // 传入时钟落在老化线上：消失
+  const expired = await render(agents, t);
+  await expired.waitForVisualIdle();
+  expect(expired.captureCharFrame()).not.toContain("task_1");
 });
 
 it("完成父被剪（超 10s）时运行中的子 agent 重挂最近存活祖先不失联", async () => {

@@ -5,10 +5,11 @@
  * 终态（完成/失败/中断）条目 10s 后从树消失；恢复会话重建的历史条目无完成时刻，不显示；
  * 层级树线 `├─`/`└─`/`│`：main 子层对齐 main 前圆点列，更下层对齐父 `( )`/`(√)`/`(!)`/`(×)` 括号中心列；
  * main 首行、子 agent 次行紧凑。
- * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。终态条目消失由本组件定时器过滤（state 保留，
- * 长会话内存由 blocks 消息承担，树只读当前活动子集）。
+ * 纯展示不切换：选择/悬停高亮见 TASKS 待排期。终态条目消失由传入的秒级时钟过滤（state 保留，
+ * 长会话内存由 blocks 消息承担，树只读当前活动子集）；时钟由 App 给出，本组件不自起——两处
+ * 各起时钟会有相位差，老化边界上行数与 App 的光标占位行数对不上。
  */
-import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createMemo } from "solid-js";
 import type { JSX } from "@opentui/solid";
 import type { AgentNode } from "../state.js";
 import { AgentPath } from "../../agent/agent-path.js";
@@ -142,14 +143,9 @@ function isTerminalVisible(a: AgentNode, now: number): boolean {
   return now - a.completedAt < DONE_VISIBLE_MS;
 }
 
-export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
-  // 10s 消失：每秒刷新一次 now，过滤完成/中断已超时的条目（运行中恒显示）
-  const [now, setNow] = createSignal(Date.now());
-  onMount(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => clearInterval(t));
-  });
-  const visible = createMemo(() => props.agents.filter((a) => isTerminalVisible(a, now())));
+/** now：App 的秒级时钟读数（每秒一翻），10s 老化按它过滤完成/中断已超时的条目 */
+export function AgentStrip(props: { agents: AgentNode[]; now: number }): JSX.Element {
+  const visible = createMemo(() => props.agents.filter((a) => isTerminalVisible(a, props.now)));
   // 仅多 agent 启用（存在子 agent）时显示整棵树；只有 main 时底栏不占行（Show 响应式门控，
   // 不能组件体 if return null——store 更新后组件体不重跑，树在子 agent 派生时才出现会不显示）
   const rows = createMemo(() => {
@@ -168,7 +164,7 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
 }
 
 /** 底栏 agent 条占用行数（0 = 不占行）：与 AgentStrip 内部可见过滤一致（isTerminalVisible）——
- *  App 计算光标绝对位置用。
+ *  App 计算光标绝对位置用。now 须与传给 AgentStrip 的是同一读数，行数才与实际渲染同拍。
  *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行）。 */
 export function agentRowCount(agents: AgentNode[], now = Date.now()): number {
   const visible = agents.filter((a) => isTerminalVisible(a, now));

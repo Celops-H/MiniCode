@@ -49,4 +49,42 @@ describe("agent 条变化时光标跟随", () => {
     expect(rowWithAgent).toBe(rowNoAgent - 3);
     (setup as { renderer?: { destroy?: () => void } }).renderer?.destroy?.();
   });
+
+  it("关掉 /session 全屏页后条重挂载：老化边界上条与光标占位同一拍（各起时钟相位差可到 1s）", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const t0 = Date.now();
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 22 });
+    await setup.waitForVisualIdle();
+    const rowNoAgent = tuiCursor.row;
+    // App 时钟随挂载起（t0）；700ms 时条随 /session 全屏页关闭才重挂载——条若自起时钟，
+    // 相位从 t0+700 算起，与 App 时钟错开 700ms
+    await vi.advanceTimersByTimeAsync(500);
+    setState({
+      ...state,
+      modal: { kind: "session", sessions: [], selected: 0, action: "enter" },
+      // 老化线落在 t0+1600：条自起时钟下一拍 t0+1700 就判老化，App 时钟要到 t0+2000
+      agents: [
+        { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+        { path: "/root/task_1", status: "completed", spawnedAt: t0 - 20_000, completedAt: t0 - 8400 },
+      ],
+    });
+    await setup.waitForVisualIdle();
+    await vi.advanceTimersByTimeAsync(200);
+    setState({ ...state, modal: undefined });
+    await setup.waitForVisualIdle();
+    // t0+1800：App 时钟仍判条目可见（9400ms）——条必须还在树里，占位行数才算上它
+    await vi.advanceTimersByTimeAsync(1100);
+    // setInterval 被假时钟接管后渲染器帧循环停摆，captureCharFrame 取的是上一帧缓存，需显式推一帧
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("task_1");
+    expect(tuiCursor.row).toBe(rowNoAgent - 3);
+    // t0+2000：App 时钟判老化，条同拍消失、占位行数回让（条自起时钟时，条已在 t0+1700 消失
+    // 而占位行数仍在计——行数比实际多 3 行，光标落到输入框上方）
+    await vi.advanceTimersByTimeAsync(200);
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).not.toContain("task_1");
+    expect(tuiCursor.row).toBe(rowNoAgent);
+    (setup as { renderer?: { destroy?: () => void } }).renderer?.destroy?.();
+  });
 });
