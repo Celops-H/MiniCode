@@ -20,6 +20,29 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
     expect(extractRecoveryContext(messages).files).toEqual(["a.ts", "b.ts"]);
   });
 
+  it("单条消息内多路径不超上限（内层同判 maxFiles）", () => {
+    const messages: Message[] = [
+      assistantMessage([
+        toolCall("c1", "read", { path: "f1.ts" }),
+        toolCall("c2", "read", { path: "f2.ts" }),
+        toolCall("c3", "read", { path: "f3.ts" }),
+        toolCall("c4", "read", { path: "f4.ts" }),
+        toolCall("c5", "read", { path: "f5.ts" }),
+        toolCall("c6", "read", { path: "f6.ts" }),
+      ]),
+    ];
+    // 逆序取最近 5 个，f1.ts 被内层上限截掉
+    expect(extractRecoveryContext(messages).files).toEqual([
+      "f6.ts",
+      "f5.ts",
+      "f4.ts",
+      "f3.ts",
+      "f2.ts",
+    ]);
+    // 自定义上限同样在内层生效
+    expect(extractRecoveryContext(messages, { maxFiles: 2 }).files).toEqual(["f6.ts", "f5.ts"]);
+  });
+
   it("忽略非文件工具（bash/grep 不提取 path）", () => {
     const messages: Message[] = [
       assistantMessage([

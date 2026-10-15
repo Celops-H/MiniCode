@@ -45,7 +45,7 @@ export function extractRecoveryContext(
   for (let i = messages.length - 1; i >= 0 && files.length < maxFiles; i--) {
     const message = messages[i]!; // 循环边界保证 i 不越界，断言去掉 undefined
     if (message.role !== "assistant") continue;
-    for (let j = message.content.length - 1; j >= 0; j--) {
+    for (let j = message.content.length - 1; j >= 0 && files.length < maxFiles; j--) {
       const block = message.content[j]!; // 同上，j 不越界
       if (block.type !== "tool_call" || !FILE_TOOLS.has(block.name)) continue;
       const path = (block.input as { path?: unknown }).path;
