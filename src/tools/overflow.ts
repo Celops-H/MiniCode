@@ -36,6 +36,7 @@ function safeNamePart(part: string): string {
  * @param maxChars 结果字符上限；undefined 或非有限数视为不截断
  * @param outputDir 落盘目录（不存在时创建）
  * @param meta 文件名归属（会话 id 与工具名，缺省时名字不带该段）
+ * @param truncationNote 截断时的补充提示（工具特有）：作为独立一行附在末尾，与落盘提示各讲一件事
  * @returns 落盘结果（回灌文本、是否截断、原始长度、落盘路径）
  */
 export function spillOutput(
@@ -43,11 +44,13 @@ export function spillOutput(
   maxChars: number | undefined,
   outputDir: string,
   meta: SpillMeta = {},
+  truncationNote?: string,
 ): SpillResult {
   const truncated = truncateOutput(content, maxChars);
   if (!truncated.truncated) {
     return { content: truncated.content, truncated: false, originalLength: truncated.originalLength };
   }
+  const note = truncationNote ? `\n[${truncationNote}]` : "";
   try {
     const owner = meta.sessionId ? `-${safeNamePart(meta.sessionId)}` : "";
     const tool = meta.toolName ? `-${safeNamePart(meta.toolName)}` : "";
@@ -57,7 +60,8 @@ export function spillOutput(
     return {
       content:
         `${truncated.content}\n` +
-        `[输出已截断：共 ${truncated.originalLength} 字符，完整内容已保存到 ${file}，可用 Read 工具读取该文件查看完整输出]`,
+        `[输出已截断：共 ${truncated.originalLength} 字符，完整内容已保存到 ${file}，可用 Read 工具读取该文件查看完整输出]` +
+        note,
       truncated: true,
       originalLength: truncated.originalLength,
       outputPath: file,
@@ -66,7 +70,8 @@ export function spillOutput(
     return {
       content:
         `${truncated.content}\n` +
-        `[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]`,
+        `[输出已截断：共 ${truncated.originalLength} 字符，保留前 ${truncated.content.length} 字符]` +
+        note,
       truncated: true,
       originalLength: truncated.originalLength,
     };

@@ -1408,7 +1408,7 @@ export class Agent {
         const truncated = spillOutput(output, tool.maxResultSizeChars, this.outputDir, {
           sessionId: this.sessionId,
           toolName: call.name,
-        });
+        }, tool.truncationNote);
         const finalOutput = truncated.content;
         // PostToolUseFailure：执行完成但结果标记失败且带失败原因（如命令失败带退出码）时
         // 补发失败事件供观测。先于 PostToolUse 发出：界面按事件序写卡片，完成事件的输出

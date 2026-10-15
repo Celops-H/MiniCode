@@ -508,6 +508,52 @@ describe("Agent 主循环：模型对话闭环", () => {
     }
   });
 
+  it("工具声明 truncationNote 时，截断回灌在落盘提示后另附一行", async () => {
+    const notedTool: Tool = {
+      name: "noted",
+      description: "返回超长输出并带截断提示",
+      inputSchema: z.object({}),
+      isReadOnly: true,
+      maxResultSizeChars: 10,
+      truncationNote: "结果不完整，建议缩小范围",
+      execute: () => "一二三四五六七八九十十一十二十三十四十五",
+    };
+    const outDir = mkdtempSync(path.join(tmpdir(), "minicode-out-"));
+    try {
+      const agent = new Agent({
+        modelClient: {
+          async *stream(_modelId, context) {
+            const hasResult = context.messages.some((m) => m.role === "tool_result");
+            if (!hasResult) {
+              yield { type: "toolcall_start", index: 0, id: "c1", name: "noted" };
+              yield { type: "toolcall_end", index: 0 };
+              yield { type: "done", stopReason: "tool_calls" };
+            } else {
+              yield { type: "text_delta", text: "完成" };
+              yield { type: "done", stopReason: "end_turn" };
+            }
+          },
+        },
+        modelId: "mock",
+        systemPrompt: "助手",
+        tools: [notedTool],
+        outputDir: outDir,
+      });
+      agent.start("大输出");
+      for await (const _ of agent.run()) {
+        // 消费事件流
+      }
+
+      const result = agent.getMessages().find((m) => m.role === "tool_result");
+      const content = typeof result?.content === "string" ? result.content : "";
+      const lines = content.split("\n");
+      expect(lines.at(-1)).toBe("[结果不完整，建议缩小范围]");
+      expect(lines.at(-2)).toContain("完整内容已保存到");
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
   it("工具标记失败（isError）时回灌为错误消息", async () => {
     const failTool: Tool = {
       name: "fail",

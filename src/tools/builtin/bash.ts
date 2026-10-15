@@ -103,6 +103,7 @@ export const bashTool: Tool = {
     return isReadOnlyBashCommand(parsed.data.command);
   },
   maxResultSizeChars: MAX_RESULT_CHARS,
+  truncationNote: "结果不完整，建议缩小命令范围或改用内置 grep 搜索",
   async execute(input, options?: ExecuteContext) {
     const { command, timeoutMs = 30000, background } = validateInput<{
       command: string;

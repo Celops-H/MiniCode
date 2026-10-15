@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spillOutput } from "../../src/tools/overflow.js";
+import { bashTool } from "../../src/tools/index.js";
 
 describe("spillOutput（工具输出超限落盘）", () => {
   let dir: string;
@@ -43,6 +44,22 @@ describe("spillOutput（工具输出超限落盘）", () => {
     expect(result.content.length).toBeLessThan(full.length);
   });
 
+  it("带截断补充提示时作为独立一行附在落盘提示之后", () => {
+    const full = "y".repeat(200);
+    const result = spillOutput(full, 20, outDir, {}, "结果不完整，建议缩小范围或改用内置 grep 搜索");
+    const lines = result.content.split("\n");
+    const last = lines[lines.length - 1];
+    expect(last).toBe("[结果不完整，建议缩小范围或改用内置 grep 搜索]");
+    // 与落盘提示并列两条
+    expect(lines[lines.length - 2]).toContain("完整内容已保存到");
+  });
+
+  it("未提供补充提示时不额外附行", () => {
+    const result = spillOutput("z".repeat(200), 20, outDir);
+    expect(result.content.endsWith("]")).toBe(true);
+    expect(result.content.split("\n").at(-1)).not.toContain("建议缩小");
+  });
+
   it("文件名编入会话 id 与工具名（产出方可回溯），非法字符归一", () => {
     const full = "y".repeat(100);
     const result = spillOutput(full, 10, outDir, { sessionId: "550e8400-e29b-41d4-a716-446655440000", toolName: "mcp__srv__search" });
@@ -69,5 +86,22 @@ describe("spillOutput（工具输出超限落盘）", () => {
     expect(result.outputPath).toBeUndefined();
     expect(result.content).toContain("保留前 10 字符");
     expect(result.content).not.toContain("完整内容已保存到");
+  });
+
+  it("bash 输出超上限时回灌末尾带截断建议（执行层按 maxResultSizeChars 截断）", async () => {
+    const out = await bashTool.execute({
+      command: `node -e "process.stdout.write('x'.repeat(40000))"`,
+    });
+    const result = spillOutput(
+      String(out),
+      bashTool.maxResultSizeChars,
+      outDir,
+      {},
+      bashTool.truncationNote,
+    );
+    expect(result.truncated).toBe(true);
+    // 落盘提示与截断建议并列两条，各讲一件事
+    expect(result.content).toContain("完整内容已保存到");
+    expect(result.content).toContain("结果不完整，建议缩小命令范围或改用内置 grep 搜索");
   });
 });

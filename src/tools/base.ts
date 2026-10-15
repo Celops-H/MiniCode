@@ -49,6 +49,11 @@ export interface Tool {
   readonly skipsPermission?: boolean;
   /** 最大结果字符数：超出截断 */
   readonly maxResultSizeChars: number;
+  /**
+   * 截断时的补充提示（工具特有，如 bash 的缩小范围建议）：该工具输出被截断时，
+   * 由执行器作为独立一行附在落盘提示之后，与落盘提示各讲一件事；缺省不附。
+   */
+  readonly truncationNote?: string;
   /** 并发安全判断：按具体输入判断，不确定返回 false（保守） */
   isConcurrencySafe?(input: unknown): boolean;
   /** 执行工具，返回文本或结构化结果；慢工具可响应 ctx.signal 中止 */
