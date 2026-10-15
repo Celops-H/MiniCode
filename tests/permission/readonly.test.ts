@@ -971,7 +971,7 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
     }
   });
 
-  it("压缩族仅 -c/-t/-l 组成的旗标簇放行，裸用与解压等改写形态拒绝", () => {
+  it("压缩族仅只读旗标簇放行（-c/-t/-l 与 -h/-H/-V 纯查询），裸用与解压等改写形态拒绝", () => {
     for (const command of [
       "gzip f",
       "gzip -d f.gz",
@@ -1058,7 +1058,7 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
   });
 
   it("已知边界：压缩族的混合簇与 stdin 形态按保守拒绝（记录口径，非期望行为）", () => {
-    // -dc/-cv 输出到 stdout 实际不落盘，但按需求口径只有 -c/-t/-l 组成的簇放行；
+    // -dc/-cv 输出到 stdout 实际不落盘，但按需求口径只有 -c/-t/-l 与纯查询旗标（-h/-H/-V）组成的簇放行；
     // 裸用与 - 操作数（读 stdin 写 stdout）同理，形态罕见，保守拒绝
     expect(readOnlyWrite("gzip -dc f.gz")).toBeDefined();
     expect(readOnlyWrite("gzip -cd f.gz")).toBeDefined();
