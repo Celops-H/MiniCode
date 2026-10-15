@@ -6,6 +6,7 @@ import { AgentPath } from "../../src/agent/agent-path.js";
 import { Team } from "../../src/agent/team.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import { createCollaborationTools } from "../../src/tools/index.js";
+import { COLLAB_SUBAGENT_PROMPT } from "../../src/tools/builtin/collab.js";
 import type { Tool } from "../../src/tools/base.js";
 import type { ModelClient } from "../../src/agent/agent.js";
 
@@ -1061,6 +1062,11 @@ describe("协作工具集（多 agent 环境）", () => {
     const followup = collabTool(team, "followup_task");
     expect(followup.description).toContain("证据要求");
     expect(followup.description).toContain("spawn_agent");
+  });
+
+  it("协作子 agent 提示词要求结论回传原始命令与绝对路径", () => {
+    expect(COLLAB_SUBAGENT_PROMPT).toContain("原始命令");
+    expect(COLLAB_SUBAGENT_PROMPT).toContain("绝对路径");
   });
 
   it("wait_agent：不能等待自己", async () => {

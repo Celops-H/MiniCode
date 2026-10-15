@@ -25,7 +25,7 @@ export const COLLAB_TOOL_NAMES = new Set([
 /** 团队工作 agent 系统提示词（fork_turns=none：全新上下文，无父历史） */
 export const COLLAB_SUBAGENT_PROMPT =
   "你是团队工作 agent，由协调者派生执行分派的任务。你看不到协调者的完整历史，只收到任务消息。" +
-  "完成任务后用简洁文字说明结论。";
+  "完成任务后用简洁文字说明结论，结论里回传执行过的原始命令与涉及的绝对路径。";
 
 /** 只读子 agent 提示词附加段（只读派生时拼在协作提示之后） */
 export const READONLY_SUBAGENT_PROMPT =
