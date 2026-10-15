@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROOT_AGENT_PATH } from "../../core/index.js";
 import { validateInput, outputLimitNote, type ExecuteContext } from "../base.js";
 import type { Tool } from "../base.js";
 import type { BackgroundTask, BackgroundTaskStatus } from "./bash-background.js";
@@ -66,7 +67,7 @@ export const bashTaskTool: Tool = {
     }
     // status：状态行 + 自该消费者上次查询以来的新增输出（游标按 agentPath 各记一份，
     // 子 agent 查询不推进父的游标；无上下文时视作 root）
-    const consumer = options?.agentPath ?? "/root";
+    const consumer = options?.agentPath ?? ROOT_AGENT_PATH;
     const line = `任务 ${task.id}：${taskStateText(task)}`;
     const fresh = task.output.slice(task.readMarks.get(consumer) ?? 0).trim();
     task.readMarks.set(consumer, task.output.length);

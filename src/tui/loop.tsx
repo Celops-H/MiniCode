@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
-import { modelErrorText, type Message } from "../core/index.js";
+import { modelErrorText, ROOT_AGENT_PATH, type Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -1320,11 +1320,11 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     // root 上下文水位：随 /root 消息追加与压缩刷新，agent.contextTokens
     // 就地计算（与压缩触发同口径）；子 agent 消息不影响 root 水位
     hooks.on("MessageAppended", (e) => {
-      if (e.agentPath !== "/root") return;
+      if (e.agentPath !== ROOT_AGENT_PATH) return;
       commit(reduceHook(state, { ...e, contextTokens: agent.contextTokens() }));
     }),
     hooks.on("Compact", (e) => {
-      if (e.agentPath !== "/root") return;
+      if (e.agentPath !== ROOT_AGENT_PATH) return;
       commit(reduceHook(state, { ...e, contextTokens: agent.contextTokens() }));
     }),
     hooks.on("AgentSpawned", (e) => commit(reduceHook(state, { ...e, spawnedAt: Date.now() }))),
@@ -1339,7 +1339,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
       wake?.();
     }),
     hooks.on("Stop", (e) => {
-      const isRoot = e.agentPath === undefined || e.agentPath === "/root";
+      const isRoot = e.agentPath === ROOT_AGENT_PATH;
       // /init 收尾：复位免审批与免铺屏，补完成通知（过程不铺屏，结果有迹可循）。
       // 只认 root 的 Stop——子 agent 回合收尾不应提前结束命令过程
       if (suppressStream && isRoot) {

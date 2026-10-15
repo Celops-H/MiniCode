@@ -4,7 +4,7 @@
  * 历史回溯、slash 命令候选；帧生成（resolve）只读这些状态。
  * 子 agent 的工具调用不铺主消息流工具卡：按 agentPath 分流进其活动块段内（见 reduceHook）。
  */
-import { COMMAND_MARKER, modelErrorText, type Message } from "../core/index.js";
+import { COMMAND_MARKER, modelErrorText, ROOT_AGENT_PATH, type Message } from "../core/index.js";
 import { INIT_PROMPT_PREFIX } from "../context/index.js";
 import { parseMailText } from "../agent/mailbox.js";
 import type { AgentOutcome } from "../observability/index.js";
@@ -468,7 +468,7 @@ export function initState(
       // 结论/中断注入重演为活动行（live 会话同样只有结论/中断有活动行，消息注入不上屏）。
       // /root 自发自收的邮件不建树条目（root 恒在首位，不重复）；不合邮件格式的
       // 带路径消息回落普通渲染，不静默丢内容
-      if (message.agentPath && message.agentPath !== "/root") {
+      if (message.agentPath && message.agentPath !== ROOT_AGENT_PATH) {
         const mail = parseMailText(message.content);
         if (mail) {
           const node = agentNodes.get(message.agentPath) ?? {
@@ -589,7 +589,7 @@ export function initState(
   // 最后终态，保留其结论文本与所在位置；终态邮件只有进度汇报（MESSAGE）或已被后续
   // 终态取代时，轨迹给出的才是最后终态，补新段
   for (const outcome of agentOutcomes ?? []) {
-    if (outcome.path === "/root") continue;
+    if (outcome.path === ROOT_AGENT_PATH) continue;
     const node = agentNodes.get(outcome.path);
     if (node && terminalPaths.has(outcome.path) && node.status === outcome.outcome) continue;
     if (node) {
@@ -627,7 +627,7 @@ export function initState(
     permissionMode: "default",
     thinkingLevel: undefined,
     agents: [
-      { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+      { path: ROOT_AGENT_PATH, status: "running", spawnedAt: null, completedAt: null },
       ...agentNodes.values(),
     ],
     queue: [],
@@ -648,7 +648,7 @@ export function resetToNewState(state: TuiState): TuiState {
     toast: undefined,
     modal: undefined,
     candidate: undefined,
-    agents: [{ path: "/root", status: "running", spawnedAt: null, completedAt: null }],
+    agents: [{ path: ROOT_AGENT_PATH, status: "running", spawnedAt: null, completedAt: null }],
     contextTokens: undefined,
     prompt: emptyPrompt(state.prompt.history),
   };
@@ -931,7 +931,7 @@ export function setCompacting(state: TuiState, compacting: boolean): TuiState {
 /** 是否有运行中的子 agent：主 agent 等子 agent 结论时主状态非 running，
  *  Esc 判定据此仍走「打断」而非「双击退出」，子 agent 活跃时 Esc 一次即级联中断 */
 export function hasRunningAgent(agents: AgentNode[]): boolean {
-  return agents.some((a) => a.path !== "/root" && a.status === "running");
+  return agents.some((a) => a.path !== ROOT_AGENT_PATH && a.status === "running");
 }
 
 /** 有在途 agent 工作：主状态运行中，或任一子 agent 后台运行中。
@@ -1062,7 +1062,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       // 不置 status=running：status 是根回合口径——子 agent 的 Stop 不回落它（见下方 Stop 分支），
       // 置位会让状态行在根空闲时停在运行中；子 agent 活跃由底栏树与 Esc 判定的
       // hasRunningAgent 承担（state.agents），与状态行互不代偿
-      if (event.agentPath !== "/root") {
+      if (event.agentPath !== ROOT_AGENT_PATH) {
         return applyAgentToolCall(state, event.agentPath, event.toolCallId, () => ({
           id: event.toolCallId,
           name: event.toolName,
@@ -1101,7 +1101,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks, status: "running" };
     }
     case "PostToolUse": {
-      if (event.agentPath !== "/root") {
+      if (event.agentPath !== ROOT_AGENT_PATH) {
         return applyAgentToolCall(
           state,
           event.agentPath,
@@ -1137,7 +1137,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
       return { ...state, blocks };
     }
     case "PostToolUseFailure": {
-      if (event.agentPath !== "/root") {
+      if (event.agentPath !== ROOT_AGENT_PATH) {
         return applyAgentToolCall(
           state,
           event.agentPath,
@@ -1219,7 +1219,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
     case "Stop":
       // 只把主 agent（/root）的 Stop 视为回合空闲：子 agent 每轮结束也发 Stop，
       // 放行会把主界面误打成「空闲」（Esc 判定依赖状态，见 hasRunningAgent）
-      if (event.agentPath && event.agentPath !== "/root") return state;
+      if (event.agentPath !== ROOT_AGENT_PATH) return state;
       return { ...state, status: "idle" };
     default:
       return state;

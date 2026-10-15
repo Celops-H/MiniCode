@@ -2,10 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { HookBus, HookEvent } from "../hooks/index.js";
 import { HOOK_EVENT_TYPES } from "../hooks/index.js";
+import { ROOT_AGENT_PATH } from "../core/index.js";
 import { resolveTracesDir } from "../config/paths.js";
 import {
   buildHeaderLine,
-  ROOT_AGENT_PATH,
   TRACE_FORMAT,
   TRACE_FORMAT_VERSION,
   type TraceHeader,

@@ -12,8 +12,6 @@
 export const TRACE_FORMAT = "minicode-trace";
 /** 格式版本：字段只增不改，格式演进升版本号 */
 export const TRACE_FORMAT_VERSION = 1;
-/** 根 agent 的路径：会话级事件与 root 的消息行都归到它（轨迹按 agentPath 过滤的固定值） */
-export const ROOT_AGENT_PATH = "/root";
 
 /**
  * 轨迹首行 header：定长字段今后不再增加，扩展一律走 metadata

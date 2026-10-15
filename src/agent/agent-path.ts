@@ -4,7 +4,8 @@
  * 校验失败返回可读错误文本，由工具回灌给模型（不抛原始堆栈）。
  */
 
-const ROOT = "/root";
+import { ROOT_AGENT_PATH } from "../core/index.js";
+
 const RESERVED_NAMES = new Set(["root", ".", ".."]);
 
 export class AgentPath {
@@ -12,7 +13,7 @@ export class AgentPath {
 
   /** 根路径 `/root`（协调者 = root 系统提示角色） */
   static root(): AgentPath {
-    return new AgentPath(ROOT);
+    return new AgentPath(ROOT_AGENT_PATH);
   }
 
   /**
@@ -21,11 +22,11 @@ export class AgentPath {
    * @returns 解析成功返回路径，失败返回可读错误信息
    */
   static parse(input: string): AgentPath | string {
-    if (input === ROOT) return new AgentPath(input);
-    if (!input.startsWith(`${ROOT}/`)) return "绝对 agent 路径必须以 /root 开头";
+    if (input === ROOT_AGENT_PATH) return new AgentPath(input);
+    if (!input.startsWith(`${ROOT_AGENT_PATH}/`)) return "绝对 agent 路径必须以 /root 开头";
     if (input.endsWith("/")) return "agent 路径不能以 / 结尾";
     // 首段 root 已由前缀保证，只校验其余段
-    const rest = input.slice(ROOT.length + 1);
+    const rest = input.slice(ROOT_AGENT_PATH.length + 1);
     for (const segment of rest.split("/")) {
       const error = validateAgentName(segment);
       if (error) return error;
@@ -34,7 +35,7 @@ export class AgentPath {
   }
 
   isRoot(): boolean {
-    return this.value === ROOT;
+    return this.value === ROOT_AGENT_PATH;
   }
 
   /** 末段名；root 返回 `root` */
@@ -61,7 +62,7 @@ export class AgentPath {
    * 返回子路径或错误文本。
    */
   resolve(reference: string): AgentPath | string {
-    if (reference === ROOT) return AgentPath.root();
+    if (reference === ROOT_AGENT_PATH) return AgentPath.root();
     if (reference.startsWith("/")) return AgentPath.parse(reference);
     const error = validateRelativeReference(reference);
     if (error) return error;

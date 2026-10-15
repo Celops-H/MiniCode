@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentPath } from "../../src/agent/agent-path.js";
+import { ROOT_AGENT_PATH } from "../../src/core/index.js";
 
 describe("AgentPath（agent 层级路径）", () => {
   it("root 固定为 /root，isRoot/name 正确", () => {
@@ -7,6 +8,11 @@ describe("AgentPath（agent 层级路径）", () => {
     expect(root.toString()).toBe("/root");
     expect(root.isRoot()).toBe(true);
     expect(root.name()).toBe("root");
+  });
+
+  it("根路径常量与 AgentPath.root() 同源：共享常量即 root 的字符串形式", () => {
+    expect(ROOT_AGENT_PATH).toBe(AgentPath.root().toString());
+    expect((AgentPath.parse(ROOT_AGENT_PATH) as AgentPath).isRoot()).toBe(true);
   });
 
   it("join 派生直接子路径", () => {

@@ -4,6 +4,7 @@ import {
   createContext,
   errorMessage,
   modelErrorText,
+  ROOT_AGENT_PATH,
   type ThinkingLevel,
   toolCallsOf,
   toolResultMessage,
@@ -521,7 +522,7 @@ export class Agent {
     }
     let context = createContext(this.systemPrompt, this.requestMessages(), this.registry.definitions(), this.contextThinkingLevel());
     const collected: StreamEvent[] = [];
-    const agentPath = this.agentPath?.toString() ?? "/root";
+    const agentPath = this.agentPath?.toString() ?? ROOT_AGENT_PATH;
     // 本轮实际产出模型：路由切到备选时更新，组装后写入消息 meta 供署名/重演一致展示
     let effectiveModel = this.modelId;
     // 超窗应急剥组重发：API 返回超窗错误时剥掉最近几组工具回合后重发当前轮，
@@ -711,7 +712,7 @@ export class Agent {
       // 带 agentPath（多 agent 下区分「谁」空闲）：TUI 据此只把主 agent 的 Stop 视为回合空闲
       //（子 agent 轮次结束不应把主界面打成空闲）
       this.stopped = true;
-      await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? "/root" });
+      await this.safeEmit({ type: "Stop", agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH });
       await this.flushOwnSession();
       // 会话记忆：回合收尾后台增量维护记忆——回合完整收尾后触发，
       // 更新 fire-and-forget 不阻塞回合结束，更新跑动中再触发合并为尾随一次
@@ -858,7 +859,7 @@ export class Agent {
     // 恢复会话未经回合直接 /compact 时合成消息才不随摘要替换静默消失
     this.flushPendingRepairMirrors();
     const startedAt = Date.now();
-    const agentPath = this.agentPath?.toString() ?? "/root";
+    const agentPath = this.agentPath?.toString() ?? ROOT_AGENT_PATH;
     const tokensBefore = this.contextTokens();
     const messagesBefore = this.messages.length;
     // 分层手段记账：pruned=裁剪真实生效（有旧工具输出被替换为裁剪标记），
@@ -1076,7 +1077,7 @@ export class Agent {
     return this.safeEmit({
       type: "MessageAppended",
       message,
-      agentPath: this.agentPath?.toString() ?? "/root",
+      agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH,
     });
   }
 
@@ -1161,7 +1162,7 @@ export class Agent {
     }
     await this.safeEmit({
       type: "LlmCallEnd",
-      agentPath: this.agentPath?.toString() ?? "/root",
+      agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH,
       ...fields,
       // 厂商链路归属：按本次尝试的模型 id 反查（切换备选/剥组重试各尝试各记各的）
       ...(fields.model ? { provider: this.modelClient.providerOf?.(fields.model) } : {}),
@@ -1178,7 +1179,7 @@ export class Agent {
   ): Promise<void> {
     return this.safeEmit({
       type: "PermissionDecision",
-      agentPath: this.agentPath?.toString() ?? "/root",
+      agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH,
       toolCallId,
       toolName,
       decision,
@@ -1228,7 +1229,7 @@ export class Agent {
         toolName: call.name,
         input: call.input,
         error: `工具调用过程出错：${error}`,
-        agentPath: this.agentPath?.toString() ?? "/root",
+        agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH,
       });
       return { message: toolResultMessage(call.id, call.name, `工具调用过程出错：${error}`, true) };
     }
@@ -1244,7 +1245,7 @@ export class Agent {
       input: call.input,
     };
     const hookVerdict = await this.preToolUseVerdict(call.id, request);
-    const agentPath = this.agentPath?.toString() ?? "/root";
+    const agentPath = this.agentPath?.toString() ?? ROOT_AGENT_PATH;
     // 无管线时 hook 裁决直接生效（deny 拒绝；ask 无审批者，fail 保守拒绝）——
     // 对未知工具同样生效（hook 拒绝优先于「未知工具」反馈）
     const hookRejects = hookVerdict === "deny" || hookVerdict === "ask";
@@ -1450,7 +1451,7 @@ export class Agent {
       toolCallId,
       toolName: request.toolName,
       input: request.input ?? {},
-      agentPath: this.agentPath?.toString() ?? "/root",
+      agentPath: this.agentPath?.toString() ?? ROOT_AGENT_PATH,
     };
     let results: (PermissionBehavior | void)[] | undefined;
     try {

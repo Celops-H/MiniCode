@@ -12,6 +12,7 @@ import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "@opentui/solid";
 import type { AgentNode } from "../state.js";
 import { AgentPath } from "../../agent/agent-path.js";
+import { ROOT_AGENT_PATH } from "../../core/index.js";
 import { theme } from "./theme.js";
 
 /** 完成条目展示时长（ms），超时从树消失 */
@@ -44,7 +45,7 @@ function durText(ms: number | null): string {
  *  子 agent=`( ) 名` / `(√) 名 耗时` / `(!) 名 耗时` / `(×) 名` */
 function agentContent(a: AgentNode, name?: string): string {
   const shown = name ?? agentName(a.path);
-  if (a.path === "/root") return "● main";
+  if (a.path === ROOT_AGENT_PATH) return "● main";
   // 完成与失败都带耗时（失败跑多久才失败，与完成一样有参考价值），符号区分：√ 完成、! 失败；
   // 派生时刻缺失（测试/直调 reducer）时只显名称不带耗时，避免尾随空格
   if (a.status === "completed" || a.status === "failed") {
@@ -78,7 +79,7 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
   // 子表：父 → 子路径；父被剪枝（完成条目消失）时子重挂到最近存活祖先，运行中子 agent 不失联
   const childrenOf = new Map<string, string[]>();
   for (const n of nodes) {
-    if (n.path === "/root") continue; // 树根无父，跳过（避免挂为自身子节点）
+    if (n.path === ROOT_AGENT_PATH) continue; // 树根无父，跳过（避免挂为自身子节点）
     let p = parentPath(n.path);
     while (p !== n.path && !present.has(p)) p = parentPath(p);
     if (!childrenOf.has(p)) childrenOf.set(p, []);
@@ -98,7 +99,7 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
       leafCount.set(l, (leafCount.get(l) ?? 0) + 1);
     }
     for (const n of nodes) {
-      if (n.path === "/root") continue;
+      if (n.path === ROOT_AGENT_PATH) continue;
       const l = agentName(n.path);
       if ((leafCount.get(l) ?? 0) > 1) displayName.set(n.path, `${agentName(parentPath(n.path))}/${l}`);
     }
@@ -128,7 +129,7 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
       render(kids[i]!, [...ancCols, myCenter], [...ancMore, i < kids.length - 1], i === kids.length - 1);
     }
   };
-  render("/root", [], [], true);
+  render(ROOT_AGENT_PATH, [], [], true);
   return rows;
 }
 
@@ -152,7 +153,7 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
   // 仅多 agent 启用（存在子 agent）时显示整棵树；只有 main 时底栏不占行（Show 响应式门控，
   // 不能组件体 if return null——store 更新后组件体不重跑，树在子 agent 派生时才出现会不显示）
   const rows = createMemo(() => {
-    if (!visible().some((a) => a.path !== "/root")) return [];
+    if (!visible().some((a) => a.path !== ROOT_AGENT_PATH)) return [];
     return renderTree(visible());
   });
   return (
@@ -171,6 +172,6 @@ export function AgentStrip(props: { agents: AgentNode[] }): JSX.Element {
  *  可见时含自身 paddingTop 1 行（Yoga 布局占真实行）。 */
 export function agentRowCount(agents: AgentNode[], now = Date.now()): number {
   const visible = agents.filter((a) => isTerminalVisible(a, now));
-  if (!visible.some((a) => a.path !== "/root")) return 0;
+  if (!visible.some((a) => a.path !== ROOT_AGENT_PATH)) return 0;
   return renderTree(visible).length + 1; // +1 = AgentStrip 自身 paddingTop
 }

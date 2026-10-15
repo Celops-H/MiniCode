@@ -13,6 +13,7 @@ export type { StreamEvent, ModelFallbackReason } from "./events.js";
 export { assembleAssistantMessage } from "./assemble.js";
 export { modelErrorText } from "./errors.js";
 export { MINICODE_VERSION } from "./version.js";
+export { ROOT_AGENT_PATH } from "./agent-path.js";
 export type {
   ContentBlock,
   TextContent,
