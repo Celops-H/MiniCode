@@ -820,3 +820,74 @@ describe("未知工具 + 权限管线裁决（⑭g）", () => {
     );
   });
 });
+
+describe("无权限管线时 hook 拒绝优先于未知工具与参数错误（⑭h）", () => {
+  it("无管线 + hook deny：未知工具给权限拒绝而非未知工具", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const agent = new Agent({
+      modelClient: unknownToolClient(),
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [],
+    });
+    agent.start("调未知工具");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "PostToolUseFailure", toolName: "nope", error: "权限拒绝：Hook 拒绝" }),
+    );
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("权限拒绝：Hook 拒绝");
+  });
+
+  it("无管线 + hook deny：非法参数给权限拒绝而非参数错误", async () => {
+    const hooks = new HookBus();
+    hooks.on("PreToolUse", (): HookVerdict => "deny");
+    let executed = false;
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "echo" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"text":123}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "完成" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [
+        {
+          name: "echo",
+          description: "回显文本",
+          inputSchema: z.object({ text: z.string() }),
+          isReadOnly: false,
+          maxResultSizeChars: 1000,
+          execute: () => {
+            executed = true;
+            return "不应执行";
+          },
+        },
+      ],
+    });
+    agent.start("非法参数");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    expect(executed).toBe(false);
+    const result = agent.getMessages().find((m) => m.role === "tool_result");
+    expect(result?.content).toBe("权限拒绝：Hook 拒绝");
+  });
+});

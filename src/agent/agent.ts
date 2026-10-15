@@ -1187,6 +1187,28 @@ export class Agent {
   }
 
   /**
+   * 权限拒绝统一出口：发 PostToolUseFailure 并回灌拒绝结果。
+   * 轨迹 error 与回灌文本同源，口径单点；hint 供未知工具附带可用工具列表。
+   */
+  private async rejectToolCall(
+    call: ToolCall,
+    reason: string,
+    agentPath: string,
+    hint = "",
+  ): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
+    const text = `权限拒绝：${reason}${hint}`;
+    await this.safeEmit({
+      type: "PostToolUseFailure",
+      toolCallId: call.id,
+      toolName: call.name,
+      input: call.input,
+      error: text,
+      agentPath,
+    });
+    return { message: toolResultMessage(call.id, call.name, text, true) };
+  }
+
+  /**
    * 执行单个工具调用；工具不存在或执行抛错时，以错误消息回灌。
    * 前置（hook 裁决 / 权限审批 / 参数校验）异常由外层兜底转失败结果，不抛断回合。
    * 返回工具结果消息与执行产出的上下文修改（供批末统一应用）。
@@ -1243,31 +1265,12 @@ export class Agent {
           const reason = result.reason ?? "未授权";
           // 未知工具被拒时附带「工具不存在 + 可用列表」，让模型能改选真实工具而非反复重试同一幻觉名
           const unknownHint = available ? `（工具不存在，可用工具：${available}）` : "";
-          await this.safeEmit({
-            type: "PostToolUseFailure",
-            toolCallId: call.id,
-            toolName: call.name,
-            input: call.input,
-            error: `权限拒绝：${reason}${unknownHint}`,
-            agentPath,
-          });
-          return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}${unknownHint}`, true) };
+          return this.rejectToolCall(call, reason, agentPath, unknownHint);
         }
       } else if (hookRejects) {
         // 无管线时 hook 裁决直接生效（hook 拒绝优先于「未知工具」反馈）
-        const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
         await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
-        await this.safeEmit({
-          type: "PostToolUseFailure",
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.input,
-          error: `权限拒绝：${reason}`,
-          agentPath,
-        });
-        return {
-          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
-        };
+        return this.rejectToolCall(call, hookDenyReason(hookVerdict), agentPath);
       } else if (hookVerdict === "allow") {
         // 无管线时 hook 显式放行也是一次权限决策，镜像进轨迹
         await this.emitPermissionDecision(call.id, call.name, "allow", "hook");
@@ -1289,19 +1292,8 @@ export class Agent {
     if (!parsed.success) {
       const error = formatInputError(call.name, parsed.error);
       if (!this.permission && hookRejects) {
-        const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
         await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
-        await this.safeEmit({
-          type: "PostToolUseFailure",
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.input,
-          error: `权限拒绝：${reason}`,
-          agentPath,
-        });
-        return {
-          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
-        };
+        return this.rejectToolCall(call, hookDenyReason(hookVerdict), agentPath);
       }
       await this.safeEmit({
         type: "PostToolUseFailure",
@@ -1319,17 +1311,8 @@ export class Agent {
     if (this.readOnly) {
       const violation = readOnlyToolViolation(call.name, tool.isReadOnly, request.content);
       if (violation) {
-        const reason = `只读 agent 不允许写操作：${violation}`;
         await this.emitPermissionDecision(call.id, call.name, "deny", "rule");
-        await this.safeEmit({
-          type: "PostToolUseFailure",
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.input,
-          error: `权限拒绝：${reason}`,
-          agentPath,
-        });
-        return { message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true) };
+        return this.rejectToolCall(call, `只读 agent 不允许写操作：${violation}`, agentPath);
       }
     }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
@@ -1345,36 +1328,13 @@ export class Agent {
         : await this.permission.check(request, hook);
       await this.emitPermissionDecision(call.id, call.name, result.allowed ? "allow" : "deny", permissionEventSource(result.source));
       if (!result.allowed) {
-        const reason = result.reason ?? "未授权";
-        // 权限拒绝：发失败事件（观测闭合）
-        await this.safeEmit({
-          type: "PostToolUseFailure",
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.input,
-          error: `权限拒绝：${reason}`,
-          agentPath,
-        });
-        return {
-          message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
-        };
+        return this.rejectToolCall(call, result.reason ?? "未授权", agentPath);
       }
     } else if (hookVerdict === "deny" || (hookVerdict === "ask" && !tool.skipsPermission)) {
       // 免审批工具（skipsPermission）的 ask 不升级用户审批、视为放行（与管线 checkSkipsPermission 一致）；
       // 普通工具无审批者时 fail 保守拒绝
-      const reason = hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
       await this.emitPermissionDecision(call.id, call.name, "deny", "hook");
-      await this.safeEmit({
-        type: "PostToolUseFailure",
-        toolCallId: call.id,
-        toolName: call.name,
-        input: call.input,
-        error: `权限拒绝：${reason}`,
-        agentPath,
-      });
-      return {
-        message: toolResultMessage(call.id, call.name, `权限拒绝：${reason}`, true),
-      };
+      return this.rejectToolCall(call, hookDenyReason(hookVerdict), agentPath);
     } else if (hookVerdict === "allow") {
       // 无管线时 hook 显式放行也是一次权限决策，镜像进轨迹
       await this.emitPermissionDecision(call.id, call.name, "allow", "hook");
@@ -1503,6 +1463,14 @@ export class Agent {
     if (results?.includes("allow")) return "allow";
     return undefined;
   }
+}
+
+/**
+ * 无权限管线时 hook 拒绝理由：deny 为显式拒绝；ask 无审批者按保守拒绝。
+ * reason 求值单点，拒绝文案只此一处。
+ */
+function hookDenyReason(hookVerdict: PermissionBehavior | undefined): string {
+  return hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
 }
 
 /**
