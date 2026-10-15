@@ -8,7 +8,8 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SessionStore } from "../../src/storage/index.js";
 import { configSchema } from "../../src/config/index.js";
-import { NO_MODEL_ID, createModelsOrGuide, createSwitchedSession, resolveInitialSession, resolveSessionModel, reloadOrDraftSession } from "../../src/tui/index.js";
+import { createBuiltinTools } from "../../src/tools/index.js";
+import { NO_MODEL_ID, createModelsOrGuide, createSwitchedSession, readOnlyToolNames, resolveInitialSession, resolveSessionModel, reloadOrDraftSession } from "../../src/tui/index.js";
 
 let dir = "";
 
@@ -256,4 +257,19 @@ it("resolveSessionModel：零可用厂商（引导态）保持载入会话的模
   const { models } = createModelsOrGuide(undefined);
   expect(resolveSessionModel(models, "m-1", NO_MODEL_ID)).toBe("m-1");
   expect(resolveSessionModel(models, NO_MODEL_ID, NO_MODEL_ID)).toBe(NO_MODEL_ID);
+});
+
+it("只读工具名集合：内置只读工具 + 协作工具只读项（list_agents）", () => {
+  const names = readOnlyToolNames(createBuiltinTools());
+  // 内置只读工具按 isReadOnly 元数据收集，写类工具不入
+  expect(names.has("read")).toBe(true);
+  expect(names.has("glob")).toBe(true);
+  expect(names.has("grep")).toBe(true);
+  expect(names.has("write")).toBe(false);
+  expect(names.has("edit")).toBe(false);
+  expect(names.has("bash")).toBe(false);
+  // 协作工具在 Agent 内部经 deps 构造，宿主拿不到实例：只有只读项 list_agents 并入
+  expect(names.has("list_agents")).toBe(true);
+  expect(names.has("spawn_agent")).toBe(false);
+  expect(names.has("interrupt_agent")).toBe(false);
 });

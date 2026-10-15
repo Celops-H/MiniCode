@@ -10,7 +10,8 @@ import { randomUUID } from "node:crypto";
 import { Session, SessionStore, DEFAULT_SESSION_TITLE } from "../storage/index.js";
 import { HookBus, type HookEvent } from "../hooks/index.js";
 import { PermissionPipeline, type PermissionMode, type PermissionPipelineOptions } from "../permission/index.js";
-import { createBuiltinTools } from "../tools/index.js";
+import { createBuiltinTools, COLLAB_READONLY_TOOL_NAMES } from "../tools/index.js";
+import type { Tool } from "../tools/index.js";
 import {
   SYSTEM_PROMPT,
   assembleSessionExtensions,
@@ -172,6 +173,16 @@ export function resolveSessionModel(models: Models, sessionModel: string, mainMo
   if (!models.resolve(mainModelId)) return sessionModel;
   if (!sessionModel || !models.resolve(sessionModel)) return mainModelId;
   return sessionModel;
+}
+
+/** 只读工具名集合（plan 模式只读放行与 /init 免审批用）：内置工具的 isReadOnly 元数据
+ *  收集，再加上协作工具里的只读项。协作工具只能在 Agent 内部经 deps 构造，宿主拿不到
+ *  实例，按 collab 的只读名单并入。 */
+export function readOnlyToolNames(tools: Tool[]): Set<string> {
+  return new Set<string>([
+    ...tools.filter((tool) => tool.isReadOnly).map((tool) => tool.name),
+    ...COLLAB_READONLY_TOOL_NAMES,
+  ]);
 }
 
 /** TUI 入口：新建/继续会话后进入会话循环；/session 切换与 /connect 重建在此完成（装配层） */
@@ -423,12 +434,7 @@ async function runTuiSession(opts: {
         const systemPrompt = [SYSTEM_PROMPT, instructionsSection, extensions.promptSection]
           .filter((s) => s.length > 0)
           .join("\n");
-        const readOnlyNames = new Set<string>([
-          ...tools.filter((t) => t.isReadOnly).map((t) => t.name),
-          // list_agents 为协作工具中的只读项，只能在 Agent 内部经 deps 构造、TUI 侧显式并入，
-          // 需与 collab.ts 的 isReadOnly 保持同步
-          "list_agents",
-        ]);
+        const readOnlyNames = readOnlyToolNames(tools);
         const pipelineOptions: PermissionPipelineOptions = {
           rules: [],
           approver,
