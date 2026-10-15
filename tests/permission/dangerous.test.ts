@@ -39,6 +39,30 @@ describe("危险命令检测", () => {
     expect(checkDangerousCommand(".env").dangerous).toBe(false);
   });
 
+  it("按 ; | & 与换行切段取段首词判危险内建（防段首非内建绕过）", () => {
+    expect(checkDangerousCommand('printf x; eval "$y"').dangerous).toBe(true);
+    expect(checkDangerousCommand("ls && source f").dangerous).toBe(true);
+    expect(checkDangerousCommand("ls & iex x").dangerous).toBe(true);
+    expect(checkDangerousCommand("cat f | source /dev/stdin").dangerous).toBe(true);
+    expect(checkDangerousCommand("echo hi\n. cfg").dangerous).toBe(true);
+    // 非首段同样剥包装前缀后再取真词
+    expect(checkDangerousCommand("ls; sudo eval x").dangerous).toBe(true);
+    // 拒绝理由指向命中的内建名
+    expect(checkDangerousCommand("ls && source f").reason).toContain("source");
+    // 各段首词均非危险内建时照常放行
+    expect(checkDangerousCommand("ls; git status").dangerous).toBe(false);
+    expect(checkDangerousCommand("printf x && echo y").dangerous).toBe(false);
+    expect(checkDangerousCommand("cat a\ncat b").dangerous).toBe(false);
+  });
+
+  it("引号内的分隔符与内建名是字面文本，不误判", () => {
+    expect(checkDangerousCommand("echo 'a; eval x'").dangerous).toBe(false);
+    expect(checkDangerousCommand('echo "a && source x"').dangerous).toBe(false);
+    expect(checkDangerousCommand("grep 'x|eval' f").dangerous).toBe(false);
+    // 引号外仍是真内建，照常拦
+    expect(checkDangerousCommand("eval 'x; y'").dangerous).toBe(true);
+  });
+
   it("包装命令取值旗标剥净后判内建（timeout -k/-s、sudo -h/-r/-t/-U、stdbuf -i/-o/-e）", () => {
     expect(checkDangerousCommand("timeout -k 5 10 eval x").dangerous).toBe(true);
     expect(checkDangerousCommand("timeout --kill-after 5 10 eval x").dangerous).toBe(true);

@@ -73,15 +73,15 @@ export function stripQuotedSpans(command: string, shell: CommandShellKind = "bas
 
 /**
  * 检测命令是否危险（硬编码黑名单 + 正则模式）。
- * 内建名判定先剥包装命令、变量赋值与分组符号，再按段首真实命令词判
- * （与只读守卫同口径，防 `sudo eval`、`FOO=1 eval`、`(eval x)` 等形态绕过首词判定）。
+ * 内建名判定按 ; | & 与换行切段，逐段剥包装命令、变量赋值与分组符号后取段首真实命令词
+ * （与只读守卫同口径，防 `sudo eval`、`FOO=1 eval`、`printf x; eval "$y"`、多行 `. cfg`
+ * 等形态绕过首词判定）；切段前先按 shell 语义剔除引号段，防引号内字面文本误判。
  * @param command 待检测的命令原文
  * @param shell 实际执行方的 shell 语义（resolveCommandShell 的归类），缺省按 bash 全量判定
  * @returns 检测结果（是否危险 + 危险原因）
  */
 export function checkDangerousCommand(command: string, shell: CommandShellKind = "bash"): DangerousCheckResult {
-  const head = commandHeadWord(command);
-  if (head !== undefined) {
+  for (const head of commandHeadWords(command, shell)) {
     if (DANGEROUS_BUILTINS.includes(head)) {
       return { dangerous: true, reason: `危险内建命令：${head}` };
     }
@@ -103,11 +103,22 @@ export function checkDangerousCommand(command: string, shell: CommandShellKind =
   return { dangerous: false };
 }
 
-/** 命令段首真实命令词：剥包装、赋值与分组符号后归一取首词；空命令返回 undefined */
-function commandHeadWord(command: string): string | undefined {
-  const words = command.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return undefined;
-  const { rest, queried } = stripCommandPrefix(words);
-  if (queried || rest.length === 0) return undefined;
-  return normalizeCommandWord(rest[0]!);
+/**
+ * 各命令段段首的真实命令词：按 ; | & 与换行切段（与只读守卫同口径），
+ * 切段前先按 shell 语义剔除引号段，引号内的分隔符与内建名是字面文本不参与判定；
+ * 再逐段剥包装、赋值与分组符号后归一取首词。空段与纯赋值段跳过。
+ * @param command 命令原文
+ * @param shell 实际执行方的 shell 语义（引号剔除口径用）
+ * @returns 各段段首命令词（顺序同命令段）
+ */
+function commandHeadWords(command: string, shell: CommandShellKind): string[] {
+  const heads: string[] = [];
+  for (const segment of stripQuotedSpans(command, shell).split(/[|;&\n]/)) {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    const { rest, queried } = stripCommandPrefix(words);
+    if (queried || rest.length === 0) continue;
+    heads.push(normalizeCommandWord(rest[0]!));
+  }
+  return heads;
 }
