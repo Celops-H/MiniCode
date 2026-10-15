@@ -1421,7 +1421,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     // 会话结束事件：防 SessionEnd handler 的 stdout 写进 raw/备用屏
     ownTerminal?.dispose();
     try {
-      // 结束原因：切换会话 / 重装配（/connect、/model）由挂起的信号判定，其余为退出
+      // 结束原因：切换会话 / 重装配（/connect、/model、/mcp、/settings）由挂起的信号判定，其余为退出
       const endReason = pendingReconfigure ? "reconfigure" : pendingSwitch ? "switch" : "exit";
       await hooks?.emit({ type: "SessionEnd", reason: endReason });
       // 主会话写结束标记（会话级汇总随 meta 落盘）：从未落盘的草稿会话自动跳过

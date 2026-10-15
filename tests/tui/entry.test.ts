@@ -165,6 +165,18 @@ it("createSwitchedSession：零可用厂商（连接引导态）回占位模型�
   expect(bare.meta.model).toBe(NO_MODEL_ID);
 });
 
+it("/session 新建：defaultModel 已下线时会话模型经 resolveSessionModel 归位到可解析主模型", async () => {
+  const store = makeStore();
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
+    defaultModel: "ghost-1",
+  });
+  const session = await createSwitchedSession(store, config);
+  expect(session.meta.model).toBe("ghost-1"); // 首选取 defaultModel，不判可解析
+  const startup = createModelsOrGuide(config);
+  expect(resolveSessionModel(startup.models, session.meta.model, startup.modelId)).toBe("m-1");
+});
+
 it("createModelsOrGuide：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {
   const startup = createModelsOrGuide(undefined);
   expect(startup.needsConnect).toBe(true);

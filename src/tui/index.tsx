@@ -100,8 +100,9 @@ export async function resolveInitialSession(
   };
 }
 
-/** reconfigure（/connect、/model）后恢复当前会话：读盘成功续跑（含 /model 改过的模型）；
- *  仅「草稿未落盘」（ENOENT）重建草稿，其余读盘错误（meta 文件损坏等）上抛走装配错误路径，不静默吞数据。
+/** reconfigure（/connect、/model、/mcp、/settings 应用）后恢复当前会话：读盘成功续跑
+ *  （含 /model 改过的模型）；仅「草稿未落盘」（ENOENT）重建草稿，其余读盘错误（meta
+ *  文件损坏等）上抛走装配错误路径，不静默吞数据。
  *  resumed 同步标记载入/重建（SessionStart 启动形态）。纯函数便于层 1 测试。 */
 export async function reloadOrDraftSession(
   store: SessionStore,
@@ -124,7 +125,7 @@ export const NO_MODEL_ID = "";
  *  /model 面板 Ctrl+S 改默认模型只写盘、不重装配，故这里取最新配置重解析，
  *  不沿用装配期解析的旧主模型。
  *  零可用厂商（连接引导态）以占位模型建会话，不抛错退出；连接成功后 reconfigure 的
- *  模型归位会给它换上真模型。
+ *  模型归位会给它换上真模型。首选条目不可解析时后续的 resolveSessionModel 归位纠正。
  *  纯函数便于层 1 测试。 */
 export async function createSwitchedSession(store: SessionStore, config: Config): Promise<Session> {
   let modelId: string;
@@ -137,8 +138,8 @@ export async function createSwitchedSession(store: SessionStore, config: Config)
 }
 
 /**
- * 模型客户端装配（启动与 reconfigure 重装配共用）：零可用厂商不报错——返回空模型集合
- * + needsConnect，由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
+ * 模型客户端装配（启动与 reconfigure、切会话重装配共用）：零可用厂商不报错——返回空模型
+ * 集合 + needsConnect，由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
  * 引导态下 /settings、/mcp 应用也到达 reconfigure，按上述口径返回空模型集合与占位模型，
  * 不让 NoProviderError 逃出入口层退出进程。
  * 主模型按候选序列取首个可解析者（defaultModel/modelChain 死条目回落，见 pickMainModel）。
@@ -269,15 +270,22 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         continue;
       }
       if (!result.switchTo) break;
-      // /session 切换：重读配置再进新会话——技能清单等装配输入按最新配置生效
-      //（技能开关变更不重装配，提示新建或切换会话后生效；切换型会话是进程内主要的生效入口）；
-      // 视图按新会话消息重建
+      // /session 切换/新建：与 reconfigure 同链重读 .env 与配置、重建模型客户端——切到
+      // 引导态建的旧会话（模型空串）、外部手改 config.json 后新建，会话模型都要落在当前
+      // 装配集合内，否则会话内显示「未连接」、首条消息报「未知模型」；模型经
+      // resolveSessionModel 归位，视图仍按新会话重建
+      await loadDotEnv();
       config = await loadConfig();
+      const switched = createModelsOrGuide(config);
+      models = switched.models;
+      modelId = switched.modelId;
+      modelWarnings = switched.warnings;
       session =
         result.switchTo === NEW_SESSION_ID
           ? await createSwitchedSession(store, config)
           : await store.loadSession(result.switchTo);
       sessionStartReason = result.switchTo === NEW_SESSION_ID ? "cold" : "resume";
+      session.meta.model = resolveSessionModel(models, session.meta.model, modelId);
       resetView = true;
     }
   } finally {
