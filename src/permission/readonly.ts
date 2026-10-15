@@ -66,8 +66,8 @@ export function readOnlyToolViolation(
 
 /**
  * 判定 bash 工具命令是否为写命令：重定向（空设备除外）或命令段命中写命令黑名单。
- * 按 ; | & 换行切段逐段判定，管道右侧的 tee、xargs 后的写命令同样命中；
- * 引号内字面文本剔除后匹配（echo "rm" 不误拦）。
+ * 按 ; | & 换行切段逐段判定（cmd 的 if/for 语句再按括号分组切开），
+ * 管道右侧的 tee、xargs 后的写命令同样命中；引号内字面文本剔除后匹配（echo "rm" 不误拦）。
  * Windows 上 bash 工具实际由 COMSPEC 的 shell 执行：cmd/PowerShell 的空设备是 NUL
  * （内核层落设备），与 /dev/null 同等豁免；bash 语义下 nul 是普通文件名，不豁免。
  * @param command 命令原文
