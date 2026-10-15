@@ -20,7 +20,7 @@ import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig, Config } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, agentsInFlight, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, planModelConfirm, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, agentsInFlight, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
@@ -985,13 +985,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
             // key 输入态 Enter：提交连接（写配置成功后由 submitConnectKey 请求重建）
             void submitConnectKey();
           } else if (state.modal.kind === "model") {
-            // 应用 /model：切模型（同一会话用新模型续跑）+ 思考等级即时生效
-            const picked = state.modal.models[state.modal.selected];
-            thinkingBox.value = state.modal.thinkingLevel;
-            commit({ ...state, modal: undefined, thinkingLevel: state.modal.thinkingLevel });
+            // 应用 /model：切模型（同一会话用新模型续跑）+ 思考等级即时生效。
+            // 值在 commit 前取出：这里的 commit 传 modal: undefined，reconcile 随后把该键从
+            // store 清掉，commit 后读 state.modal 是 undefined（同 /mcp、/skills、/settings 先取 rows）
+            const { picked, thinkingLevel, switchModel } = planModelConfirm(state.modal, session.meta.model);
+            thinkingBox.value = thinkingLevel;
+            commit({ ...state, modal: undefined, thinkingLevel });
             // 弹窗关闭唤醒输入泵（弹窗打开期间泵暂停取项）
             wake?.();
-            if (picked && picked.id !== session.meta.model) {
+            if (picked && switchModel) {
               // 切模型先落盘再生效：写盘失败时回滚内存 meta——先改内存后写盘的
               // 旧实现失败只 toast，下一次轮末 flush 把错值落盘，重启续跑与「切换失败」提示矛盾
               const previousModel = session.meta.model;
@@ -1011,7 +1013,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
                   showToast("切换模型失败：写入会话文件出错（已还原原模型）");
                 });
             } else {
-              showToast(`思考等级：${thinkingLevelLabel(state.modal.thinkingLevel)}`);
+              showToast(`思考等级：${thinkingLevelLabel(thinkingLevel)}`);
             }
           } else if (state.modal.kind === "mcp") {
             // 应用扩展面板：写回定义层配置并重装配（无改动仅关闭）。

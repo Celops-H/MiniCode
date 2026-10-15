@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, errorMessage, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, promptEmpty, setCompacting, agentsInFlight, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, planModelConfirm, promptEmpty, setCompacting, agentsInFlight, type BlockView, type TuiState } from "../../src/tui/state.js";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
 function withKeyModal(state: TuiState): TuiState {
@@ -58,6 +58,42 @@ describe("connect key 输入态（弹窗内）", () => {
     const s = withKeyModal(initState([]));
     expect(reduceAction(s, { type: "modal-confirm" }).modal).toMatchObject({ kind: "connect-key", key: "" });
     expect(reduceAction(s, { type: "cancel" }).modal).toMatchObject({ kind: "connect-key", key: "" });
+  });
+});
+
+describe("/model 弹窗 Enter 应用计划（commit 前取值，modal 置空后读不到）", () => {
+  const models = [{ id: "m-1" }, { id: "m-2" }];
+
+  it("选中与当前会话模型不同：切模型 + 思考等级保留", () => {
+    expect(planModelConfirm({ kind: "model", models, selected: 1, thinkingLevel: "high" }, "m-1")).toEqual({
+      picked: { id: "m-2" },
+      thinkingLevel: "high",
+      switchModel: true,
+    });
+  });
+
+  it("选中当前会话模型：不切模型，思考等级照常提示（原先 commit 后读 state.modal 抛错、提示丢失）", () => {
+    expect(planModelConfirm({ kind: "model", models, selected: 0, thinkingLevel: "medium" }, "m-1")).toEqual({
+      picked: { id: "m-1" },
+      thinkingLevel: "medium",
+      switchModel: false,
+    });
+  });
+
+  it("模型列表为空：picked 无候选、不切模型，思考等级照常提示（原先抛错路径）", () => {
+    expect(planModelConfirm({ kind: "model", models: [], selected: 0, thinkingLevel: "low" }, "m-1")).toEqual({
+      picked: undefined,
+      thinkingLevel: "low",
+      switchModel: false,
+    });
+  });
+
+  it("selected 越界：picked 无候选，不抛错", () => {
+    expect(planModelConfirm({ kind: "model", models, selected: 9, thinkingLevel: undefined }, "m-1")).toEqual({
+      picked: undefined,
+      thinkingLevel: undefined,
+      switchModel: false,
+    });
   });
 });
 

@@ -252,6 +252,27 @@ export function sessionModalTarget(
   return { kind: "new" };
 }
 
+/** /model 弹窗 Enter 应用的计划：值在 commit 前取出（reconcile 会把 modal 置空，commit 后读不到 modal）。
+ *  models 为空或 selected 越界时 picked 为 undefined：不切模型，仅提示思考等级。 */
+export function planModelConfirm(
+  modal: ModelModalState,
+  currentModel: string,
+): {
+  /** 选中模型；undefined 表示无候选 */
+  picked: { id: string } | undefined;
+  /** 思考等级（Enter 应用即写入 thinkingBox） */
+  thinkingLevel: ThinkingLevel | undefined;
+  /** 选中与当前会话模型不同才切模型（写盘成功后重装配） */
+  switchModel: boolean;
+} {
+  const picked = modal.models[modal.selected];
+  return {
+    picked,
+    thinkingLevel: modal.thinkingLevel,
+    switchModel: picked !== undefined && picked.id !== currentModel,
+  };
+}
+
 /** 思考等级循环序（/model 左右调整）：low → medium → high → 缺省 → low */
 const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
 
