@@ -191,6 +191,17 @@ it("createModelsOrGuide：modelChain 死条目收进 warnings 供界面提示", 
   expect(startup.warnings).toEqual([expect.stringContaining("ghost-1")]);
 });
 
+it("createModelsOrGuide：defaultModel 死条目不阻断装配，主模型回落到可用首模型并告警", () => {
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }] }],
+    defaultModel: "ghost-1",
+  });
+  const startup = createModelsOrGuide(config);
+  expect(startup.needsConnect).toBe(false);
+  expect(startup.modelId).toBe("m-1");
+  expect(startup.warnings).toEqual([expect.stringContaining("ghost-1")]);
+});
+
 it("resolveSessionModel：有可用厂商时会话模型可解析则保持原值", () => {
   const { models } = createModelsOrGuide(
     configSchema.parse({

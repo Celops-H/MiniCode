@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { assistantMessage, createContext, toolResultMessage } from "../../src/core/index.js";
 import type { StreamEvent } from "../../src/core/index.js";
 import type { Config } from "../../src/config/index.js";
-import { buildModelClient, resolveMainModel } from "../../src/bootstrap/models.js";
-import type { ChatCompletionsClient, ChatCompletionsClientFactory } from "../../src/llm/index.js";
+import { buildModelClient, NoProviderError, pickMainModel, resolveMainModel } from "../../src/bootstrap/models.js";
+import { Models, type ChatCompletionsClient, type ChatCompletionsClientFactory } from "../../src/llm/index.js";
 
 const KEYS = { A_API_KEY: "k-a", B_API_KEY: "k-b" };
 
@@ -336,7 +336,7 @@ describe("resolveMainModel（主模型解析）", () => {
     ]);
   });
 
-  it("主模型不可解析仍硬报错（告警只覆盖主模型之外的条目）", () => {
+  it("链首指向已删模型时回落到后续可解析条目并告警（不再退出进程）", () => {
     const config: Config = {
       logLevel: "info",
       providers: [
@@ -345,10 +345,56 @@ describe("resolveMainModel（主模型解析）", () => {
       modelChain: ["ghost-1", "a-1"],
     };
     const warnings: string[] = [];
-    expect(() =>
-      buildModelClient(config, undefined, { env: KEYS, onWarning: (w) => warnings.push(w) }),
-    ).toThrow("模型 ghost-1 不可用");
-    expect(warnings).toEqual([]);
+    const models = buildModelClient(config, undefined, { env: KEYS, onWarning: (w) => warnings.push(w) });
+    expect(pickMainModel(models, config, { env: KEYS })).toBe("a-1");
+    expect(warnings).toEqual([expect.stringContaining("ghost-1")]);
+  });
+
+  it("defaultModel 指向已删模型时回落到可用首模型并告警", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+      ],
+      defaultModel: "ghost-1",
+    };
+    const warnings: string[] = [];
+    const models = buildModelClient(config, undefined, { env: KEYS, onWarning: (w) => warnings.push(w) });
+    expect(pickMainModel(models, config, { env: KEYS })).toBe("a-1");
+    expect(warnings).toEqual([expect.stringContaining("ghost-1")]);
+  });
+
+  it("可用首厂商无模型时回落到下一个可用厂商的模型", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [] },
+        { id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B_API_KEY", models: [{ id: "b-1" }] },
+      ],
+    };
+    const models = buildModelClient(config, undefined, { env: KEYS });
+    expect(pickMainModel(models, config, { env: KEYS })).toBe("b-1");
+  });
+
+  it("pickMainModel：候选可解析时按 defaultModel > 链首 > 可用首模型取首个", () => {
+    const config: Config = {
+      logLevel: "info",
+      providers: [
+        { id: "a", baseUrl: "https://a.example.com", apiKeyEnv: "A_API_KEY", models: [{ id: "a-1" }] },
+        { id: "b", baseUrl: "https://b.example.com", apiKeyEnv: "B_API_KEY", models: [{ id: "b-1" }] },
+      ],
+      modelChain: ["a-1"],
+      defaultModel: "b-1",
+    };
+    const models = buildModelClient(config, undefined, { env: KEYS });
+    expect(pickMainModel(models, config, { env: KEYS })).toBe("b-1");
+  });
+
+  it("零可用厂商抛 NoProviderError（按错误类型判定，文案变动不影响引导态）", () => {
+    expect(() => buildModelClient(undefined, undefined, { env: KEYS })).toThrow(NoProviderError);
+    expect(() => buildModelClient(undefined, undefined, { env: KEYS })).toThrow("未配置任何可用厂商");
+    expect(() => resolveMainModel(undefined)).toThrow(NoProviderError);
+    expect(() => pickMainModel(new Models(), undefined, { env: KEYS })).toThrow(NoProviderError);
   });
 });
 

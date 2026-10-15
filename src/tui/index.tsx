@@ -23,7 +23,7 @@ import {
 } from "../bootstrap/assemble.js";
 import { attachRecorder, deleteTrace, readAgentOutcomes } from "../observability/index.js";
 import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
-import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../bootstrap/models.js";
+import { buildModelClient, NoProviderError, pickMainModel, resolveMainModel } from "../bootstrap/models.js";
 import { DEFAULT_CONTEXT_WINDOW, Models } from "../llm/index.js";
 import { NEW_SESSION_ID, initState } from "./state.js";
 import { rebuildUsageFromTrace, usageFromMessages } from "./usage.js";
@@ -119,19 +119,18 @@ export async function reloadOrDraftSession(
 /** 无可用模型时的占位模型 id（空串）：连接成功后 reconfigure 重建草稿或归位会话模型 */
 export const NO_MODEL_ID = "";
 
-/** /session 面板「新建会话」：主模型按重启同序从配置重解析
+/** /session 面板「新建会话」：主模型按首选序从配置解析
  *  （defaultModel > modelChain[0] > 兜底，见 resolveMainModel）。
  *  /model 面板 Ctrl+S 改默认模型只写盘、不重装配，故这里取最新配置重解析，
  *  不沿用装配期解析的旧主模型。
- *  defaultModel、modelChain[0]、可用首模型全取不到时（连接引导态）回占位模型
- *  建会话，不抛错退出；连接成功后 reconfigure 的模型归位会给它换上真模型。
+ *  零可用厂商（连接引导态）以占位模型建会话，不抛错退出；连接成功后 reconfigure 的
+ *  模型归位会给它换上真模型。
  *  纯函数便于层 1 测试。 */
 export async function createSwitchedSession(store: SessionStore, config: Config): Promise<Session> {
   let modelId: string;
   try {
     modelId = resolveMainModel(config);
-  } catch (err) {
-    if ((err as Error).message !== NO_PROVIDER_ERROR) throw err;
+  } catch {
     modelId = NO_MODEL_ID;
   }
   return store.createSession({ model: modelId });
@@ -141,8 +140,9 @@ export async function createSwitchedSession(store: SessionStore, config: Config)
  * 模型客户端装配（启动与 reconfigure 重装配共用）：零可用厂商不报错——返回空模型集合
  * + needsConnect，由 runTuiEntry 走 /connect 引导正常进入界面；其余装配错误原样上抛。
  * 引导态下 /settings、/mcp 应用也到达 reconfigure，按上述口径返回空模型集合与占位模型，
- * 不让 NO_PROVIDER_ERROR 逃出入口层退出进程。
- * modelChain 死条目等装配告警收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
+ * 不让 NoProviderError 逃出入口层退出进程。
+ * 主模型按候选序列取首个可解析者（defaultModel/modelChain 死条目回落，见 pickMainModel）。
+ * 装配告警（defaultModel/modelChain 死条目）收集返回，由 runTuiEntry 转界面提示（不 console 直写花屏）。
  * @param config 已加载配置（可省略，等同零厂商）
  * @returns models 模型客户端（可能为空）、modelId 主模型（无厂商时为 NO_MODEL_ID 占位）、
  *   needsConnect 是否进连接引导、warnings 装配告警列表
@@ -155,14 +155,10 @@ export function createModelsOrGuide(config?: Config): {
 } {
   const warnings: string[] = [];
   try {
-    return {
-      models: buildModelClient(config, undefined, { onWarning: (w) => warnings.push(w) }),
-      modelId: resolveMainModel(config),
-      needsConnect: false,
-      warnings,
-    };
+    const models = buildModelClient(config, undefined, { onWarning: (w) => warnings.push(w) });
+    return { models, modelId: pickMainModel(models, config), needsConnect: false, warnings };
   } catch (err) {
-    if ((err as Error).message !== NO_PROVIDER_ERROR) throw err;
+    if (!(err instanceof NoProviderError)) throw err;
     return { models: new Models(), modelId: NO_MODEL_ID, needsConnect: true, warnings };
   }
 }

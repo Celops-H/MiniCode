@@ -1,4 +1,4 @@
-import type { Config } from "../config/index.js";
+import type { Config, ProviderConfig } from "../config/index.js";
 import { PROVIDER_PRESETS } from "../config/presets.js";
 import { resolveAuth } from "../llm/auth.js";
 import { lookupModelLimits, type CatalogLookup } from "../llm/catalog.js";
@@ -10,12 +10,29 @@ import {
 } from "../llm/index.js";
 import type { AnthropicMessagesClient, AnthropicMessagesClientFactory, ChatCompletionsClient, ChatCompletionsClientFactory } from "../llm/index.js";
 
-/** 可用厂商为零时的启动报错（无任何兜底：列表里出现的模型一定有 key，无例外） */
-export const NO_PROVIDER_ERROR =
+/** 零可用厂商错误文案（列表里出现的模型一定有 key，无例外） */
+const NO_PROVIDER_ERROR =
   "未配置任何可用厂商：请 /connect 连接供应商（或配置对应 API key 环境变量），或编辑 ~/.minicode/config.json";
+
+/** 零可用厂商错误：装配期无 key 就绪的厂商时抛出。TUI 入口按 instanceof 判定进连接引导——
+ *  用错误类型而非文案比对，文案调整不会让引导态判定失效 */
+export class NoProviderError extends Error {
+  constructor() {
+    super(NO_PROVIDER_ERROR);
+    this.name = "NoProviderError";
+  }
+}
 
 /** 预设按 provider id 索引：能力位缺省回填用（存量配置兼容，见 buildModelClient） */
 const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
+
+/** key 就绪的厂商（配置落盘 apiKey 与环境变量同权，任一存在即可用）：无 key 的厂商不注册，
+ *  调用了也必然认证失败，进列表只会误导 /model 选择 */
+function usableProviders(config: Config | undefined, env: NodeJS.ProcessEnv): ProviderConfig[] {
+  return (config?.providers ?? []).filter(
+    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
+  );
+}
 
 /**
  * 按配置构建模型客户端：config 配置了 providers → 注册多厂商 Provider（按 provider
@@ -23,12 +40,12 @@ const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
  * 且优先级链总开关开启（modelChainEnabled 缺省开）并配置了 modelChain → 挂 ModelRouter
  * 优先级链路由；开关关闭时只用主模型，出错不再自动切备选。
  * 装配期逐 provider 查 apiKeyEnv（resolveAuth）：key 已配置才注册，未配置的不进
- * 模型列表（列表里出现的模型一定有 key，无例外）；可用厂商为零直接报错，不再回退
- * 硬编码兜底（删除文件重启即按预设重新播种，见 config/seed.ts）。
- * -m 指定时以其为主模型打头（配置的 modelChain 作为备选路由）；-m 未在配置中出现则
- * 显式报错，不静默忽略。modelChain 整链在装配期校验：主模型不可解析硬报错，
- * 其余条目不可解析经 onWarning 告警（运行时路由会跳过，见 Models.stream）；
- * 优先级链总开关关闭时链不参与运行时路由，链校验一并跳过。
+ * 模型列表（列表里出现的模型一定有 key，无例外）；可用厂商为零抛 NoProviderError
+ * 走连接引导，不再回退硬编码兜底（删除文件重启即按预设重新播种，见 config/seed.ts）。
+ * -m 指定时以其为主模型打头（配置的 modelChain 作为备选路由）；-m 不可解析则显式报错，
+ * 不静默忽略也不回落。defaultModel 与 modelChain 条目不可解析只告警不阻断（运行时按
+ * 候选顺序回落到首个可解析模型，见 pickMainModel）；优先级链总开关关闭时链不参与运行时
+ * 路由，链条目告警一并跳过。
  * @param config 配置（providers / modelChain 可选）
  * @param modelId 模型 id 覆盖（-m 选项），可省略
  * @param opts.env 环境变量注入（测试用；缺省读 process.env，宿主启动时已注入项目 .env）
@@ -36,8 +53,8 @@ const PRESET_BY_ID = new Map(PROVIDER_PRESETS.map((p) => [p.id, p]));
  *   缺省用各 Provider 的默认 SDK 工厂），可端到端断言配置 → 请求体的能力位接线
  * @param opts.catalog 模型目录查询注入（测试用；缺省查 models.dev 目录）：
  *   配置未写窗口/输出上限的模型按目录代查，仍未命中由消费方按兜底常量处理
- * @param opts.onWarning 装配告警回调（modelChain 死条目等非致命问题）；缺省输出到 stderr，
- *   TUI 宿主注入收集器转为界面提示（console 直写在全屏界面下会花屏）
+ * @param opts.onWarning 装配告警回调（defaultModel/modelChain 死条目等非致命问题）；
+ *   缺省输出到 stderr，TUI 宿主注入收集器转为界面提示（console 直写在全屏界面下会花屏）
  * @returns 注册了 Provider 的 Models 集合
  */
 export function buildModelClient(
@@ -52,18 +69,14 @@ export function buildModelClient(
   } = {},
 ): Models {
   const env = opts.env ?? process.env;
-  // key 过滤：无 key 的厂商不注册（调用了也必然认证失败，进列表只会误导 /model 选择）。
-  // 环境变量与配置落盘 apiKey 同权，任一存在即可用
-  const usable = (config?.providers ?? []).filter(
-    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
-  );
-  if (usable.length === 0) throw new Error(NO_PROVIDER_ERROR);
+  const usable = usableProviders(config, env);
+  if (usable.length === 0) throw new NoProviderError();
   // -m 存在时以其为主模型打头，配置的 modelChain 作备选路由。
   // 优先级链总开关（缺省开）：关闭时链不进装配（router 与 chain 都不给，Models 退化为
   // 单模型直连），出错不再自动切备选；链成员与顺序仍由 modelChain 定义，清空 modelChain
-  // 不是关闭方式。只拆路由不动主模型解析：defaultModel > modelChain[0] > 兜底的选取
-  // 照旧（见 resolveMainModel），链上不可解析条目的装配告警也随之跳过（链不参与运行时
-  // 路由，告警没有意义）
+  // 不是关闭方式。只拆路由不动主模型解析：defaultModel > modelChain[0] > 兜底的候选
+  // 照旧（见 mainModelCandidates），链上不可解析条目的装配告警也随之跳过（链不参与
+  // 运行时路由，告警没有意义）
   const chainEnabled = config?.modelChainEnabled ?? true;
   const chain = chainEnabled
     ? modelId
@@ -156,36 +169,75 @@ export function buildModelClient(
       );
     }
   }
-  // 主模型必须可解析：不在配置中则显式报错，避免会话运行时才「未知模型」崩溃
-  const main = resolveMainModel(config, modelId, { env });
-  if (!models.resolve(main)) {
+  // -m 显式指定时硬校验：用户点名的模型不可解析直接报错，不静默回落（其余路径按候选回退，
+  // 见 pickMainModel）
+  if (modelId && !models.resolve(modelId)) {
     throw new Error(
-      `模型 ${main} 不可用：请确认其所属厂商的 API key 已配置、模型在 providers 中，或调整 -m / defaultModel / modelChain`,
+      `模型 ${modelId} 不可用：请确认其所属厂商的 API key 已配置、模型在 providers 中，或调整 -m / defaultModel / modelChain`,
     );
   }
-  // modelChain 整链校验：主模型之外的条目不可解析（模型下线、所属厂商 key 已删后
-  // 未注册）只告警不阻断——运行时路由会跳过它们，但用户应在装配期就知道链上有死条目，
-  // 而不是等切换失败才看到被遮蔽的错误
+  // 候选条目（defaultModel、modelChain）不可解析只告警不阻断：运行时按候选顺序回落到首个
+  // 可解析模型，用户应在装配期就知道哪些条目是死的。链开关关闭时链不参与运行时路由，
+  // 链条目告警一并跳过（链不参与路由，告警没有意义）
   const onWarning = opts.onWarning ?? ((message: string) => console.error(message));
   const warned = new Set<string>();
-  for (const entry of chain ?? []) {
-    if (entry === main || warned.has(entry) || models.resolve(entry)) continue;
-    warned.add(entry);
-    onWarning(`模型链条目 ${entry} 不可解析：所属厂商 key 未配置或模型不在 providers 中，自动路由将跳过它`);
-  }
+  const warnIfDead = (id: string, label: string): void => {
+    if (warned.has(id) || models.resolve(id)) return;
+    warned.add(id);
+    onWarning(`${label} ${id} 不可解析：所属厂商 key 未配置或模型不在 providers 中，已按候选顺序跳过`);
+  };
+  for (const entry of chain ?? []) warnIfDead(entry, "模型链条目");
+  if (!modelId && config?.defaultModel) warnIfDead(config.defaultModel, "默认模型");
   return models;
 }
 
+/** 主模型候选序列（去重保序）：defaultModel > modelChain 顺序 > 可用首模型。
+ *  可用首模型取第一个「有模型」的可用厂商的模型（厂商 models 可为空数组，跳过它继续找）。 */
+function mainModelCandidates(config: Config | undefined, opts: { env?: NodeJS.ProcessEnv } = {}): string[] {
+  const usable = usableProviders(config, opts.env ?? process.env);
+  const fallback = usable.find((p) => p.models[0]);
+  return [
+    ...new Set([
+      ...(config?.defaultModel ? [config.defaultModel] : []),
+      ...(config?.modelChain ?? []),
+      ...(fallback?.models[0] ? [fallback.models[0].id] : []),
+    ]),
+  ];
+}
+
 /**
- * 解析会话主模型：-m 选项 > 默认模型（defaultModel，/model 面板 Ctrl+S 写全局配置）>
- * 优先级链首（modelChain[0]）> **key 就绪**的 providers 首个模型；都没有则报错
+ * 装配期主模型解析：按候选序列（defaultModel > modelChain 顺序 > 可用首模型）逐候选取首个
+ * 可解析者。defaultModel 或 modelChain 指向已删模型、所属厂商 key 已删时回落到后续候选，
+ * 不阻断启动（另有可用厂商即可用）；全部候选不可解析或无候选抛 NoProviderError。
+ * 不判可解析性的「首选」见 resolveMainModel（/session 新建等暂不持有模型集合的路径）。
+ * @param models 已注册的模型集合（buildModelClient 产物）
+ * @param config 配置
+ * @param opts.env 环境变量注入（测试用；缺省读 process.env）
+ * @returns 可解析的主模型 id
+ */
+export function pickMainModel(
+  models: Models,
+  config?: Config,
+  opts: { env?: NodeJS.ProcessEnv } = {},
+): string {
+  for (const candidate of mainModelCandidates(config, opts)) {
+    if (models.resolve(candidate)) return candidate;
+  }
+  throw new NoProviderError();
+}
+
+/**
+ * 解析会话首选主模型（纯函数，不判可解析性）：-m 选项 > 候选序列首个
+ * （defaultModel > modelChain[0] > 可用首模型）；无任何候选抛 NoProviderError
  * （无默认模型兜底，配置播种后种子 providers 必有模型）。
- * 「providers 首个」与 buildModelClient 的 key 过滤一致——未配置 key 的厂商不进
- * 注册集合，取它的模型做主模型只会启动失败。
+ * 「可用」与 buildModelClient 的 key 过滤一致——未配置 key 的厂商不进候选，
+ * 取它的模型做主模型只会启动失败。
+ * 首选条目不可解析时装配期按候选回退到下一个可解析者（见 pickMainModel）；需要该回退的
+ * 路径请用 pickMainModel，本函数供暂不持有模型集合的调用方（如 /session 新建）取首选。
  * @param config 配置
  * @param modelId -m 选项指定的模型 id，可省略
  * @param opts 环境变量注入（测试用；缺省读 process.env）
- * @returns 主模型 id
+ * @returns 首选主模型 id
  */
 export function resolveMainModel(
   config?: Config,
@@ -193,11 +245,7 @@ export function resolveMainModel(
   opts: { env?: NodeJS.ProcessEnv } = {},
 ): string {
   if (modelId) return modelId;
-  const env = opts.env ?? process.env;
-  const usable = (config?.providers ?? []).filter(
-    (p) => resolveAuth({ apiKeyEnv: p.apiKeyEnv, storedKey: p.apiKey, env }).auth.configured,
-  );
-  const main = config?.defaultModel ?? config?.modelChain?.[0] ?? usable[0]?.models[0]?.id;
-  if (!main) throw new Error(NO_PROVIDER_ERROR);
-  return main;
+  const first = mainModelCandidates(config, opts)[0];
+  if (!first) throw new NoProviderError();
+  return first;
 }
