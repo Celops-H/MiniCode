@@ -13,6 +13,27 @@ describe("危险命令检测", () => {
     expect(checkDangerousCommand("source script.sh").dangerous).toBe(true);
   });
 
+  it("剥包装与分组前缀后判内建（与只读守卫同口径）", () => {
+    // 分组符号与赋值前缀包住的危险内建照常命中
+    expect(checkDangerousCommand('(eval "x")').dangerous).toBe(true);
+    expect(checkDangerousCommand("((eval x))").dangerous).toBe(true);
+    expect(checkDangerousCommand("{ source script.sh").dangerous).toBe(true);
+    expect(checkDangerousCommand("FOO=1 eval x").dangerous).toBe(true);
+    // 包装命令（sudo/env/timeout/call）剥开后按真实命令词判定
+    expect(checkDangerousCommand("sudo eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("env FOO=1 eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("timeout 10 eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("@iex x", "cmd").dangerous).toBe(true);
+    // 点命令（source 别名）剥包装后同样命中
+    expect(checkDangerousCommand("( . script.sh )").dangerous).toBe(true);
+    // 剥包装后不是危险内建的照常放行
+    expect(checkDangerousCommand("(ls)").dangerous).toBe(false);
+    expect(checkDangerousCommand("FOO=1 ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("timeout 10 ls").dangerous).toBe(false);
+    // command -v/-V 只查询命令路径，不执行后续命令词
+    expect(checkDangerousCommand("command -v eval").dangerous).toBe(false);
+  });
+
   it(". 作为 source 别名危险，但隐藏文件不误报", () => {
     expect(checkDangerousCommand(". script.sh").dangerous).toBe(true);
     expect(checkDangerousCommand(".env").dangerous).toBe(false);

@@ -19,7 +19,13 @@
  * - 包管理器安装与脚本执行（pnpm install 等）、for 循环 do 内嵌命令、certutil -decode
  *   等其余执行与落盘形态未覆盖（缺口记录 request.md E190）。
  */
-import { resolveCommandShell, stripQuotedSpans, type CommandShellKind } from "./dangerous.js";
+import {
+  normalizeCommandWord,
+  resolveCommandShell,
+  stripCommandPrefix,
+  stripQuotedSpans,
+  type CommandShellKind,
+} from "./dangerous.js";
 
 /** 无文件写副作用、只读 agent 可用的状态类工具（协作调度与会话内任务管理） */
 const STATE_TOOL_ALLOW = new Set([
@@ -76,12 +82,6 @@ function bashWriteViolation(command: string, shell: CommandShellKind): string | 
   }
   return undefined;
 }
-
-/** 前缀命令的取值选项：其后一个 token 是该选项的参数，随选项一并跳过 */
-const PREFIX_VALUE_FLAGS = new Set([
-  "-u", "-g", "-C", "-p", "-T", "-D", "-R", "-S", "-w", "-f", "-n",
-  "--user", "--group", "--unset", "--split-string",
-]);
 
 /** shell 家族与 Windows 脚本宿主：调用即执行内层代码（-c 内联、脚本文件、stdin），整体拒绝 */
 const SCRIPT_HOST_WORDS = new Set(["sh", "bash", "dash", "zsh", "ksh", "fish", "cscript", "wscript"]);
@@ -155,70 +155,16 @@ function xargsVerdict(words: string[], idx: number, shell: CommandShellKind): st
 }
 
 /**
- * 命令词归一：取路径基名、剥首尾分组符号与 cmd 的 @ 静默前缀、剥 Windows 可执行后缀、转小写。
- * Windows 的可执行名查找不分大小写与分隔符（cmd.exe / C:\...\cmd.exe 与 cmd 等效），
- * 统一归一后比较，防拼写变体绕过（@del、括号包住的首词同为常见拼写形态）；
- * POSIX 下多余的大写形态本就不存在，按写拦不误伤。
- */
-function normalizeCommandWord(word: string): string {
-  const base = word.split(/[\\/]/).pop()!;
-  const cleaned = base.replace(/^[@({]+/, "").replace(/[)}]+$/, "");
-  return cleaned.replace(/\.(exe|com|cmd|bat)$/i, "").toLowerCase();
-}
-
-/**
- * 单个命令段的写判定：跳过变量赋值前缀与 sudo/env/nohup 等包装命令
- * （含其选项与选项参数），按真实命令词查黑名单。
+ * 单个命令段的写判定：剥开段首包装与分组符号（与危险命令检查同口径，
+ * 见 dangerous.ts stripCommandPrefix），按真实命令词查黑名单。
  * @param words 命令段分词（非空）
  * @param shell 命令实际执行方的 shell 语义（sc 的别名二义判定用）
  * @returns 违规原因；只读安全返回 undefined
  */
 function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
-  let rest = [...words];
-  // 外层循环：连乘的包装（sudo env FOO=1 cmd）逐层剥开
-  while (rest.length > 0) {
-    // 段首的独立分组符号词逐层剥干净（( rm x)、{ rm x、@ del x——含剥包装后露出的
-    // call ( del x），首词判定看其后真实命令词
-    while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
-    if (rest.length === 0) break;
-    const head = normalizeCommandWord(rest[0]!);
-    // command 的旗标只有 -p/-v/-V（可组合，如 -pv）：带 -v/-V 是查询命令路径，不执行
-    // 后续词，整体放行；只有 -p 时剥掉 command 与其旗标（-p 用默认 PATH 执行后续命令），
-    // 按后续命令词继续判定。单列处理避免共享取值旗标表把 -v 当成 -p 的参数吞掉
-    if (head === "command") {
-      let i = 1;
-      let queried = false;
-      while (i < rest.length && /^-[pvV]+$/.test(rest[i]!)) {
-        if (/[vV]/.test(rest[i]!)) queried = true;
-        i++;
-      }
-      // bash 内建的 -- 结束选项标记：与旗标一并剥掉后按后续命令词判定
-      if (rest[i] === "--") i++;
-      if (queried) return undefined;
-      rest.splice(0, i);
-      continue;
-    }
-    const isWrapper =
-      /^[A-Za-z_][A-Za-z0-9_]*=/.test(head) ||
-      head === "sudo" || head === "env" || head === "nohup" || head === "nice" ||
-      head === "stdbuf" || head === "timeout" || head === "call";
-    if (!isWrapper) break;
-    rest.shift();
-    // timeout 的首参数是时长（timeout 10 rm x），随包装一并剥掉
-    if (head === "timeout" && /^\d+[smhd]?$/.test(rest[0] ?? "")) rest.shift();
-    // 剥包装后继续吞选项与赋值；取值选项连参数一起吞
-    while (rest.length > 0) {
-      const word = rest[0]!;
-      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
-        rest.shift();
-      } else if (word.startsWith("-")) {
-        rest.shift();
-        if (PREFIX_VALUE_FLAGS.has(word)) rest.shift();
-      } else {
-        break;
-      }
-    }
-  }
+  const { rest, queried } = stripCommandPrefix(words);
+  // command -v/-V 只查询命令路径，不执行后续词
+  if (queried) return undefined;
   const first = rest[0] === undefined ? undefined : normalizeCommandWord(rest[0]);
   if (!first) return undefined;
   // shell 家族与 Windows 脚本宿主：-c 内联、脚本文件、stdin 都是无法核验的内层代码，

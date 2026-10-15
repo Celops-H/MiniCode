@@ -64,23 +64,23 @@ export function stripQuotedSpans(command: string): string {
 
 /**
  * 检测命令是否危险（硬编码黑名单 + 正则模式）。
+ * 内建名判定先剥包装命令、变量赋值与分组符号，再按段首真实命令词判
+ * （与只读守卫同口径，防 `sudo eval`、`FOO=1 eval`、`(eval x)` 等形态绕过首词判定）。
  * @param command 待检测的命令原文
  * @param shell 实际执行方的 shell 语义（resolveCommandShell 的归类），缺省按 bash 全量判定
  * @returns 检测结果（是否危险 + 危险原因）
  */
 export function checkDangerousCommand(command: string, shell: CommandShellKind = "bash"): DangerousCheckResult {
-  // 内建名按小写比较：Windows 可执行名查找不分大小写，EVAL 与 eval 等效
-  const trimmed = command.trimStart().toLowerCase();
-
-  for (const builtin of DANGEROUS_BUILTINS) {
-    if (startsWithBuiltin(trimmed, builtin)) {
-      return { dangerous: true, reason: `危险内建命令：${builtin}` };
+  const head = commandHeadWord(command);
+  if (head !== undefined) {
+    if (DANGEROUS_BUILTINS.includes(head)) {
+      return { dangerous: true, reason: `危险内建命令：${head}` };
     }
-  }
-
-  // `. script` 是 source 别名（点 + 空格）；`.foo`（隐藏文件）不危险
-  if (/^\.\s/.test(trimmed)) {
-    return { dangerous: true, reason: "危险内建命令：.（source 别名）" };
+    // 段首 `.` 是 source 别名（`. script` 点与脚本名分写成两个词）；
+    // `.foo`（隐藏文件）与 `./x`（相对路径）归一后首词不是 `.`，不危险
+    if (head === ".") {
+      return { dangerous: true, reason: "危险内建命令：.（source 别名）" };
+    }
   }
 
   for (const { pattern, reason, quoteStrippedCommand, shells } of DANGEROUS_PATTERNS) {
@@ -94,16 +94,84 @@ export function checkDangerousCommand(command: string, shell: CommandShellKind =
   return { dangerous: false };
 }
 
-/**
- * 判断命令是否以某个内建命令开头。
- * @param command 命令原文
- * @param builtin 内建命令名
- * @returns 是否以该内建命令开头（后跟空白或结尾）
- */
-function startsWithBuiltin(command: string, builtin: string): boolean {
-  return new RegExp(`^${escapeRegExp(builtin)}(\\s|$)`).test(command);
+/** 命令段首真实命令词：剥包装、赋值与分组符号后归一取首词；空命令返回 undefined */
+function commandHeadWord(command: string): string | undefined {
+  const words = command.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return undefined;
+  const { rest, queried } = stripCommandPrefix(words);
+  if (queried || rest.length === 0) return undefined;
+  return normalizeCommandWord(rest[0]!);
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** 前缀命令的取值选项：其后一个 token 是该选项的参数，随选项一并跳过 */
+const PREFIX_VALUE_FLAGS = new Set([
+  "-u", "-g", "-C", "-p", "-T", "-D", "-R", "-S", "-w", "-f", "-n",
+  "--user", "--group", "--unset", "--split-string",
+]);
+
+/** 包装命令：不改写后续命令词，剥开按真实命令词判定（sudo/env/nohup 等，跨 shell 归并） */
+const WRAPPER_COMMANDS = new Set(["sudo", "env", "nohup", "nice", "stdbuf", "timeout", "call"]);
+
+/**
+ * 命令词归一：取路径基名、剥首尾分组符号与 cmd 的 @ 静默前缀、剥 Windows 可执行后缀、转小写。
+ * Windows 的可执行名查找不分大小写与分隔符（cmd.exe / C:\...\cmd.exe 与 cmd 等效），
+ * 统一归一后比较，防拼写变体绕过（@del、括号包住的首词同为常见拼写形态）；
+ * POSIX 下多余的大写形态本就不存在，按写拦不误伤。
+ */
+export function normalizeCommandWord(word: string): string {
+  const base = word.split(/[\\/]/).pop()!;
+  const cleaned = base.replace(/^[@({]+/, "").replace(/[)}]+$/, "");
+  return cleaned.replace(/\.(exe|com|cmd|bat)$/i, "").toLowerCase();
+}
+
+/**
+ * 剥开命令段首的包装与分组：分组符号词、变量赋值前缀、包装命令（含选项与取值选项的参数）。
+ * 与只读守卫共用同一口径，防连乘包装（sudo env FOO=1 cmd）绕过首词判定。
+ * @param words 命令段分词（含包装前缀）
+ * @returns rest 剥开后的词表；queried 为 true 表示 command -v/-V 只查询命令路径、不执行后续词
+ */
+export function stripCommandPrefix(words: string[]): { rest: string[]; queried: boolean } {
+  const rest = [...words];
+  // 外层循环：连乘的包装（sudo env FOO=1 cmd）逐层剥开
+  while (rest.length > 0) {
+    // 段首的独立分组符号词逐层剥干净（( rm x)、{ rm x、@ del x——含剥包装后露出的
+    // call ( del x），首词判定看其后真实命令词
+    while (rest.length > 0 && /^[@({]+$/.test(rest[0]!)) rest.shift();
+    if (rest.length === 0) break;
+    const head = normalizeCommandWord(rest[0]!);
+    // command 的旗标只有 -p/-v/-V（可组合，如 -pv）：带 -v/-V 是查询命令路径，不执行
+    // 后续词，整体按查询放行；只有 -p 时剥掉 command 与其旗标（-p 用默认 PATH 执行后续命令）
+    if (head === "command") {
+      let i = 1;
+      let query = false;
+      while (i < rest.length && /^-[pvV]+$/.test(rest[i]!)) {
+        if (/[vV]/.test(rest[i]!)) query = true;
+        i++;
+      }
+      // bash 内建的 -- 结束选项标记：与旗标一并剥掉后按后续命令词判定
+      if (rest[i] === "--") i++;
+      if (query) return { rest, queried: true };
+      rest.splice(0, i);
+      continue;
+    }
+    const isWrapper =
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || WRAPPER_COMMANDS.has(head);
+    if (!isWrapper) break;
+    rest.shift();
+    // timeout 的首参数是时长（timeout 10 rm x），随包装一并剥掉
+    if (head === "timeout" && /^\d+[smhd]?$/.test(rest[0] ?? "")) rest.shift();
+    // 剥包装后继续吞选项与赋值；取值选项连参数一起吞
+    while (rest.length > 0) {
+      const word = rest[0]!;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
+        rest.shift();
+      } else if (word.startsWith("-")) {
+        rest.shift();
+        if (PREFIX_VALUE_FLAGS.has(word)) rest.shift();
+      } else {
+        break;
+      }
+    }
+  }
+  return { rest, queried: false };
 }
