@@ -591,6 +591,28 @@ describe("只读 agent 写拦截判定（包管理器与临时包执行）", () 
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });
+
+  it("子命令前的取值旗标连其参数一并跳过，取真实子命令判定", () => {
+    for (const command of [
+      "pnpm --filter ls run build",
+      "pnpm --filter web add lodash",
+      "pnpm -F web dlx cowsay",
+      "npm --prefix . install",
+      "npm --registry https://r add x",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeDefined();
+    }
+    for (const command of [
+      "npm --prefix . ls",
+      "pnpm --filter web ls",
+      "pnpm --filter=web list",
+      "pnpm -F web list",
+      "npm --registry https://r view react",
+      "npm --loglevel warn outdated",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
 });
 
 describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {

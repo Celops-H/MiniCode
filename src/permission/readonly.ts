@@ -140,6 +140,30 @@ const PKG_INSTALL_SUBCOMMANDS = new Set([
 /** 包管理器脚本执行子命令：跑 package.json 脚本、临时包或任意二进制 */
 const PKG_EXEC_SUBCOMMANDS = new Set(["run", "run-script", "exec", "x", "dlx"]);
 
+/** 包管理器子命令之前的取值旗标：其后一个词是旗标参数，不是子命令（--prefix . ls 的 .） */
+const PKG_VALUE_FLAGS = new Set([
+  "-C", "--prefix", "--registry", "--cache", "--cache-folder", "--userconfig", "--globalconfig",
+  "--loglevel", "--location", "--otp", "--tag", "--workspace", "--omit", "--include", "--depth",
+  "--filter", "-F", "--dir", "--cwd", "--reporter", "--store-dir", "--mutex",
+  "--script-shell", "--node-options", "--network-timeout", "--fetch-timeout",
+]);
+
+/**
+ * 包管理器子命令词：跳过旗标，取值旗标连其参数一并跳过。
+ * 裸「-」是 stdin 脚本，按操作数位取（bun -），不随选项一起跳过。
+ * @param args 包管理器词之后的词
+ * @returns 子命令词（小写）；无子命令返回 undefined
+ */
+function packageSubcommand(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i]!;
+    if (w === "-") return "-";
+    if (!w.startsWith("-")) return w.toLowerCase();
+    if (PKG_VALUE_FLAGS.has(w)) i++;
+  }
+  return undefined;
+}
+
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
  *  变量，perl 的 -E 才是内联执行），按命令词分设；命中一行流即放行，否则出现脚本操作数即拒绝 */
 const INTERPRETER_INLINE_FLAGS: Record<string, (word: string) => boolean> = {
@@ -351,8 +375,7 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (PACKAGE_EXEC_WORDS.has(first)) return `写命令 ${first}（临时包执行无法核验）`;
   if (PACKAGE_MANAGER_WORDS.has(first)) {
     const args = rest.slice(1);
-    // 裸「-」是 stdin 脚本（bun -），按操作数位取，不随选项一起跳过
-    const sub = args.find((w) => w === "-" || !w.startsWith("-"))?.toLowerCase();
+    const sub = packageSubcommand(args);
     // 裸 yarn 与只带非查询旗标的调用等于 yarn install（npm/pnpm/corepack 裸用只打印帮助）
     if (sub === undefined) {
       const onlyQueryFlag = args.length > 0 && args.every((w) => /^(-v|--version|-h|--help)$/.test(w));
