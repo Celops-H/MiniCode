@@ -21,7 +21,7 @@ import {
   resolveAgentsEnabled,
   MINICODE_VERSION,
 } from "../bootstrap/assemble.js";
-import { attachRecorder, deleteTrace } from "../observability/index.js";
+import { attachRecorder, deleteTrace, readAgentOutcomes } from "../observability/index.js";
 import { attachHookLogging, hookHandlerErrorText } from "../logger/index.js";
 import { buildModelClient, NO_PROVIDER_ERROR, resolveMainModel } from "../bootstrap/models.js";
 import { DEFAULT_CONTEXT_WINDOW, Models } from "../llm/index.js";
@@ -397,13 +397,17 @@ async function runTuiSession(opts: {
       compactThreshold: compactConfig.contextWindow - compactConfig.maxOutputTokens - compactConfig.safetyMargin,
       rebuildExtras: async () => {
         // 降级顺序：轨迹（全量含子 agent）→ 会话 meta.usage（仅主 agent、无缓存段）→ 无数据
-        const rebuilt = await rebuildUsageFromTrace(
-          path.join(tracesDir, `${session.meta.id}.jsonl`),
-          (id) => models.resolve(id)?.model.api,
-        );
+        const traceFile = path.join(tracesDir, `${session.meta.id}.jsonl`);
+        // 两遍读盘（用量与子 agent 终态各一片）并行发出，不叠加等待
+        const [rebuilt, agentOutcomes] = await Promise.all([
+          rebuildUsageFromTrace(traceFile, (id) => models.resolve(id)?.model.api),
+          // 子 agent 终态层：补注入消息覆盖不到的终态（未消费的 INTERRUPTED 标记、孙 agent 结论）
+          readAgentOutcomes(traceFile),
+        ]);
         return {
           usage: rebuilt.usage ?? usageFromMessages(session.getMessages()),
           toolDurations: rebuilt.toolDurations,
+          agentOutcomes,
         };
       },
       assemble: ({ approver, feedRoot }) => {

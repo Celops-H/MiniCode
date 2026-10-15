@@ -26,7 +26,7 @@ import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
 import { App } from "./view/App.js";
 import { interact } from "../bootstrap/interact.js";
-import { deleteTrace } from "../observability/index.js";
+import { deleteTrace, type AgentOutcome } from "../observability/index.js";
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./win32.js";
 import { attachCursorPositioning } from "./cursor.js";
 import type { Agent, Team } from "../agent/index.js";
@@ -130,10 +130,16 @@ export interface TuiLoopOptions {
   compactThreshold?: number;
   /**
    * 恢复重建（重建视图时调用一次）：状态行用量按降级顺序重建
-   * （轨迹 → 会话 meta.usage）+ 工具耗时按 toolCallId 从轨迹回填；
+   * （轨迹 → 会话 meta.usage）+ 工具耗时按 toolCallId 从轨迹回填 +
+   * 子 agent 终态层按轨迹补（注入消息覆盖不到的路径）；
    * carry 续接（reconfigure）不调用，用量随界面状态原样续接
    */
-  rebuildExtras?: () => Promise<{ usage?: UsageSummary; toolDurations?: Map<string, number> }>;
+  rebuildExtras?: () => Promise<{
+    usage?: UsageSummary;
+    toolDurations?: Map<string, number>;
+    /** 轨迹补充的子 agent 终态层（未消费的 INTERRUPTED 标记、孙 agent 结论） */
+    agentOutcomes?: AgentOutcome[];
+  }>;
   /** hook 命令 stderr 输出通道：入口层创建的可变盒子，runTui 挂载后指向 toast；
    *  全屏渲染下 hook stderr 直写会插花渲染帧，TUI 形态落 toast */
   hookStderr?: { value?: (text: string) => void };
@@ -229,7 +235,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     if (options.resetView !== false) {
       setState(
         reconcile({
-          ...(options.carryState ?? initState(session.getMessages(), session.meta.title, undefined, extras?.toolDurations)),
+          ...(options.carryState ??
+            initState(
+              session.getMessages(),
+              session.meta.title,
+              undefined,
+              extras?.toolDurations,
+              extras?.agentOutcomes,
+            )),
           modelLabel,
           // 权限模式跨会话持久（modeBox 活读）：状态行显示与实际裁决一致——
           // 此前 resetView 重建 state 硬编码 default，plan/auto 下切会话显示失真
@@ -248,7 +261,14 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     }
   } else {
     const [ownedState, ownedSetState] = createStore<TuiState>(
-      options.carryState ?? initState(session.getMessages(), session.meta.title, modelLabel, extras?.toolDurations),
+      options.carryState ??
+        initState(
+          session.getMessages(),
+          session.meta.title,
+          modelLabel,
+          extras?.toolDurations,
+          extras?.agentOutcomes,
+        ),
     );
     state = ownedState;
     setState = ownedSetState;

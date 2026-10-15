@@ -7,6 +7,7 @@
 import { COMMAND_MARKER, modelErrorText, type Message } from "../core/index.js";
 import { INIT_PROMPT_PREFIX } from "../context/index.js";
 import { parseMailText } from "../agent/mailbox.js";
+import type { AgentOutcome } from "../observability/index.js";
 import type { StreamEvent } from "../core/index.js";
 import type { HookEvent } from "../hooks/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -439,11 +440,22 @@ export function selectedPromptText(p: PromptState): string {
  *  或该调用被中断（无 PostToolUse）时无条目、卡片不显示耗时
  *  多 agent 协作历史：带 agentPath 的注入消息（子 agent 结论/中断回灌）重演为 agent 活动
  *  行并重建 agent 树条目（路径全路径无歧义），不再以「你」消息块铺全文；终态取该路径
- *  最后一次终态注入（先中断后结论 = 完成） */
-export function initState(messages: Message[], title = "", modelLabel = "", toolDurations?: Map<string, number>): TuiState {
+ *  最后一次终态注入（先中断后结论 = 完成）
+ *  agentOutcomes：注入消息之外的轨迹补充层。注入消息只覆盖回灌过父的层——未消费的
+ *  INTERRUPTED 标记随收件箱丢弃、孙 agent 的结论只落在中间父的子会话文件，两层都只
+ *  在轨迹里有终态；按轨迹终态补活动行与树条目，已有同态终态注入的路径不重复 */
+export function initState(
+  messages: Message[],
+  title = "",
+  modelLabel = "",
+  toolDurations?: Map<string, number>,
+  agentOutcomes?: AgentOutcome[],
+): TuiState {
   const blocks: BlockView[] = [];
   /** 重建的 agent 树条目：路径 → 终态（按注入顺序建，/root 恒在首位） */
   const agentNodes = new Map<string, AgentNode>();
+  /** 有终态注入邮件的路径（轨迹补充层据此判「该路径的最后终态是否已由消息给出」） */
+  const terminalPaths = new Set<string>();
   const msgTime = (m: Message): string | undefined => {
     if (!m.timestamp) return undefined;
     const t = new Date(m.timestamp);
@@ -470,6 +482,7 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
             // 失败终态邮件（FAILED）重建为失败活动行与失败树条目，与 live 的红字「失败」同态
             const failed = mail.type === "FAILED";
             node.status = failed ? "failed" : "completed";
+            terminalPaths.add(message.agentPath);
             blocks.push({
               kind: "agent",
               event: failed ? "failed" : "completed",
@@ -480,6 +493,7 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
             });
           } else if (mail.type === "INTERRUPTED") {
             node.status = "interrupted";
+            terminalPaths.add(message.agentPath);
             blocks.push({ kind: "agent", event: "interrupted", path: message.agentPath, tools: [], collapsed: true });
           }
           continue;
@@ -569,6 +583,38 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
         time: msgTime(message),
       });
     }
+  }
+  // 轨迹补充层：注入消息覆盖不到的终态按轨迹补（未消费的 INTERRUPTED 标记、孙 agent
+  // 结论只在轨迹里有终态）。已有终态注入且与轨迹同态的路径不重复——注入邮件是该路径
+  // 最后终态，保留其结论文本与所在位置；终态邮件只有进度汇报（MESSAGE）或已被后续
+  // 终态取代时，轨迹给出的才是最后终态，补新段
+  for (const outcome of agentOutcomes ?? []) {
+    if (outcome.path === "/root") continue;
+    const node = agentNodes.get(outcome.path);
+    if (node && terminalPaths.has(outcome.path) && node.status === outcome.outcome) continue;
+    if (node) {
+      node.status = outcome.outcome;
+    } else {
+      agentNodes.set(outcome.path, {
+        path: outcome.path,
+        status: outcome.outcome,
+        spawnedAt: null,
+        completedAt: null,
+      });
+    }
+    if (outcome.outcome === "interrupted") {
+      blocks.push({ kind: "agent", event: "interrupted", path: outcome.path, tools: [], collapsed: true });
+      continue;
+    }
+    blocks.push({
+      kind: "agent",
+      event: outcome.outcome,
+      path: outcome.path,
+      tools: [],
+      collapsed: true,
+      ...(outcome.conclusion !== undefined ? { conclusion: outcome.conclusion } : {}),
+      ...(outcome.mergeResult !== undefined ? { mergeResult: outcome.mergeResult } : {}),
+    });
   }
   return {
     blocks,
