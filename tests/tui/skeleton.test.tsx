@@ -313,11 +313,31 @@ it("工具事件无运行中段：并入最近段不新开（防悬空），无�
   expect(agentSegments(s)).toHaveLength(1);
   expect(agentSegments(s)[0]).toMatchObject({ event: "completed" });
   expect(agentSegments(s)[0]!.tools).toHaveLength(1);
-  // 该路径一个段都没有（派生事件缺失）：补开运行段承接，仍不落主消息流工具卡
+  // 该路径一个段都没有（派生事件缺失）：补开运行段承接，仍不落主消息流工具卡，
+  // 且同步登记底栏树（派生事件缺失时只补消息区会让 Esc 的 hasRunningAgent 看不见）
   let d = reduceHook(initState([]), { type: "PreToolUse", toolCallId: "c9", toolName: "read", input: {}, agentPath: "/root/gone" });
   expect(d.blocks.some((b) => b.kind === "tool")).toBe(false);
   expect(agentSegments(d)).toHaveLength(1);
   expect(agentSegments(d)[0]).toMatchObject({ event: "running", path: "/root/gone" });
+  expect(d.agents).toEqual([
+    { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+    { path: "/root/gone", status: "running", spawnedAt: null, completedAt: null },
+  ]);
+  expect(hasRunningAgent(d.agents)).toBe(true);
+  // 该路径已有条目但无对应段（恢复重建只收到 MESSAGE 邮件：树有条目、消息区无段）：
+  // 补段复用原条目、清完成时刻转运行态（保留派生时刻），不追加重复节点
+  const desync: TuiState = {
+    ...initState([]),
+    agents: [
+      { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+      { path: "/root/rev", status: "completed", spawnedAt: 5, completedAt: 9 },
+    ],
+  };
+  const revived = reduceHook(desync, { type: "PreToolUse", toolCallId: "k1", toolName: "read", input: {}, agentPath: "/root/rev" });
+  expect(revived.agents).toEqual([
+    { path: "/root", status: "running", spawnedAt: null, completedAt: null },
+    { path: "/root/rev", status: "running", spawnedAt: 5, completedAt: null },
+  ]);
 });
 
 it("hasRunningAgent：主 agent 或 completed/interrupted 不算，运行中的子 agent 才算", () => {

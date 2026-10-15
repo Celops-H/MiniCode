@@ -975,7 +975,7 @@ function upsertAgentToolLine(
  *  跨轮复用，按 id 找到旧段会把新调用错挂过去。
  *  并入的段：运行中段正常；终态段（事件序异常/丢终态后到的工具事件）也并入，
  *  不新开运行段（新段没有收束事件，会永远停在「运行中」）。
- *  该路径一个段都没有（派生事件缺失）时才补一段承接，
+ *  该路径一个段都没有（派生事件缺失）时才补一段承接，并同步登记底栏树，
  *  保证子 agent 工具事件永不落成主消息流工具卡 */
 function applyAgentToolCall(
   state: TuiState,
@@ -999,8 +999,14 @@ function applyAgentToolCall(
     const updated = upsertAgentToolLine(latest, id, update);
     return { ...state, blocks: state.blocks.map((b, k) => (k === latestIndex ? updated : b)) };
   }
+  // 补段承接（该路径一个段都没有）：同时登记底栏树，同 AgentSpawned 口径——
+  // 派生事件缺失时只补消息区段会让树看不到该 agent，无终态事件收束时长期停在「运行中」，
+  // 且 Esc 的 hasRunningAgent 看不见、无法级联中断
   return {
     ...state,
+    agents: state.agents.some((a) => a.path === path)
+      ? state.agents.map((a) => (a.path === path ? { ...a, status: "running" as const, completedAt: null } : a))
+      : [...state.agents, { path, status: "running", spawnedAt: null, completedAt: null }],
     blocks: [...state.blocks, { kind: "agent", event: "running", path, tools: [update(undefined)], collapsed: true }],
   };
 }
