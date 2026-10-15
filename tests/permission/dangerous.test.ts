@@ -82,6 +82,28 @@ describe("危险命令检测", () => {
     expect(checkDangerousCommand("env -i ls").dangerous).toBe(false);
   });
 
+  it("剥段首 shell 关键字及其选项后判内建（do/then/time/! 不遮蔽危险内建）", () => {
+    // 循环体与分支体在 do/then 段，段首是关键字不是命令词
+    expect(checkDangerousCommand("for f in a b; do eval $f; done").dangerous).toBe(true);
+    expect(checkDangerousCommand("if x; then source f; fi").dangerous).toBe(true);
+    expect(checkDangerousCommand("while read l; do . cfg; done").dangerous).toBe(true);
+    // time/exec/! 是修饰词，其选项排在命令词之前（-p、-a name）
+    expect(checkDangerousCommand("time eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("time -p eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("exec -a n eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("! eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("time ! eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("for f in a b; do eval $f; done").reason).toContain("eval");
+    // 关键字段首、内层是普通命令的照常放行
+    expect(checkDangerousCommand("for f in a b; do echo $f; done").dangerous).toBe(false);
+    expect(checkDangerousCommand("if x; then ls; fi").dangerous).toBe(false);
+    expect(checkDangerousCommand("while read l; do cat $l; done").dangerous).toBe(false);
+    expect(checkDangerousCommand("time ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("time -p ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("exec -a n ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("! ls").dangerous).toBe(false);
+  });
+
   it("命令替换危险", () => {
     expect(checkDangerousCommand("echo $(whoami)").dangerous).toBe(true);
     expect(checkDangerousCommand("echo `whoami`").dangerous).toBe(true);

@@ -127,6 +127,9 @@ describe("只读 agent 写拦截判定", () => {
       "time sudo rm x",
       "sudo time rm x",
       "time ! rm x",
+      // 修饰词的选项排在命令词之前：剥关键字后连选项一并剥掉
+      "time -p rm x",
+      "exec -a n rm x",
       "cat f | while read l; do tee out; done",
     ]) {
       expect(readOnlyWriteShell(command, "bash"), command).toBeDefined();
@@ -148,6 +151,10 @@ describe("只读 agent 写拦截判定", () => {
       "! ls",
       "! git log",
       "sudo time ls",
+      // 剥关键字与选项后是只读命令，照常放行
+      "time -p ls",
+      "exec -a n ls",
+      "time -p git status",
     ]) {
       expect(readOnlyWriteShell(command, "bash"), command).toBeUndefined();
     }
@@ -368,6 +375,29 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
       "type report (copy).txt",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
+    }
+  });
+
+  it("PowerShell 花括号分组取内层命令判定：if/foreach 分组内的写命令照常命中", () => {
+    for (const command of [
+      "if ($x) { Remove-Item f }",
+      "foreach ($f in $fs) { rm $f }",
+      "if (Test-Path x) { Set-Content y z }",
+      "while ($true) { New-Item x }",
+      "if ($a) { echo same } else { del f }",
+      "(if ($x) { del f })",
+    ]) {
+      expect(readOnlyWriteShell(command, "powershell"), command).toBeDefined();
+    }
+    expect(readOnlyWriteShell("foreach ($f in $fs) { rm $f }", "powershell")).toMatch(/写命令 rm/);
+    for (const command of [
+      "if ($x) { Get-ChildItem f }",
+      "foreach ($f in $fs) { Write-Output $f }",
+      "if ($x) { echo hi }",
+      "Get-ChildItem | Where-Object { $_.Name -like '*.ts' }",
+      "Select-String -Pattern x { $_.Line }",
+    ]) {
+      expect(readOnlyWriteShell(command, "powershell"), command).toBeUndefined();
     }
   });
 

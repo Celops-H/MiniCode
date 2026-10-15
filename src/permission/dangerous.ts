@@ -72,10 +72,59 @@ export function stripQuotedSpans(command: string, shell: CommandShellKind = "bas
 }
 
 /**
+ * 命令段切分：按 ; | & 与换行切开，取各段首词前的公共步骤。
+ * 危险命令检查与只读守卫同一口径，cmd 的 if/for 括号分组与 PowerShell 的花括号分组
+ * 由调用方在段内再切（见 readonly.ts bashWriteViolation）。
+ * @param command 引号段已剔除的命令原文
+ * @returns 命令段列表
+ */
+export function splitCommandSegments(command: string): string[] {
+  return command.split(/[|;&\n]/);
+}
+
+/** bash 与 PowerShell 的段首关键字：语句结构词与执行修饰词本身不是命令词。
+ *  do/then/else/elif/if/while/until/for 是语句结构词（命令按 ;|& 切段后各自单独成段，
+ *  循环与分支体在 do/then/else 段；if/while/until/for 段的命令是条件式）；
+ *  time 计时、exec 替换进程、! 取反退出码是修饰词。按归一后小写匹配：这些词在 shell 里
+ *  都是小写形态，误剥同名普通命令只会保守多拦，方向安全。 */
+export const SHELL_KEYWORDS = new Set([
+  "do", "then", "else", "elif", "if", "while", "until", "for", "time", "exec", "!",
+]);
+
+/** 段首修饰词的取值选项：其后一个 token 是该选项的参数，随选项一并剥掉
+ *  （exec -a name cmd 的 name）。语句结构词不带选项，不入表。 */
+const SHELL_KEYWORD_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
+  exec: new Set(["-a"]),
+};
+
+/**
+ * 剥除段首的 bash/PowerShell 关键字，露出真实命令词。
+ * 关键字可连乘（time ! cmd），逐层剥干净；关键字后跟的选项一并剥掉
+ * （time -p rm x、exec -a name rm x），取值选项连其参数一起剥。
+ * @param words 命令段分词
+ * @returns 剥除后的词表
+ */
+export function stripShellKeywords(words: string[]): string[] {
+  const rest = [...words];
+  while (rest.length > 0) {
+    const keyword = normalizeCommandWord(rest[0]!);
+    if (!SHELL_KEYWORDS.has(keyword)) break;
+    rest.shift();
+    const valueFlags = SHELL_KEYWORD_VALUE_FLAGS[keyword];
+    while (rest.length > 0 && rest[0]!.startsWith("-")) {
+      const option = rest.shift()!;
+      if (valueFlags?.has(option)) rest.shift();
+    }
+  }
+  return rest;
+}
+
+/**
  * 检测命令是否危险（硬编码黑名单 + 正则模式）。
- * 内建名判定按 ; | & 与换行切段，逐段剥包装命令、变量赋值与分组符号后取段首真实命令词
- * （与只读守卫同口径，防 `sudo eval`、`FOO=1 eval`、`printf x; eval "$y"`、多行 `. cfg`
- * 等形态绕过首词判定）；切段前先按 shell 语义剔除引号段，防引号内字面文本误判。
+ * 内建名判定按 ; | & 与换行切段，逐段剥段首关键字、包装命令、变量赋值与分组符号后取段首
+ * 真实命令词（与只读守卫同口径，防 `sudo eval`、`FOO=1 eval`、`printf x; eval "$y"`、
+ * `do eval $f`、`time eval x`、多行 `. cfg` 等形态绕过首词判定）；
+ * 切段前先按 shell 语义剔除引号段，防引号内字面文本误判。
  * @param command 待检测的命令原文
  * @param shell 实际执行方的 shell 语义（resolveCommandShell 的归类），缺省按 bash 全量判定
  * @returns 检测结果（是否危险 + 危险原因）
@@ -106,17 +155,18 @@ export function checkDangerousCommand(command: string, shell: CommandShellKind =
 /**
  * 各命令段段首的真实命令词：按 ; | & 与换行切段（与只读守卫同口径），
  * 切段前先按 shell 语义剔除引号段，引号内的分隔符与内建名是字面文本不参与判定；
- * 再逐段剥包装、赋值与分组符号后归一取首词。空段与纯赋值段跳过。
+ * 再逐段剥段首关键字（do/then/time/! 等，见 stripShellKeywords）、
+ * 包装、赋值与分组符号后归一取首词。空段与纯赋值段跳过。
  * @param command 命令原文
  * @param shell 实际执行方的 shell 语义（引号剔除口径用）
  * @returns 各段段首命令词（顺序同命令段）
  */
 function commandHeadWords(command: string, shell: CommandShellKind): string[] {
   const heads: string[] = [];
-  for (const segment of stripQuotedSpans(command, shell).split(/[|;&\n]/)) {
+  for (const segment of splitCommandSegments(stripQuotedSpans(command, shell))) {
     const words = segment.trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) continue;
-    const { rest, queried } = stripCommandPrefix(words);
+    const { rest, queried } = stripCommandPrefix(stripShellKeywords(words));
     if (queried || rest.length === 0) continue;
     heads.push(normalizeCommandWord(rest[0]!));
   }

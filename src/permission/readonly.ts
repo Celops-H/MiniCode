@@ -18,8 +18,9 @@
  *   整体拒绝兜住，root 侧该形态落入正常审批链；
  * - cmd 的 doskey 宏与 PowerShell 的 Set-Alias 可把写命令改名（如 sal wd Remove-Item），
  *   改名后的命令词绕过黑名单，不做别名反解；
- * - 段首修饰关键字 time/exec 的选项排在命令词之前（time -p rm x、exec -a name rm x），
- *   剥关键字后取到的是选项词或 -a 的参数，判只读放行，与包装命令的选项剥法不同源；
+ * - PowerShell 的花括号分组（if (...) { cmd }、foreach (...) { cmd }）按花括号切开取内层命令，
+ *   与 cmd 侧 if/for 按括号切开同思路；段内非分组的字面花括号一并切开，
+ *   散列表键名撞上写命令词时按保守拒绝（@{ rm = 1 }）；
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
@@ -36,8 +37,8 @@
  *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
  *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
- *   非 cmd 语义（bash 与 PowerShell）的段先剥段首关键字
- *   （do/then/else/if/while/until/for/time/exec/!，见 stripShellKeywords）再取真词，
+ *   非 cmd 语义（bash 与 PowerShell）的段先剥段首关键字与其选项
+ *   （do/then/else/if/while/until/for/time/exec/!，见 dangerous.ts stripShellKeywords）再取真词，
  *   见 segmentWriteVerdict 各分支；
  * - ssh 的远端命令不判定：`ssh host rm x` 与 `ssh host 'rm x'`（引号包住的整串）同属边界，
  *   远端执行的写入不在本机守卫范围，只读 agent 的远端读由内置工具覆盖。
@@ -50,7 +51,9 @@ import {
 import { COLLAB_TOOL_NAMES } from "../tools/builtin/collab.js";
 import {
   resolveCommandShell,
+  splitCommandSegments,
   stripQuotedSpans,
+  stripShellKeywords,
   type CommandShellKind,
 } from "./dangerous.js";
 
@@ -83,7 +86,8 @@ export function readOnlyToolViolation(
 
 /**
  * 判定 bash 工具命令是否为写命令：重定向（空设备除外）或命令段命中写命令黑名单。
- * 按 ; | & 换行切段逐段判定（cmd 的 if/for 语句再按括号分组切开），
+ * 按 ; | & 换行切段逐段判定（cmd 的 if/for 语句再按括号分组切开、
+ * PowerShell 的花括号分组再按花括号切开），
  * 管道右侧的 tee、xargs 后的写命令同样命中；引号内字面文本剔除后匹配（echo "rm" 不误拦）。
  * Windows 上 bash 工具实际由 COMSPEC 的 shell 执行：cmd/PowerShell 的空设备是 NUL
  * （内核层落设备），与 /dev/null 同等豁免；bash 语义下 nul 是普通文件名，不豁免。
@@ -100,16 +104,29 @@ function bashWriteViolation(command: string, shell: CommandShellKind): string | 
   // 重定向到文件：> >> 2> &> 等（>&2 / 2>&1 是 fd 复制不写文件；
   // >( 进程替换由危险命令检查拦截——该检查挂在权限管线，管线缺失时不兜底）
   if (/>{1,2}(?!&\d)(?!\()/.test(stripped)) return "命令含重定向写文件";
-  for (const segment of stripped.split(/[|;&\n]/)) {
-    // cmd 的括号只在 if/for 语句里是命令分组，其余位置是字面文本（echo (del)、findstr (copy)）
-    const parts = shell === "cmd" && isCmdIfForSegment(segment) ? segment.split(/[()]/) : [segment];
-    for (const part of parts) {
+  for (const segment of splitCommandSegments(stripped)) {
+    for (const part of segmentParts(segment, shell)) {
       const words = part.trim().split(/\s+/).filter(Boolean);
       const verdict = segmentWriteVerdict(words, shell);
       if (verdict) return verdict;
     }
   }
   return undefined;
+}
+
+/**
+ * 命令段的次级切分：取分组内的真实命令。
+ * cmd 的括号只在 if/for 语句里是命令分组，其余位置是字面文本（echo (del)、findstr (copy)）；
+ * PowerShell 的花括号是语句分组（if (...) { cmd }、foreach (...) { cmd }），
+ * 段内非分组的字面花括号一并切开（散列表键名撞上写命令词时按保守拒绝）。
+ * @param segment 命令段原文
+ * @param shell 命令实际执行方的 shell 语义
+ * @returns 待判定的片段列表
+ */
+function segmentParts(segment: string, shell: CommandShellKind): string[] {
+  if (shell === "cmd") return isCmdIfForSegment(segment) ? segment.split(/[()]/) : [segment];
+  if (shell === "powershell") return segment.split(/[{}]/);
+  return [segment];
 }
 
 /** shell 家族与 Windows 脚本宿主：调用即执行内层代码（-c 内联、脚本文件、stdin），整体拒绝 */
@@ -362,30 +379,9 @@ function cmdInlineCommand(words: string[]): string[] {
   return rest.slice(i);
 }
 
-/** bash 与 PowerShell 的段首关键字：语句结构词与执行修饰词本身不是命令词。
- *  do/then/else/elif/if/while/until/for 是语句结构词（命令按 ;|& 切段后各自单独成段，
- *  循环与分支体在 do/then/else 段；if/while/until/for 段的命令是条件式）；
- *  time 计时、exec 替换进程、! 取反退出码是修饰词。按归一后小写匹配：这些词在 shell 里
- *  都是小写形态，误剥同名普通命令只会保守多拦，方向安全。 */
-const SHELL_KEYWORDS = new Set([
-  "do", "then", "else", "elif", "if", "while", "until", "for", "time", "exec", "!",
-]);
-
 /**
- * 剥除段首的 bash/PowerShell 关键字，露出真实命令词。
- * 关键字可连乘（time ! cmd），逐层剥干净。
- * @param words 命令段分词
- * @returns 剥除后的词表
- */
-function stripShellKeywords(words: string[]): string[] {
-  const rest = [...words];
-  while (rest.length > 0 && SHELL_KEYWORDS.has(normalizeCommandWord(rest[0]!))) rest.shift();
-  return rest;
-}
-
-/**
- * 单个命令段的写判定：剥开段首包装与分组符号（见 core/shell-words.ts stripCommandPrefix），
- * 按真实命令词查黑名单。
+ * 单个命令段的写判定：剥开段首关键字（见 dangerous.ts stripShellKeywords）、
+ * 包装与分组符号（见 core/shell-words.ts stripCommandPrefix），按真实命令词查黑名单。
  * @param words 命令段分词（非空）
  * @param shell 命令实际执行方的 shell 语义（sc 的别名二义判定用）
  * @returns 违规原因；只读安全返回 undefined
