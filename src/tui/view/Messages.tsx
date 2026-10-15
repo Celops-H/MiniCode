@@ -8,7 +8,7 @@
  * 块与块之间以一行空行分隔（marginTop）；消息区滑动条显式可见。
  * 所有展示状态在 state，本组件只读呈现。
  */
-import { For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
+import { For, Show, Switch, Match, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { MacOSScrollAccel } from "@opentui/core";
 import type { JSX } from "@opentui/solid";
 import { isFoldable } from "../state.js";
@@ -195,77 +195,116 @@ function durationText(b: { durationMs?: number }): string {
 /** 工具卡在创建后不重建（store 就地合并更新，见 AgentView 注释）：状态图标、折叠判定、
  *  输出行数必须走 createMemo——组件体在 createComponent 的 untrack 中只求值一次，
  *  直接读取 store 不建立订阅，更新后不重算：图标停在创建时的 …、
- *  「输出 N 行」停在 0、点开不出现 */
+ *  「输出 N 行」停在 0、点开不出现。
+ *  布局模式同理：name 可能由后端补发（openai-completions 对同一次调用重复发 toolcall_start
+ *  补名）才到达，mode 走 memo 并按 mode() 切换三布局——组件体常量会把模式冻结在创建时的 generic */
 function ToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
   const b = props.b;
-  const status = createMemo(() => toolStatus(b));
-  const mode = toolDisplayMode(b.name);
-  const h = useFoldHover(props.onFold);
-  const foldBox = {
-    onMouseDown: h.onMouseDown,
-    onMouseUp: h.onMouseUp,
-    onMouseOver: h.onMouseOver,
-    onMouseOut: h.onMouseOut,
-  };
-
-  if (mode === "compact") {
-    const expanded = createMemo(() => !b.collapsedOutput);
-    const outputLines = createMemo(() => (b.output ? b.output.trimEnd().split("\n").length : 0));
-    return (
-      <box flexDirection="column" {...foldBox}>
-        <text fg={h.fg()}>
-          <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
-          {b.args ? ` ${argsDigest(b.args)}` : ""}
-          {durationText(b)}
-          {/* 折叠摘要：有输出显「输出 N 行」，只有错误显「错误详情」——与 bash/generic 同口径 */}
-          {b.status === "running"
-            ? ""
-            : hasOutput(b) && !expanded()
-              ? b.output
-                ? ` · 输出 ${outputLines()} 行 · 点击展开`
-                : " · 错误详情 · 点击展开"
-              : ""}
-        </text>
-        <Show when={expanded() && b.args}>
-          <text fg={theme.textMuted}>{b.args}</text>
-        </Show>
-        <Show when={expanded() && b.output}>
-          <text fg={theme.textMuted}>{b.output}</text>
-        </Show>
-        <Show when={expanded() && b.error}>
-          <text fg={theme.error}>{b.error}</text>
-        </Show>
-      </box>
-    );
-  }
-  if (mode === "bash") {
-    // bash：去框线紧凑——首行状态 + 命令摘要，输出按折叠切换（保留输出块无边框）
-    return (
-      <box flexDirection="column" {...foldBox}>
-        <text>
-          <span style={{ fg: status().fg }}>{status().icon}</span> <span style={{ fg: h.fg() }}>Bash</span>{" "}
-          {b.args ? argsDigest(b.args, 60) : ""}
-          {durationText(b)}
-        </text>
-        <Show when={hasOutput(b)}>
-          {b.collapsedOutput ? (
-            <text fg={h.fg()}>
-              ▾ {b.error ? "错误详情" : `输出 ${(b.output ?? "").trimEnd().split("\n").length} 行`} · 点击展开
-            </text>
-          ) : (
-            <Show when={b.output}>
-              <text fg={theme.textMuted}>{b.output}</text>
-            </Show>
-          )}
-          {!b.collapsedOutput && b.error ? <text fg={theme.error}>{b.error}</text> : null}
-        </Show>
-      </box>
-    );
-  }
-  // generic：默认单行 icon+名+参数，输出隐藏；展开显示输出（完成后同样可点开）
+  const mode = createMemo(() => toolDisplayMode(b.name));
   return (
-    <box flexDirection="column" {...foldBox}>
-      <text fg={h.fg()}>
+    <Switch>
+      <Match when={mode() === "compact"}>
+        <CompactToolView b={b} onFold={props.onFold} />
+      </Match>
+      <Match when={mode() === "bash"}>
+        <BashToolView b={b} onFold={props.onFold} />
+      </Match>
+      <Match when={mode() === "generic"}>
+        <GenericToolView b={b} onFold={props.onFold} />
+      </Match>
+    </Switch>
+  );
+}
+
+/** compact：glob/read/grep/ls 只读快工具，单行摘要 + 点击展开参数与输出全文 */
+function CompactToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
+  const b = props.b;
+  const { fg, onMouseDown, onMouseUp, onMouseOver, onMouseOut } = useFoldHover(props.onFold);
+  const status = createMemo(() => toolStatus(b));
+  const expanded = createMemo(() => !b.collapsedOutput);
+  const outputLines = createMemo(() => (b.output ? b.output.trimEnd().split("\n").length : 0));
+  return (
+    <box
+      flexDirection="column"
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onMouseOver={onMouseOver}
+      onMouseOut={onMouseOut}
+    >
+      <text fg={fg()}>
+        <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
+        {b.args ? ` ${argsDigest(b.args)}` : ""}
+        {durationText(b)}
+        {/* 折叠摘要：有输出显「输出 N 行」，只有错误显「错误详情」——与 bash/generic 同口径 */}
+        {b.status === "running"
+          ? ""
+          : hasOutput(b) && !expanded()
+            ? b.output
+              ? ` · 输出 ${outputLines()} 行 · 点击展开`
+              : " · 错误详情 · 点击展开"
+            : ""}
+      </text>
+      <Show when={expanded() && b.args}>
+        <text fg={theme.textMuted}>{b.args}</text>
+      </Show>
+      <Show when={expanded() && b.output}>
+        <text fg={theme.textMuted}>{b.output}</text>
+      </Show>
+      <Show when={expanded() && b.error}>
+        <text fg={theme.error}>{b.error}</text>
+      </Show>
+    </box>
+  );
+}
+
+/** bash：去框线紧凑——首行状态 + 命令摘要，输出按折叠切换（保留输出块无边框） */
+function BashToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
+  const b = props.b;
+  const { fg, onMouseDown, onMouseUp, onMouseOver, onMouseOut } = useFoldHover(props.onFold);
+  const status = createMemo(() => toolStatus(b));
+  return (
+    <box
+      flexDirection="column"
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onMouseOver={onMouseOver}
+      onMouseOut={onMouseOut}
+    >
+      <text>
+        <span style={{ fg: status().fg }}>{status().icon}</span> <span style={{ fg: fg() }}>Bash</span>{" "}
+        {b.args ? argsDigest(b.args, 60) : ""}
+        {durationText(b)}
+      </text>
+      <Show when={hasOutput(b)}>
+        {b.collapsedOutput ? (
+          <text fg={fg()}>
+            ▾ {b.error ? "错误详情" : `输出 ${(b.output ?? "").trimEnd().split("\n").length} 行`} · 点击展开
+          </text>
+        ) : (
+          <Show when={b.output}>
+            <text fg={theme.textMuted}>{b.output}</text>
+          </Show>
+        )}
+        {!b.collapsedOutput && b.error ? <text fg={theme.error}>{b.error}</text> : null}
+      </Show>
+    </box>
+  );
+}
+
+/** generic：未特判工具，默认单行 icon+名+参数，输出隐藏；展开显示输出（完成后同样可点开） */
+function GenericToolView(props: { b: ToolBlock; onFold: () => void }): JSX.Element {
+  const b = props.b;
+  const { fg, onMouseDown, onMouseUp, onMouseOver, onMouseOut } = useFoldHover(props.onFold);
+  const status = createMemo(() => toolStatus(b));
+  return (
+    <box
+      flexDirection="column"
+      onMouseDown={onMouseDown}
+      onMouseUp={onMouseUp}
+      onMouseOver={onMouseOver}
+      onMouseOut={onMouseOut}
+    >
+      <text fg={fg()}>
         <span style={{ fg: status().fg }}>{status().icon}</span> {b.name ?? "tool"}
         {b.args ? ` ${argsDigest(b.args, 48)}` : ""}
         {durationText(b)}

@@ -418,6 +418,56 @@ describe("view/App 渲染链", () => {
     expect(frame).toContain("输出 2 行 · 点击展开");
   });
 
+  it("工具名补发后就地切换布局：无名建卡按 generic，补名后切 bash/compact（reconcile 路径）", async () => {
+    // openai-completions 对同一次调用可先发不带名的 toolcall_start，name 到达后再补发一次
+    // （src/llm/protocol/openai-completions.ts:245-253），state 侧重复 start 原地补名。
+    // 卡片创建后不重建：布局模式若是组件体常量，会冻结在创建时的 generic，补名后仍按
+    // generic 渲染（无「Bash」标签）、参数摘要也按 generic 的 48 上限截断
+    const [state, setState] = createStore<TuiState>(initState([]));
+    const commit = (next: TuiState): void => setState(reconcile(next));
+    const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 70, height: 20 });
+    await setup.waitForVisualIdle();
+    // 第一张卡：无名建卡（generic，无「Bash」标签），参数已流到
+    commit(reduceEvent(state, { type: "toolcall_start", index: 0, id: "c1" }));
+    commit(reduceEvent(state, { type: "toolcall_delta", index: 0, partialJson: '{"command":"pnpm test"}' }));
+    await setup.waitForVisualIdle();
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("tool"); // 无名回落名
+    expect(frame).not.toContain("Bash");
+    // 补名 bash：原地切 bash 布局（首行「Bash」标签，generic 布局下这里是小写工具名）
+    commit(reduceEvent(state, { type: "toolcall_start", index: 0, id: "c1", name: "bash" }));
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("Bash pnpm test");
+    expect(frame).not.toContain("bash pnpm test");
+    // 完成带输出：bash 折叠摘要独立成行（「▾ 输出 N 行 · 点击展开」）
+    commit(reduceHook(state, { type: "PreToolUse", toolCallId: "c1", toolName: "bash", input: { command: "pnpm test" }, agentPath: "/root" }));
+    commit(
+      reduceHook(state, {
+        type: "PostToolUse",
+        toolCallId: "c1",
+        toolName: "bash",
+        input: { command: "pnpm test" },
+        output: "BASHOUT1\nBASHOUT2",
+        isError: false,
+        durationMs: 3000,
+        agentPath: "/root",
+      }),
+    );
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("▾ 输出 2 行 · 点击展开");
+    expect(frame).not.toContain("BASHOUT1");
+    // 第二张卡：补名 read 切 compact 布局，参数摘要按 compact 的 40 上限截断（generic 为 48）
+    const longPath = "a".repeat(45);
+    commit(reduceEvent(state, { type: "toolcall_start", index: 1, id: "c2" }));
+    commit(reduceEvent(state, { type: "toolcall_delta", index: 1, partialJson: `{"path":"${longPath}"}` }));
+    commit(reduceEvent(state, { type: "toolcall_start", index: 1, id: "c2", name: "read" }));
+    await setup.waitForVisualIdle();
+    frame = setup.captureCharFrame();
+    expect(frame).toContain(`${"a".repeat(40)}…`);
+  });
+
   it("AgentInterrupted 后底栏树显示 (×) 名、消息区显示中断活动行", async () => {
     const [state, setState] = createStore<TuiState>(initState([]));
     const setup = await testRender(() => <App state={state} model="m" onAction={() => {}} />, { width: 64, height: 12 });
