@@ -10,7 +10,8 @@
  *   cmd 不把单引号当引号。同一条命令在 cmd 与非 cmd 语义下判定不同：echo hi '>' out.txt
  *   在 cmd 语义下判「命令含重定向写文件」，在 bash/PowerShell 语义下放行；
  * - 取值旗标的参数被引号包住时随引号段剔除消失，剥包装把真命令词当该旗标的参数
- *   吞掉，同样判只读放行（stdbuf -o "L" rm x、sudo -r "x" rm y），与上条同源；
+ *   吞掉，同样判只读放行（stdbuf -o "L" rm x、sudo -r "x" rm y），uniq 的操作数计数
+ *   同一根因（uniq -f "1" in.txt out.txt），与上条同源；
  * - $( ) 命令替换内的写命令不检测，由权限管线的危险命令检查兜底
  *   （该检查随管线存在，无管线的 agent 无此兜底）。兜底按实际 shell 语义生效：
  *   cmd 归类下 bash -c 引号内的替换不被危险命令检查拦，只读侧由 shell 执行体
@@ -20,7 +21,7 @@
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
- *   整体拒绝，落盘出口（下载、sort 输出文件、certutil 编解码）与持久化写（注册表、
+ *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码）与持久化写（注册表、
  *   setx、计划任务、服务控制）按形态判定，cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
  *   见 segmentWriteVerdict 各分支；
@@ -386,6 +387,8 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (first === "sort" && rest.slice(1).some((w) => /^\/o$/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {
     return "写命令 sort（输出写文件）";
   }
+  // uniq 的输出位有文件操作数即落盘（uniq in.txt out.txt），见 uniqWriteVerdict
+  if (first === "uniq") return uniqWriteVerdict(rest.slice(1));
   if (first === "reg") {
     const sub = rest[1]?.toLowerCase();
     return sub !== undefined && REG_WRITE_SUBCOMMANDS.has(sub) ? `写命令 reg ${sub}` : undefined;
@@ -521,6 +524,35 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
   "config", "init", "remote", "fetch", "submodule", "update-ref", "gc", "reflog",
 ]);
 
+/** uniq 的取值旗标：其后一个词是旗标参数，不是文件操作数 */
+const UNIQ_VALUE_FLAGS = new Set(["-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"]);
+
+/**
+ * uniq 的写判定：uniq [输入 [输出]] 的输出位有文件操作数即落盘。
+ * 「-」作输入是 stdin、作输出是 stdout，输出位是「-」不判写。
+ * 取值旗标连其参数一并跳过；-- 之后的词全按操作数算。
+ * 边界：取值旗标的参数被引号包住时随引号段剔除消失，其后的真操作数被当参数吞掉
+ * （uniq -f "1" in.txt out.txt 判只读），与包装命令同一根因，见文件头边界说明。
+ * @param words uniq 之后的词
+ * @returns 违规原因；只读安全返回 undefined
+ */
+function uniqWriteVerdict(words: string[]): string | undefined {
+  const operands: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (w === "--") {
+      operands.push(...words.slice(i + 1));
+      break;
+    }
+    if (w.startsWith("-") && w !== "-") {
+      if (UNIQ_VALUE_FLAGS.has(w)) i++;
+      continue;
+    }
+    operands.push(w);
+  }
+  return operands.length > 1 && operands[1] !== "-" ? "写命令 uniq（第二操作数落盘）" : undefined;
+}
+
 /**
  * bash 写命令黑名单：命令词命中即写操作（按命令段首词匹配，不做全文词搜索）。
  * POSIX 词与 Windows 词（cmd 内建 + PowerShell 常用别名/cmdlet）合并为一套，不分 shell
@@ -533,6 +565,8 @@ const WRITE_COMMAND_WORDS = new Set([
   // POSIX：删除、移动、复制、链接、目录、权限与原地写
   "rm", "rmdir", "mv", "cp", "ln", "mkdir", "touch", "chmod", "chown", "chgrp",
   "dd", "tee", "truncate", "shred", "mkfifo", "install", "patch",
+  // 拆分落盘（split/csplit 默认写 xaa 系文件）、建临时文件（mktemp）与行编辑器（ed）
+  "split", "csplit", "mktemp", "ed",
   // cmd 内建与随附工具：del/erase、ren/rename、rd/md 与 mkdir/rmdir 互为同义词；
   // xcopy/robocopy 是 copy 的递归形态；mklink 建链接；takeown 无纯显示形态；
   // setx 写用户级环境变量（持久化）

@@ -172,6 +172,9 @@ describe("只读 agent 写拦截判定", () => {
     expect(readOnlyWrite('stdbuf -o "L" rm x')).toBeUndefined();
     expect(readOnlyWrite('sudo -r "x" rm y')).toBeUndefined();
     expect(readOnlyWrite('sudo -u "root" rm x')).toBeUndefined();
+    // uniq 的操作数计数同一根因：-f 的引号参数消失后吞掉真正的输入操作数，
+    // 只剩输出操作数一个，判只读（实际写 out.txt）
+    expect(readOnlyWrite('uniq -f "1" in.txt out.txt')).toBeUndefined();
   });
 
   it("已知边界：ssh 远端命令不判定（记录口径，非期望行为）", () => {
@@ -844,6 +847,53 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
     // Windows Git Bash 下 sc 经 sc.exe 解析，同 cmd 口径
     expect(readOnlyWriteShell("sc query wuauserv", "bash")).toBeUndefined();
     expect(readOnlyWriteShell("sc start wuauserv", "bash")).toMatch(/服务控制写操作/);
+  });
+});
+
+describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () => {
+  it("uniq 输出位有文件操作数判写，输出位是 -（stdout）与无输出位放行", () => {
+    for (const command of [
+      "uniq in.txt out.txt",
+      "uniq -c in.txt out.txt",
+      "uniq -f 1 in.txt out.txt",
+      "uniq --skip-fields 2 in.txt out.txt",
+      "uniq --skip-fields=2 in.txt out.txt",
+      "uniq - out.txt",
+      "uniq -- -weird.txt out.txt",
+      "uniq in.txt out1.txt out2.txt",
+      "sudo uniq in.txt out.txt",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/uniq（第二操作数落盘）/);
+    }
+    for (const command of [
+      "uniq",
+      "uniq -d",
+      "uniq in.txt",
+      "uniq -c in.txt",
+      "uniq -f 2 report.txt",
+      "uniq -",
+      "uniq in.txt -",
+      "uniq - -",
+      "cat in.txt | uniq -c",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("拆分、临时文件与行编辑器入黑名单（含包装与 xargs 形态）", () => {
+    for (const command of [
+      "split -l 100 in.txt",
+      "split --bytes=1M big.bin",
+      "csplit in.txt 10",
+      "mktemp",
+      "mktemp -d",
+      "mktemp --suffix=.log",
+      "ed -s script.ed",
+      "sudo split -l 100 in.txt",
+      "xargs split -l 100",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/写命令 (split|csplit|mktemp|ed)/);
+    }
   });
 });
 
