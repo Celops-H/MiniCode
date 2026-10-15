@@ -22,6 +22,8 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
     controller.abort();
     const result = await promise;
     expect(result).toMatchObject({ isError: true });
+    // 用户打断是主动行为：只标 isError，不带失败原因（执行器据此不补发 PostToolUseFailure）
+    expect((result as { error?: string }).error).toBeUndefined();
     expect(String(JSON.stringify(result))).toContain("已被用户打断");
   });
 
@@ -42,11 +44,9 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
     expect(String(JSON.stringify(out))).toContain("命令失败");
   });
 
-  it("超时：到点杀进程并标记失败，文案提示可加大 timeoutMs 重试", async () => {
+  it("超时：到点杀进程并标记失败，携带失败原因（执行器据此补发 PostToolUseFailure）", async () => {
     const out = await bashTool.execute({ command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 200 });
-    expect(out).toMatchObject({ isError: true });
-    // 超时只标失败不带失败原因：执行器据此不补发 PostToolUseFailure（命令失败才带）
-    expect((out as { error?: string }).error).toBeUndefined();
+    expect(out).toMatchObject({ isError: true, error: "命令执行超时：200ms 未退出" });
     expect(String(JSON.stringify(out))).toContain("执行超时");
     expect(String(JSON.stringify(out))).toContain("timeoutMs");
   });

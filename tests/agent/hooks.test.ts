@@ -5,6 +5,7 @@ import type { ModelClient } from "../../src/agent/index.js";
 import { HookBus, type HookVerdict } from "../../src/hooks/index.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import type { Tool } from "../../src/tools/index.js";
+import { bashTool } from "../../src/tools/index.js";
 
 function mockTextClient(text: string): ModelClient {
   return {
@@ -389,7 +390,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     expect(result?.content).toContain("命令失败：退出码 2");
   });
 
-  it("标记失败但未带失败原因：只标 isError 不补发 PostToolUseFailure（超时/打断的既有口径）", async () => {
+  it("标记失败但未带失败原因：只标 isError 不补发 PostToolUseFailure（用户打断的既有口径）", async () => {
     const hooks = new HookBus();
     const failure = vi.fn();
     hooks.on("PostToolUseFailure", failure);
@@ -398,7 +399,7 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
       modelId: "mock",
       systemPrompt: "助手",
       hooks,
-      tools: [makeReadTool(() => ({ output: "命令执行超时", isError: true }))],
+      tools: [makeReadTool(() => ({ output: "命令已被用户打断", isError: true }))],
     });
     agent.start("读文件");
     for await (const _ of agent.run()) {
@@ -409,6 +410,46 @@ describe("Agent 工具钩子事件（PreToolUse 裁决 + PostToolUse 观测）",
     const result = agent.getMessages().find((m) => m.role === "tool_result");
     expect(result?.isError).toBe(true);
   });
+
+  it("bash 超时：结构化失败带原因，执行器补发 PostToolUseFailure", async () => {
+    const hooks = new HookBus();
+    const failure = vi.fn();
+    hooks.on("PostToolUseFailure", failure);
+    const input = JSON.stringify({ command: 'node -e "setInterval(()=>{},1000)"', timeoutMs: 300 });
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (!hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "bash" };
+            yield { type: "toolcall_delta", index: 0, partialJson: input };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+          } else {
+            yield { type: "text_delta", text: "已重试" };
+            yield { type: "done", stopReason: "end_turn" };
+          }
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      hooks,
+      tools: [bashTool],
+    });
+    agent.start("跑长命令");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PostToolUseFailure",
+        toolName: "bash",
+        error: "命令执行超时：300ms 未退出",
+      }),
+    );
+  }, 20_000);
 
   it("无权限管线时 PreToolUse 也无条件触发：deny 直接拒绝执行（原实现依赖管线，CLI 未装配则永不触发）", async () => {
     let executed = false;
