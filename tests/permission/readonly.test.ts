@@ -377,6 +377,34 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
     }
   });
 
+  it("版本化与未列解释器按同一套脚本执行判定（python3.12/deno/tsx），一行流放行", () => {
+    for (const command of [
+      "python3.12 x.py",
+      "python3.11 tool.py",
+      "python2.7 x.py",
+      "py3 x.py",
+      "ruby3.1 x.rb",
+      "deno run x.ts",
+      "deno run --allow-read x.ts",
+      "deno check main.ts",
+      "tsx script.ts",
+      "tsx src/main.ts",
+      "ls *.ts | xargs python3.12",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/脚本文件执行无法核验|写命令 xargs/);
+    }
+    for (const command of [
+      "python3.12 -c 'print(1)'",
+      "python3.12 --version",
+      "deno eval 'console.log(1)'",
+      "deno --version",
+      "tsx -e 'console.log(1)'",
+      "tsx --eval 'x'",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
   it("perl/ruby 的 -i 原地改写拒绝（含组合与后缀形态）", () => {
     for (const command of [
       "perl -i -pe 's/a/b/' f.txt",

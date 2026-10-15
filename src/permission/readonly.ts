@@ -107,11 +107,15 @@ const SC_READ_SUBCOMMANDS = new Set([
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
  *  变量，perl 的 -E 才是内联执行），按命令词分设；命中一行流即放行，否则出现脚本操作数即拒绝 */
 const INTERPRETER_INLINE_FLAGS: Record<string, (word: string) => boolean> = {
-  // python 内联只有 -c（-m 执行模块、-E/-B 均非内联，带脚本操作数按文件执行拦）
+  // python 内联只有 -c（-m 执行模块、-E/-B 均非内联，带脚本操作数按文件执行拦）；
+  // 版本化拼写（python3、python3.12、py3.12）按基线名归一，见 interpreterBase
   python: (w) => w === "-c",
-  python3: (w) => w === "-c",
   py: (w) => w === "-c",
   node: (w) => w === "-e" || w === "-p" || /^--(eval|print)(=|$)/.test(w),
+  // deno 的一行流是 eval 子命令（deno eval "code"），run 与脚本参数走操作数判定
+  deno: (w) => w === "eval",
+  // tsx 转发 node 参数，一行流旗标同 node
+  tsx: (w) => w === "-e" || w === "-p" || /^--(eval|print)(=|$)/.test(w),
   // perl 的 -e/-E 与组合形态（-pe/-ne/-lane）
   perl: (w) => /^-[a-zA-Z]*[eE]$/.test(w),
   // ruby 的 -e 与组合形态（-we）；-E 是外部编码带值，不以 e 结尾不误判
@@ -119,7 +123,19 @@ const INTERPRETER_INLINE_FLAGS: Record<string, (word: string) => boolean> = {
   php: (w) => w === "-r" || w === "-R" || w === "-B" || w === "-E",
   lua: (w) => w === "-e",
 };
-const INTERPRETER_WORDS = new Set(Object.keys(INTERPRETER_INLINE_FLAGS));
+
+/**
+ * 解释器词的基线名：剥掉尾部版本号（python3、python3.12、ruby3.1、php8.2 → python/ruby/php）。
+ * 版本化拼写与未列解释器同属脚本执行体，按基线名共用同一套一行流判定。
+ */
+function interpreterBase(word: string): string {
+  return word.replace(/\d+(?:\.\d+)*$/, "");
+}
+
+/** 解释器词判定：含版本化拼写 */
+function isInterpreterWord(word: string): boolean {
+  return INTERPRETER_INLINE_FLAGS[interpreterBase(word)] !== undefined;
+}
 
 /** 脚本操作数：非选项词与 stdin 的「-」（重定向词如 2>&1、< f 除外） */
 function isScriptOperand(word: string): boolean {
@@ -155,7 +171,7 @@ function xargsTargetIndex(words: string[]): number {
  *  其余目标按同一套段判定递归（xargs curl -o、xargs sort -o 同样命中） */
 function xargsVerdict(words: string[], idx: number, shell: CommandShellKind): string | undefined {
   const target = normalizeCommandWord(words[idx]!);
-  if (SCRIPT_HOST_WORDS.has(target) || INTERPRETER_WORDS.has(target)) return `写命令 xargs ${words[idx]}`;
+  if (SCRIPT_HOST_WORDS.has(target) || isInterpreterWord(target)) return `写命令 xargs ${words[idx]}`;
   return segmentWriteVerdict(words.slice(idx), shell);
 }
 
@@ -177,15 +193,17 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (SCRIPT_HOST_WORDS.has(first)) {
     return `写命令 ${first}（脚本执行无法核验）`;
   }
-  // 解释器脚本文件执行（python x.py、node x.js）：脚本内容同属无法核验的内层代码，拒绝。
+  // 解释器脚本文件执行（python x.py、node x.js、deno run x.ts）：脚本内容同属无法核验的
+  // 内层代码，拒绝。版本化拼写按基线名归一（python3.12 x.py）。
   // 一行流（-c/-e 等内联旗标）沿用既有边界：引号内代码与字面文本无法区分，不检测
-  if (INTERPRETER_WORDS.has(first)) {
+  const interpreter = interpreterBase(first);
+  const isInline = INTERPRETER_INLINE_FLAGS[interpreter];
+  if (isInline) {
     // perl/ruby 的 -i 原地改写文件（含 -pi/-pie 组合与 -i.bak 后缀），先于一行流判定。
     // 只认小写旗标簇：-Mstrict、-Ilib 的带值选项词面含 i 但非 -i，不误拦
-    if ((first === "perl" || first === "ruby") && rest.slice(1).some((w) => /^-[a-z]*i/.test(w))) {
+    if ((interpreter === "perl" || interpreter === "ruby") && rest.slice(1).some((w) => /^-[a-z]*i/.test(w))) {
       return `写命令 ${first} -i（原地改写）`;
     }
-    const isInline = INTERPRETER_INLINE_FLAGS[first]!;
     if (!rest.slice(1).some(isInline) && rest.slice(1).some(isScriptOperand)) {
       return `写命令 ${first}（脚本文件执行无法核验）`;
     }
