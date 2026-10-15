@@ -69,7 +69,7 @@ const MAX_SANITIZED_LENGTH = 200;
  * @param name 待编码的路径
  * @returns 编码后的子目录名
  */
-export function sanitizePath(name: string): string {
+function sanitizePath(name: string): string {
   // Windows 文件系统大小写不敏感：编码前统一小写——C:\Work\proj 与 c:\work\proj
   // 否则分裂两个会话存储、互不可见。归一改变子目录名，既有会话一次性失效（需重新指向，
   // 与配置文档同步说明）

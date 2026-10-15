@@ -3,7 +3,7 @@ import { LOG_LEVELS } from "../logger/index.js";
 import { HOOK_EVENT_TYPES } from "../hooks/index.js";
 
 /** 单个模型配置（OpenAI 兼容厂商的模型）；strict：拼错字段直接报错而非默认忽略 */
-export const modelConfigSchema = z
+const modelConfigSchema = z
   .object({
     id: z.string(),
     name: z.string().optional(),
@@ -19,11 +19,11 @@ export const modelConfigSchema = z
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 
 /** 已实现的协议（配置可选项）；ProtocolType 预留的其余协议未接入装配，不开放配置 */
-export const PROVIDER_PROTOCOLS = ["openai-chat-completions", "anthropic-messages"] as const;
+const PROVIDER_PROTOCOLS = ["openai-chat-completions", "anthropic-messages"] as const;
 export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 
 /** 单个 Provider 配置（厂商接入）；strict：拼错字段直接报错而非默认忽略 */
-export const providerConfigSchema = z
+const providerConfigSchema = z
   .object({
     id: z.string(),
     /** API 端点。两种拼接约定不同：openai-chat-completions 需含 /v1（SDK 在其下追加
@@ -60,7 +60,7 @@ export const providerConfigSchema = z
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 
 /** 单个 MCP server 配置（stdio 传输）；strict：拼错字段直接报错而非默认忽略 */
-export const mcpServerConfigSchema = z
+const mcpServerConfigSchema = z
   .object({
     /** 启动命令（如 npx、node） */
     command: z.string(),
@@ -77,7 +77,7 @@ export const mcpServerConfigSchema = z
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>;
 
 /** Skill 技能配置；strict：拼错字段直接报错而非默认忽略 */
-export const skillsConfigSchema = z
+const skillsConfigSchema = z
   .object({
     /** 关闭名单：命中技能名的技能不注入系统提示词（全局/项目两层名单取并集） */
     disabled: z.array(z.string()).optional(),
@@ -86,7 +86,7 @@ export const skillsConfigSchema = z
 export type SkillsConfig = z.infer<typeof skillsConfigSchema>;
 
 /** 调试开关（诊断用）；strict：拼错字段直接报错而非默认忽略 */
-export const debugConfigSchema = z
+const debugConfigSchema = z
   .object({
     /** 记录 openai 流解析中未产出任何事件的被丢弃 chunk（数量 + 样本，流结束时输出到
      *  stderr），排查「流活跃但零输出」的静默卡死；诊断输出会干扰 TUI 画面，仅排查时开启 */
@@ -96,7 +96,7 @@ export const debugConfigSchema = z
 export type DebugConfig = z.infer<typeof debugConfigSchema>;
 
 /** 可观测性配置；strict：拼错字段直接报错而非默认忽略 */
-export const observabilityConfigSchema = z
+const observabilityConfigSchema = z
   .object({
     /** 总开关（缺省 true）：false 时不装配 Recorder、不写轨迹；日志文件不受影响 */
     enabled: z.boolean().optional(),

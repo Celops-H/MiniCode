@@ -45,7 +45,7 @@ export function isStaleBuild(
  * @param root 项目根（git 命令的工作目录）
  * @returns 提交时刻毫秒；无法判定返回 undefined
  */
-export async function lastCommitTime(root: string): Promise<number | undefined> {
+async function lastCommitTime(root: string): Promise<number | undefined> {
   if (!existsSync(path.join(root, ".git"))) return undefined;
   return new Promise((resolve) => {
     const child = spawn("git", ["log", "-1", "--format=%ct"], { cwd: root });
@@ -88,7 +88,7 @@ export async function newestBuildTime(distDir: string): Promise<number | undefin
  * @param root 项目根（构建命令工作目录）
  * @returns 构建成功 true；命令失败（含 pnpm 不存在）false
  */
-export function runBuild(root: string): Promise<boolean> {
+function runBuild(root: string): Promise<boolean> {
   return new Promise((resolve) => {
     // Windows 的 pnpm 是 .cmd，需经 shell 解析；其余平台直跑
     const child = spawn("pnpm", ["build"], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
