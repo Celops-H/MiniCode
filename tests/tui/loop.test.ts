@@ -194,6 +194,64 @@ describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
   });
 });
 
+describe("输入历史回溯（↑↓）", () => {
+  /** 两条历史（升序存放，末位最新）：发送才写入输入历史 */
+  const seed = (): TuiState => {
+    let s = initState([]);
+    s = reduceAction(s, { type: "input", text: "第一条" });
+    s = reduceAction(s, { type: "send" });
+    s = reduceAction(s, { type: "input", text: "第二条" });
+    s = reduceAction(s, { type: "send" });
+    return s;
+  };
+
+  it("↑ 进最新一条，再 ↑ 向更旧", () => {
+    let s = seed();
+    s = reduceAction(s, { type: "history", dir: -1 });
+    expect(s.prompt.lines).toEqual(["第二条"]);
+    expect(s.prompt.historyIndex).toBe(1);
+    s = reduceAction(s, { type: "history", dir: -1 });
+    expect(s.prompt.lines).toEqual(["第一条"]);
+    expect(s.prompt.historyIndex).toBe(0);
+  });
+
+  it("在最旧一条按 ↑ 停住，不退出浏览", () => {
+    let s = seed();
+    s = reduceAction(s, { type: "history", dir: -1 });
+    s = reduceAction(s, { type: "history", dir: -1 });
+    const stopped = reduceAction(s, { type: "history", dir: -1 });
+    expect(stopped.prompt.historyIndex).toBe(0);
+    expect(stopped.prompt.lines).toEqual(["第一条"]);
+  });
+
+  it("↓ 从最新一条回空草稿", () => {
+    let s = seed();
+    s = reduceAction(s, { type: "history", dir: -1 });
+    const back = reduceAction(s, { type: "history", dir: 1 });
+    expect(back.prompt.historyIndex).toBe(-1);
+    expect(back.prompt.lines).toEqual([""]);
+    expect(promptEmpty(back.prompt)).toBe(true);
+  });
+
+  it("↓ 从最旧逐条向更新，到最新一条后再 ↓ 回草稿", () => {
+    let s = seed();
+    s = reduceAction(s, { type: "history", dir: -1 });
+    s = reduceAction(s, { type: "history", dir: -1 });
+    s = reduceAction(s, { type: "history", dir: 1 });
+    expect(s.prompt.historyIndex).toBe(1);
+    expect(s.prompt.lines).toEqual(["第二条"]);
+    s = reduceAction(s, { type: "history", dir: 1 });
+    expect(s.prompt.historyIndex).toBe(-1);
+    expect(s.prompt.lines).toEqual([""]);
+  });
+
+  it("不在浏览时按 ↓ 不动", () => {
+    const same = reduceAction(seed(), { type: "history", dir: 1 });
+    expect(same.prompt.historyIndex).toBe(-1);
+    expect(same.prompt.lines).toEqual([""]);
+  });
+});
+
 describe("paste（bracketed paste 整段插入）", () => {
   it("单行粘贴：光标处插入、光标移到文本后", () => {
     let s = initState([]);

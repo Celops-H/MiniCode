@@ -1377,28 +1377,22 @@ export function reduceAction(state: TuiState, action: TuiAction): TuiState {
       return { ...state, prompt: { ...moved, sel: anchor } };
     }
     case "history": {
-      // 历史回溯：不在浏览时 ↑ 进最后一条；浏览中 ↑/↓ 移动；-1 退出浏览回编辑内容
+      // 历史条目按时间升序存放（下标 0 最旧、末位最新）。不在浏览时 ↑ 进最新一条；
+      // 浏览中 ↑ 向更旧、↓ 向更新：最旧一条再 ↑ 停住，最新一条再 ↓ 回草稿。
+      // 进浏览只发生在输入为空时（keymap 判 inputEmpty），草稿恒为空输入框，回落用 emptyPrompt
       const history = state.prompt.history;
       if (history.length === 0) return state;
       const browsing = state.prompt.historyIndex !== -1;
-      const nextIndex = browsing ? state.prompt.historyIndex + action.dir : action.dir === -1 ? history.length - 1 : -1;
-      if (nextIndex >= history.length) return state; // 已在最旧一条再 ↓
-      const prompt: PromptState =
-        nextIndex === -1
-          ? { ...state.prompt, historyIndex: -1, sel: null }
-          : (() => {
-              const lines = history[nextIndex]!.split("\n");
-              const last = lines.at(-1) ?? "";
-              return {
-                lines,
-                curLine: lines.length - 1,
-                curCol: Array.from(last).length,
-                history,
-                historyIndex: nextIndex,
-                sel: null,
-              };
-            })();
-      return { ...state, prompt };
+      if (!browsing && action.dir !== -1) return state; // 已在草稿再 ↓
+      const nextIndex = browsing ? state.prompt.historyIndex + action.dir : history.length - 1;
+      if (nextIndex < 0) return state; // 已在最旧一条再 ↑
+      if (nextIndex >= history.length) return { ...state, prompt: emptyPrompt(history) }; // 已在最新一条再 ↓
+      const lines = history[nextIndex]!.split("\n");
+      const last = lines.at(-1) ?? "";
+      return {
+        ...state,
+        prompt: { lines, curLine: lines.length - 1, curCol: Array.from(last).length, history, historyIndex: nextIndex, sel: null },
+      };
     }
     case "complete": {
       // slash 候选 Tab 补全：把当前选中项填入输入首行
