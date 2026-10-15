@@ -55,7 +55,7 @@ export type PromptSegmentKind = "normal" | "sel" | "cursor";
  * @param cursorCol 光标列（码点下标）；null = 本行无光标
  * @param sel 本行选区范围（[start,end)，lineSelRange 产出）；null = 无选区
  */
-export function promptLineSegments(
+function promptLineSegments(
   chars: string[],
   cursorCol: number | null,
   sel: [number, number] | null,

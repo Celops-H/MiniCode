@@ -125,7 +125,7 @@ export interface QueuedItem {
 }
 
 /** 输入行上限：多行输入最多 20 行，超出不再增高，靠光标移动查看 */
-export const MAX_PROMPT_LINES = 20;
+const MAX_PROMPT_LINES = 20;
 
 /** 输入框选区锚点：Shift+方向键起点（光标 curLine/curCol 是焦点端，随移动扩展/收缩） */
 export interface SelectionAnchor {
@@ -253,7 +253,7 @@ export function sessionModalTarget(
 }
 
 /** 思考等级循环序（/model 左右调整）：low → medium → high → 缺省 → low */
-export const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
+const THINKING_LEVELS: Array<ThinkingLevel | undefined> = [undefined, "low", "medium", "high"];
 
 /** 下一个思考等级（纯函数） */
 export function cycleThinkingLevel(level: ThinkingLevel | undefined): ThinkingLevel | undefined {
@@ -285,10 +285,10 @@ export const PERMISSION_OPTIONS = [
 ] as const;
 
 /** 内置 slash 命令（输入 / 时候选加载） */
-export const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/settings", "/skills"] as const;
+const COMMANDS = ["/clear", "/compact", "/connect", "/exit", "/help", "/init", "/mcp", "/model", "/rename", "/session", "/settings", "/skills"] as const;
 
 /** 权限模式循环序（Shift+Tab 切换）：default(正常审批) → plan(只读放行) → bypassPermissions(自动放行) → default */
-export const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
+const PERMISSION_MODES: PermissionMode[] = ["default", "plan", "bypassPermissions"];
 
 /** 下一个权限模式（纯函数，shortcut 用） */
 export function cyclePermissionMode(mode: PermissionMode): PermissionMode {

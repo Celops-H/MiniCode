@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import * as configPaths from "../src/config/paths.js";
 import * as configTypes from "../src/config/types.js";
 import * as staleBuild from "../src/bootstrap/staleBuild.js";
+import * as tuiState from "../src/tui/state.js";
+import * as tuiPrompt from "../src/tui/view/Prompt.js";
 
 /** [模块相对路径, 模块命名空间, 仍在导出的标识符（哨兵）, 不应再导出的标识符] */
 const CASES: Array<[string, object, string, string[]]> = [
@@ -26,6 +28,8 @@ const CASES: Array<[string, object, string, string[]]> = [
     ],
   ],
   ["bootstrap/staleBuild.ts", staleBuild, "isStaleBuild", ["runBuild", "lastCommitTime"]],
+  ["tui/state.ts", tuiState, "initState", ["MAX_PROMPT_LINES", "THINKING_LEVELS", "PERMISSION_MODES", "COMMANDS"]],
+  ["tui/view/Prompt.tsx", tuiPrompt, "PromptView", ["promptLineSegments"]],
 ];
 
 describe("死导出守卫：无引用导出已降为非导出", () => {
