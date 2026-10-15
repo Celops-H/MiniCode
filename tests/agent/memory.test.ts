@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Agent, type ModelClient } from "../../src/agent/index.js";
 import { errorMessage, toolResultMessage, userMessage } from "../../src/core/index.js";
 import { MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest } from "../../src/context/index.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** 判别一次模型调用是不是记忆更新请求 */
 function isMemoryRequest(context: { messages: { role: string; content: unknown }[] }): boolean {
@@ -270,6 +274,50 @@ describe("记忆更新后台化", () => {
     expect(isMemoryRequest({ messages: [] })).toBe(false);
     releaseMemory?.();
     await agent.whenMemorySettled();
+  });
+
+  it("记忆更新流忽略 abort 永不结束：中断看门狗 3s 强制收尾，whenMemorySettled 不被永久卡住", async () => {
+    vi.useFakeTimers();
+    let memoryCalls = 0;
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryCalls++;
+          // 第一次记忆调用忽略 signal 永不结束（模拟厂商不响应 abort）；重试那次正常返回
+          if (memoryCalls === 1) {
+            yield { type: "text_delta", text: "记忆开头" };
+            markStarted!();
+            await new Promise<void>(() => {}); // 永不 resolve
+          }
+          yield { type: "text_delta", text: "记忆" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    agent.start("打断记忆更新");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await started; // 记忆更新已进入模型流并挂起
+    agent.interrupt();
+    await vi.advanceTimersByTimeAsync(3_001); // 看门狗超时触发
+    await agent.whenMemorySettled(); // 收尾不再永久挂起
+
+    // 中断那批记忆不回写、覆盖点不前进：下一轮重试同一区间（数据不丢）
+    agent.start("重试");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    expect(memoryCalls).toBe(2);
   });
 
   it("跑动中多次触发合并为尾随一次：不叠加排队调用", async () => {

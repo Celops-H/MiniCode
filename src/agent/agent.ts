@@ -772,6 +772,21 @@ export class Agent {
   }
 
   /**
+   * 摘要与记忆更新共用的模型客户端：流套中断看门狗，与主循环同口径。
+   * 打断后厂商不响应 abort 的流，经看门狗 3s 强制收尾，Esc 在这些调用里同样能收尾。
+   */
+  private guardedModelClient(): ModelClient {
+    return {
+      stream: (modelId, context, options) =>
+        withInterruptTimeout(
+          this.modelClient.stream(modelId, context, options),
+          this.interruptController.signal,
+          INTERRUPT_STREAM_TIMEOUT_MS,
+        ),
+    };
+  }
+
+  /**
    * 单次记忆更新：只喂上次覆盖点之后的未覆盖消息（按批取最旧一批，覆盖点精确推进），
    * 杜绝「最近 8 条」窗口在覆盖点之间留下永远进不了记忆的空洞——空洞段会在记忆替代
    * 压缩时被静默丢弃。覆盖点记调用时刻的实际覆盖位置（快照），
@@ -789,7 +804,7 @@ export class Agent {
     const coveredAt = this.memoryCovered + recent.length;
     try {
       const updated = await updateMemory(
-        this.modelClient,
+        this.guardedModelClient(),
         this.modelId,
         {
           currentMemory: this.memory,
@@ -915,7 +930,7 @@ export class Agent {
       if (instructions) {
         // 现场摘要：指导随 Additional Instructions 段生效
         summary = await generateSummary(
-          this.modelClient,
+          this.guardedModelClient(),
           this.modelId,
           this.messages,
           instructions,
@@ -951,7 +966,7 @@ export class Agent {
           }
           const delta = this.messages.slice(deltaStart);
           summary = await generateSummary(
-            this.modelClient,
+            this.guardedModelClient(),
             this.modelId,
             delta.length > 0 ? delta : this.messages,
             `已有会话摘要：\n${previous}\n请基于旧摘要增量更新：旧摘要中未变化的内容不要重复展开，只合并新增部分`,
@@ -959,7 +974,7 @@ export class Agent {
           );
         } else {
           summary = await generateSummary(
-            this.modelClient,
+            this.guardedModelClient(),
             this.modelId,
             this.messages,
             undefined,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
-import type { StreamEvent } from "../../src/core/index.js";
+import { assistantMessage, userMessage, type StreamEvent } from "../../src/core/index.js";
 import type { Tool } from "../../src/tools/index.js";
 import { OpenAICompletionsProtocol } from "../../src/llm/index.js";
 
@@ -355,6 +355,43 @@ describe("Agent 主循环：turn 内真打断", () => {
     // 已产出保留、回合收尾（不再永久挂起，宿主输入循环可恢复）
     expect(events).toEqual([{ type: "text_delta", text: "开头段" }]);
     expect(agent.getMessages()).toHaveLength(2); // user + 半截 assistant
+  });
+
+  it("压缩摘要流忽略 abort 永不结束：中断看门狗 3s 强制收尾，compactNow 不被永久卡住", async () => {
+    vi.useFakeTimers();
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    // 摘要调用（tools 为空）忽略 signal 永不结束，模拟厂商不响应 abort
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          yield { type: "text_delta", text: "摘要开头" };
+          markStarted!();
+          await new Promise<void>(() => {}); // 永不 resolve
+        }
+        yield { type: "text_delta", text: "正常回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      initialMessages: [userMessage("第一问"), assistantMessage([{ type: "text", text: "回答一" }])],
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+    });
+    const compacting = agent.compactNow();
+    await started; // 摘要调用已进入模型流并挂起
+    agent.interrupt();
+    await vi.advanceTimersByTimeAsync(3_001); // 看门狗超时触发
+    expect(await compacting).toBe(false);
+    // 打断算用户中断而非压缩失败：历史未被摘要替换
+    expect(agent.getMessages()).toHaveLength(2);
+    expect(
+      agent.getMessages().some((m) => typeof m.content === "string" && m.content.includes("【会话摘要】")),
+    ).toBe(false);
   });
 
   it("工具忽略 signal 挂起：中断看门狗 3s 强制失败结果，回合不被卡死", async () => {
