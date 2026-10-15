@@ -23,7 +23,15 @@
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
- *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
+ *   整体拒绝，非 JS 包管理器（pip/cargo/apt/brew/gem/go/composer/snap/winget 等）按族
+ *   枚举只读子命令判定，其余子命令按写拒绝（pip config set、go env -w、poetry version <v>
+ *   一类带写形态的同名子命令不入只读集，cargo tree 补写 Cargo.lock 同属写形态，
+ *   多级子命令 rustup toolchain list、conda env list 只认首词、按写拒绝），
+ *   裸用与纯查询旗标形态只打印帮助、照常放行；只读子命令取远端元数据时写本工具链缓存
+ *   （pip index、cargo search），属放行侧固有行为，与 npm view 同口径，
+ *   构建器（make/ninja/cmake/msbuild/gradle/mvn/dotnet 等）无查询豁免、
+ *   整体拒绝（make --version 与 cmake -L 一并拒绝），
+ *   落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
  *   压缩族非 -c/-t/-l 与纯查询旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
  *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
  *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
@@ -166,6 +174,75 @@ function packageSubcommand(args: string[]): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * 非 JS 包管理器的只读子命令：命令词 → 该族的查询形态。
+ * 只读集按族分设，不并成一张全局表：同名子命令跨族语义不同，合表会把写形态按同名
+ * 只读词放行（cargo check 编译写 target/、conda env remove 删环境、poetry version 2.0
+ * 改 pyproject），故这类带写形态的同名子命令一律不入表。子命令不在本表内按写拒绝，
+ * 见 segmentWriteVerdict 的非 JS 包管理器分支。
+ * cargo tree 与 cargo metadata 解析依赖时会补写项目里的 Cargo.lock，同属写形态；
+ * 可编译的族只留取远端元数据的查询（cargo search、go doc），构建与脚本执行形态走
+ * EXT_PKG_BUILD_SUBCOMMANDS 与 EXT_PKG_EXEC_SUBCOMMANDS。
+ */
+const EXT_PACKAGE_MANAGERS: Record<string, ReadonlySet<string>> = {
+  // Python：pip 与常用环境工具
+  pip: new Set(["list", "show", "freeze", "check", "search", "index", "debug", "help", "version"]),
+  pipx: new Set(["list", "environment", "help", "version"]),
+  poetry: new Set(["show", "about", "check", "help"]),
+  conda: new Set(["list", "info", "search", "help", "version"]),
+  // Rust：cargo 的 check/build/run/install 写 target/ 或执行代码，只留查询
+  cargo: new Set(["search", "locate-project", "help", "version"]),
+  rustup: new Set(["show", "check", "help", "version"]),
+  // 其他语言：gem（Ruby）、go、composer（PHP）
+  gem: new Set(["list", "info", "search", "env", "which", "help", "version"]),
+  go: new Set(["list", "doc", "version", "help"]),
+  composer: new Set(["show", "info", "list", "audit", "outdated", "licenses", "validate",
+    "check-platform-reqs", "depends", "why", "prohibits", "suggests", "diagnose", "help", "version"]),
+  // 系统包管理器：Debian 系、RPM 系、SUSE、Snap
+  apt: new Set(["list", "show", "search", "policy", "depends", "check", "help", "version"]),
+  "apt-get": new Set(["check", "help", "version"]),
+  "apt-cache": new Set(["search", "show", "policy", "depends", "rdepends", "madison", "pkgnames",
+    "showpkg", "stats", "dump", "unmet", "help", "version"]),
+  "apt-mark": new Set(["showauto", "showmanual", "help", "version"]),
+  // yum/dnf 的 history 带 undo/rollback 子形态，一并按写拒绝，不入表
+  yum: new Set(["list", "info", "search", "check-update", "repolist", "provides", "whatprovides",
+    "deplist", "help", "version"]),
+  dnf: new Set(["list", "info", "search", "check-update", "repolist", "provides", "whatprovides",
+    "deplist", "help", "version"]),
+  zypper: new Set(["search", "info", "list-updates", "repos", "packages", "patches", "patterns",
+    "products", "help", "version"]),
+  snap: new Set(["list", "info", "find", "connections", "help", "version"]),
+  // Homebrew 与 Windows 三家：choco、scoop、winget
+  brew: new Set(["list", "info", "search", "deps", "outdated", "doctor", "config", "home", "help", "version"]),
+  choco: new Set(["list", "search", "info", "help", "version"]),
+  scoop: new Set(["list", "search", "info", "status", "which", "help", "version"]),
+  winget: new Set(["list", "search", "show", "help", "version"]),
+};
+
+/** 非 JS 包管理器的安装与依赖变更子命令：安装或移除包、改写依赖清单与缓存 */
+const EXT_PKG_INSTALL_SUBCOMMANDS = new Set([
+  "install", "i", "ci", "add", "remove", "rm", "uninstall", "un", "erase", "update", "up", "upgrade",
+  "upgrade-all", "dist-upgrade", "full-upgrade", "dup", "downgrade", "reinstall", "swap", "autoremove",
+  "dedupe", "prune", "link", "unlink", "publish", "patch", "set", "init", "create", "create-project",
+  "import", "rebuild", "sync", "lock", "fetch", "download", "get", "restore", "purge", "clean",
+  "makecache", "refresh", "enable", "disable", "hold", "unhold", "auto", "manual", "vendor",
+  "require", "dump-autoload", "clear-cache", "archive", "self-update",
+]);
+
+/** 非 JS 包管理器的构建子命令：编译或打包，写目标目录与构建缓存 */
+const EXT_PKG_BUILD_SUBCOMMANDS = new Set([
+  "build", "compile", "make", "wheel", "bdist", "sdist", "package", "dist", "generate",
+]);
+
+/** 非 JS 包管理器的脚本执行子命令：跑本地脚本或任意二进制，无法核验 */
+const EXT_PKG_EXEC_SUBCOMMANDS = new Set(["run", "run-script", "exec", "x", "dlx", "test", "bench", "shell"]);
+
+/** 构建器：调用即编译或生成产物（写目标目录、构建缓存与生成文件），无查询豁免、整体拒绝 */
+const BUILD_TOOL_WORDS = new Set([
+  "make", "gmake", "bmake", "nmake", "ninja", "cmake", "msbuild", "gradle", "gradlew", "mvn", "mvnw",
+  "ant", "bazel", "bazelisk", "dotnet",
+]);
 
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
  *  变量，perl 的 -E 才是内联执行），按命令词分设；命中一行流即放行，否则出现脚本操作数即拒绝 */
@@ -417,6 +494,19 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
     if (PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
     return `写命令 ${first} ${sub}（子命令无法核验）`;
   }
+  // 非 JS 包管理器（pip/cargo/apt/brew 等）按族枚举的只读子命令判定，构建器整体拒绝。
+  // 族名按版本化拼写归一（pip3.12 归 pip），与解释器同口径
+  const extPackage = EXT_PACKAGE_MANAGERS[first] ?? EXT_PACKAGE_MANAGERS[interpreterBase(first)];
+  if (extPackage) {
+    const sub = packageSubcommand(rest.slice(1));
+    // 裸用与纯查询旗标形态只打印帮助（gem/go/brew 的裸形态同为帮助，写形态由子命令拦）
+    if (sub === undefined || extPackage.has(sub)) return undefined;
+    if (EXT_PKG_INSTALL_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（写本地包与缓存）`;
+    if (EXT_PKG_BUILD_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（构建写产物）`;
+    if (EXT_PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
+    return `写命令 ${first} ${sub}（子命令无法核验）`;
+  }
+  if (BUILD_TOOL_WORDS.has(first)) return `写命令 ${first}（构建写产物）`;
   // certutil 的编解码把结果写入文件（certutil -decode in.b64 out.bin）；-hashfile 等查询形态放行
   if (first === "certutil" && rest.slice(1).some((w) => /^[-/](encode|decode|decodehex)$/i.test(w))) {
     return "写命令 certutil（落盘写文件）";
