@@ -550,7 +550,8 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
     ]) {
       expect(readOnlyWrite(command), command).toMatch(/输出写文件/);
     }
-    for (const command of ["sort in.txt", "sort -n in.txt", "sort -r -k2 f", "sort /R f"]) {
+    // /o 按整词匹配：以 /o 开头的路径操作数不误伤（与 bash.ts 同口径）
+    for (const command of ["sort in.txt", "sort -n in.txt", "sort -r -k2 f", "sort /R f", "sort /opt/data.txt"]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });

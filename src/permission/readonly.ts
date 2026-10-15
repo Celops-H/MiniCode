@@ -250,8 +250,9 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
       rest.slice(1).some((w) => /^-(outf|outfi|outfil|outfile)(=|:|$)/i.test(w))) {
     return `写命令 ${first}（落盘写文件）`;
   }
-  // sort 输出写文件：cmd 的 /o、POSIX 的 -o/--output（无该选项输出 stdout 是只读）
-  if (first === "sort" && rest.slice(1).some((w) => /^\/o/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {
+  // sort 输出写文件：cmd 的 /o、POSIX 的 -o/--output（无该选项输出 stdout 是只读）。
+  // /o 按整词匹配，不误伤以 /o 开头的路径操作数（sort /opt/data.txt），与 bash.ts 同口径
+  if (first === "sort" && rest.slice(1).some((w) => /^\/o$/i.test(w) || /^-[A-Za-z]*o/.test(w) || /^--output(=|$)/.test(w))) {
     return "写命令 sort（输出写文件）";
   }
   if (first === "reg") {
