@@ -46,6 +46,8 @@ export function buildSummaryRequest(instructions?: string): Message {
 
 /**
  * 用模型把消息压缩成摘要文本：摘要请求附在对话末尾，收集模型回复的文本。
+ * 错误记录（role:"error"）剥除：它是界面留痕不是对话消息，与记忆更新同口径；
+ * 摘要会作为上下文写回，带错误文本等于把错误回灌模型。
  * @param client 模型流（Summarizer）
  * @param modelId 模型 id
  * @param messages 待压缩的对话消息
@@ -59,7 +61,8 @@ export async function generateSummary(
   instructions?: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const context = createContext(SUMMARY_SYSTEM_PROMPT, [...messages, buildSummaryRequest(instructions)], []);
+  const conversation = messages.filter((m) => m.role !== "error");
+  const context = createContext(SUMMARY_SYSTEM_PROMPT, [...conversation, buildSummaryRequest(instructions)], []);
   const assistant = await assembleAssistantMessage(client.stream(modelId, context, { signal }));
   return assistant.content
     .filter((block): block is { type: "text"; text: string } => block.type === "text")

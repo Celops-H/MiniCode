@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSummaryRequest, generateSummary, replaceWithSummary } from "../../src/context/index.js";
-import { userMessage } from "../../src/core/index.js";
+import { userMessage, errorMessage } from "../../src/core/index.js";
 import type { Summarizer } from "../../src/context/index.js";
 
 /** 固定输出摘要文本的 mock 模型流 */
@@ -76,6 +76,26 @@ describe("generateSummary（生成摘要）", () => {
       },
     };
     expect(await generateSummary(stream, "mock", [])).toBe("");
+  });
+
+  it("剥除错误记录：role:error 不进摘要请求，正常消息保留", async () => {
+    let seen: { role: string; content: unknown }[] | undefined;
+    const stream: Summarizer = {
+      async *stream(_modelId, context) {
+        seen = context.messages as unknown as { role: string; content: unknown }[];
+        yield { type: "text_delta", text: "摘要" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    await generateSummary(stream, "mock", [
+      userMessage("问题"),
+      errorMessage("上游 500"),
+      userMessage("继续"),
+    ]);
+    // 两条正常消息 + 摘要请求；错误记录被剥除（带上会把错误文本回灌模型）
+    expect(seen).toHaveLength(3);
+    expect(seen!.some((m) => m.role === "error")).toBe(false);
+    expect(seen!.map((m) => m.content)).toEqual(["问题", "继续", expect.stringContaining("压缩为结构化摘要")]);
   });
 });
 
