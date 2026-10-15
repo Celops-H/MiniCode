@@ -5,7 +5,7 @@
  *
  * 顺序与时间戳：行序才是因果序，消费方按文件行序读，不按 timestamp 排序。
  * 两类行的 timestamp 语义不同——事件行记采集时刻，消息行记消息自身创建时刻；
- * 写入攒批会让落盘时刻晚于发生时刻，因此文件序里 timestamp 允许回退。
+ * 二者交错写入，文件序里 timestamp 允许回退。
  */
 
 /** header 的 format 标识 */
@@ -49,13 +49,12 @@ export interface TraceMessageLine {
  * 事件行：与 hook 事件同名同构（零映射），data 为事件负载（type 与 agentPath
  * 提升到行级）。行级 timestamp 是采集时刻，由 Recorder 收到事件时打
  * （总线顺序 await，到达序即发生序）；它不保证随文件序单调，因果序只看行序。
- * agentPath 由 Recorder 恒写（payload 不带路径的会话级事件归 /root）；
- * 声明成可选是兼容没有该键的旧轨迹，读取侧按缺省处理。
+ * agentPath 由 Recorder 恒写（payload 不带路径的会话级事件归 /root），行级必有值。
  */
 export interface TraceEventLine {
   kind: "event";
   event: string;
-  agentPath?: string;
+  agentPath: string;
   timestamp: string;
   data: Record<string, unknown>;
 }
