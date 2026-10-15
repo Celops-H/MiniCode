@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Agent, type ModelClient } from "../../src/agent/index.js";
-import { toolResultMessage, userMessage } from "../../src/core/index.js";
+import { errorMessage, toolResultMessage, userMessage } from "../../src/core/index.js";
 import { MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest } from "../../src/context/index.js";
 
 /** 判别一次模型调用是不是记忆更新请求 */
@@ -49,6 +49,41 @@ describe("会话记忆", () => {
     }
     await agent.whenMemorySettled();
     expect(memoryCalls).toHaveLength(2);
+  });
+
+  it("记忆更新跳过 error 记录：错误文本不进记忆请求", async () => {
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryRequests.push(String(context.messages[0]!.content));
+          yield { type: "text_delta", text: "记忆：正常内容" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      // 会话恢复出的历史带一条错误记录（上一轮模型调用失败的界面留痕）
+      initialMessages: [userMessage("上一轮输入"), errorMessage("模型调用失败：认证错误，可用 /model 换模型")],
+    });
+    agent.start("本轮");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    expect(memoryRequests).toHaveLength(1);
+    // 错误记录跳过，其余未覆盖消息照常进记忆
+    expect(memoryRequests[0]).toContain("上一轮输入");
+    expect(memoryRequests[0]).toContain("本轮");
+    expect(memoryRequests[0]).not.toContain("认证错误");
   });
 
   it("记忆更新失败静默：不影响对话主流程", async () => {
@@ -191,6 +226,20 @@ describe("buildMemoryUpdateRequest", () => {
     expect(text).toContain("x".repeat(2000));
     expect(text).not.toContain("x".repeat(2001));
     expect(text).toMatch(/…$/);
+  });
+
+  it("错误记录跳过：界面留痕不拼进记忆请求文本", () => {
+    const request = buildMemoryUpdateRequest({
+      currentMemory: "",
+      recentMessages: [
+        userMessage("正常输入"),
+        errorMessage("模型调用失败：认证错误，可用 /model 换模型报错"),
+      ],
+    });
+    const text = String(request[0]!.content);
+    expect(text).toContain("正常输入");
+    expect(text).not.toContain("认证错误");
+    expect(text).not.toContain("error:");
   });
 });
 describe("记忆更新后台化", () => {
