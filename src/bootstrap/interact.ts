@@ -126,8 +126,10 @@ export async function interact(options: InteractOptions): Promise<void> {
       while (agent.isActive()) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      // 本轮起点：回显工具结果时只回显本轮新增的（重写分支里历史可能被压缩替换）
-      const roundStart = agent.getMessages().length;
+      // 本轮起点：记下已有消息 id，回显工具结果时只回显本轮新增的。回合内自动压缩
+      // 会整体替换消息数组（doCompact 改写 this.messages），按下标快照切会随替换
+      // 失效：切空或切掉前半段新增结果，回显丢失；按 id 判定与下标无关
+      const knownIds = new Set(agent.getMessages().map((message) => message.id));
       agent.start(prompt);
       // 轮末落盘：放 finally——api error 当轮（模型流抛错）时 agent 内存里已有本轮
       // 用户消息，异常路径跳过落盘会让盘上缺这条，reconfigure/重开后的 UI 与模型上下文不一致；
@@ -189,9 +191,11 @@ export async function interact(options: InteractOptions): Promise<void> {
         }
       }
       write("\n");
-      // 回显本轮工具结果（重写分支也要回显，不能因压缩吞掉工具输出）
-      for (const message of agent.getMessages().slice(roundStart)) {
-        if (message.role === "tool_result") {
+      // 回显本轮工具结果：按 id 取本轮新增。压缩替换历史后，仍在上下文中的本轮
+      // 结果照常回显（旧实现按压缩前下标切会切空或错切）；压缩后保留的旧结果
+      // id 在快照内不会重发；回合中途被摘要吸收的结果随历史消失，不回显
+      for (const message of agent.getMessages()) {
+        if (message.role === "tool_result" && !knownIds.has(message.id)) {
           write(`\n[工具结果] ${message.content}\n`);
         }
       }

@@ -622,6 +622,174 @@ describe("interact /compact 命令", () => {
     expect(JSON.stringify(loaded.getMessages().map((m) => m.content))).toContain("回复");
   });
 
+  it("撞线自动压缩轮的工具结果照常回显（按 id 取本轮新增，不因压缩丢）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      maxResultSizeChars: 1000,
+      execute: () => "文件内容",
+    };
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const isSummaryRequest = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+          );
+          if (isSummaryRequest) {
+            yield { type: "text_delta", text: "压缩摘要" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          // 压缩后（上下文含摘要）先执行一次工具，再总结——工具结果出现在
+          // 压缩替换后的新数组里，压缩前下标快照已失效
+          const hasSummary = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("【会话摘要】"),
+          );
+          const hasResult = context.messages.some((m) => m.role === "tool_result");
+          if (hasSummary && !hasResult) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"a.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+            return;
+          }
+          yield { type: "text_delta", text: "回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      // 窗口：前三轮不撞线；第四轮（历史 + 1200 字大输入）撞线压缩，
+      // 压缩把消息数组整体换成摘要（短于压缩前长度）
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "前情一";
+      yield "前情二";
+      yield "前情三";
+      yield "很长的问题".repeat(200);
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+      onEvent: () => {},
+    });
+
+    // 前提：第四轮确实撞线压缩，否则用例退化为普通轮、不测本 bug
+    expect(outputs.join("")).toContain("[历史已压缩]");
+    // 压缩轮内执行的工具结果照常回显（此前按压缩前下标切缩短后的新数组，切空丢回显）
+    const echoes = outputs.filter((t) => t.includes("[工具结果]"));
+    expect(echoes).toHaveLength(1);
+    expect(echoes[0]).toContain("文件内容");
+  });
+
+  it("记忆替代压缩轮的工具结果照常回显（在途消息保留原文，回显按 id 取新增）", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const readTool: Tool = {
+      name: "read",
+      description: "读取文件",
+      inputSchema: z.object({ path: z.string() }),
+      isReadOnly: true,
+      maxResultSizeChars: 1000,
+      execute: () => "小输出",
+    };
+    // 摘要调用计数：断言为零钉住压缩走了记忆替代路径（不调摘要模型）
+    let summaryCalls = 0;
+    const agent = new Agent({
+      modelClient: {
+        async *stream(_modelId, context) {
+          const isMemoryRequest = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes(MEMORY_REQUEST_MARKER),
+          );
+          if (isMemoryRequest) {
+            yield { type: "text_delta", text: "记忆文本" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          const isSummaryRequest = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("结构化摘要"),
+          );
+          if (isSummaryRequest) {
+            summaryCalls++;
+            yield { type: "text_delta", text: "压缩摘要" };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          const hasSummary = context.messages.some(
+            (m) => typeof m.content === "string" && m.content.includes("【会话摘要】"),
+          );
+          const toolResults = context.messages.filter((m) => m.role === "tool_result");
+          // 压缩后（记忆替代摘要，上下文含摘要消息）先执行一次工具，再总结；
+          // 记忆分支保留在途消息原文，新数组整体短于压缩前长度
+          if (hasSummary && toolResults.length === 0) {
+            yield { type: "toolcall_start", index: 0, id: "c1", name: "read" };
+            yield { type: "toolcall_delta", index: 0, partialJson: '{"path":"small.ts"}' };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_calls" };
+            return;
+          }
+          // 第三轮的长回复把历史撑到撞线，供第四轮压缩触发
+          const last = context.messages.at(-1);
+          if (typeof last?.content === "string" && last.content === "前情三") {
+            yield { type: "text_delta", text: "背景资料".repeat(125) };
+            yield { type: "done", stopReason: "end_turn" };
+            return;
+          }
+          yield { type: "text_delta", text: "回复" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      memory: true,
+      // 窗口：前三轮不撞线；第四轮（历史约 513 token）撞线，压缩走记忆替代路径
+      compactConfig: { contextWindow: 500, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "前情一";
+      yield "前情二";
+      yield "前情三";
+      // 等三轮记忆更新收尾：记忆非空且覆盖点推进到 6，第四轮压缩必走记忆替代路径
+      await agent.whenMemorySettled();
+      yield "干活";
+      yield "/exit";
+    }
+    const outputs: string[] = [];
+    await interact({
+      agent,
+      store,
+      session,
+      inputs: inputs(),
+      write: (text) => outputs.push(text),
+      onEvent: () => {},
+    });
+    await agent.whenMemorySettled();
+
+    // 前提：第四轮确实撞线压缩，且走记忆替代路径（不调摘要模型）
+    expect(outputs.join("")).toContain("[历史已压缩]");
+    expect(summaryCalls).toBe(0);
+    // 压缩轮内执行的工具结果照常回显（此前按压缩前下标切缩短后的新数组，切空丢回显）
+    const echoes = outputs.filter((t) => t.includes("[工具结果]"));
+    expect(echoes).toHaveLength(1);
+    expect(echoes[0]).toContain("小输出");
+  });
+
   it("interact 未知命令反馈帮助提示", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
