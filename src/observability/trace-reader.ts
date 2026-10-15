@@ -111,6 +111,9 @@ export interface AgentOutcome {
   conclusion?: string;
   /** worktree 合并结果（有隔离工作区且发生合并时存在） */
   mergeResult?: string;
+  /** 终态事件行的采集时刻（ISO 串，即终态发生时刻）。消费方据此把终态还原到消息流的对应位置；
+   *  事件行缺时间戳时省略该键 */
+  timestamp?: string;
 }
 
 /**
@@ -134,7 +137,11 @@ export async function readAgentOutcomes(filePath: string): Promise<AgentOutcome[
       const path = data.path;
       if (typeof path !== "string") continue;
       if (line.event === "AgentInterrupted") {
-        last.set(path, { path, outcome: "interrupted" });
+        last.set(path, {
+          path,
+          outcome: "interrupted",
+          ...(typeof line.timestamp === "string" ? { timestamp: line.timestamp } : {}),
+        });
         continue;
       }
       last.set(path, {
@@ -142,6 +149,7 @@ export async function readAgentOutcomes(filePath: string): Promise<AgentOutcome[
         outcome: data.failed === true ? "failed" : "completed",
         ...(typeof data.conclusion === "string" ? { conclusion: data.conclusion } : {}),
         ...(typeof data.mergeResult === "string" ? { mergeResult: data.mergeResult } : {}),
+        ...(typeof line.timestamp === "string" ? { timestamp: line.timestamp } : {}),
       });
     }
   } catch {

@@ -735,11 +735,12 @@ describe("TraceReader：流式读取与容错", () => {
       );
 
       const outcomes = await readAgentOutcomes(file);
+      // timestamp 取终态事件行的采集时刻，供 TUI 把活动行还原到消息流对应位置
       expect(outcomes).toEqual([
-        { path: "/root/ok", outcome: "completed", conclusion: "任务完成", mergeResult: "已合并" },
-        { path: "/root/bad", outcome: "failed", conclusion: "子代理 bad 失败：模型链耗尽" },
-        { path: "/root/gone", outcome: "interrupted" },
-        { path: "/root/retry", outcome: "completed", conclusion: "重跑后完成" },
+        { path: "/root/ok", outcome: "completed", conclusion: "任务完成", mergeResult: "已合并", timestamp: "t" },
+        { path: "/root/bad", outcome: "failed", conclusion: "子代理 bad 失败：模型链耗尽", timestamp: "t" },
+        { path: "/root/gone", outcome: "interrupted", timestamp: "t" },
+        { path: "/root/retry", outcome: "completed", conclusion: "重跑后完成", timestamp: "t" },
       ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -764,12 +765,15 @@ describe("TraceReader：流式读取与容错", () => {
           JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/badpath", timestamp: "t", data: { path: 123 } }),
           // conclusion 字段缺失（老轨迹）：条件展开省略该键
           JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/after", timestamp: "t", data: { path: "/root/after", parentPath: "/root" } }),
+          // 事件行缺 timestamp：同样条件展开省略该键
+          JSON.stringify({ kind: "event", event: "AgentCompleted", agentPath: "/root/nots", data: { path: "/root/nots", parentPath: "/root" } }),
         ].join("\n"),
         "utf8",
       );
       expect(await readAgentOutcomes(file)).toEqual([
-        { path: "/root/quiet", outcome: "completed", conclusion: "" },
-        { path: "/root/after", outcome: "completed" },
+        { path: "/root/quiet", outcome: "completed", conclusion: "", timestamp: "t" },
+        { path: "/root/after", outcome: "completed", timestamp: "t" },
+        { path: "/root/nots", outcome: "completed" },
       ]);
       expect(await readAgentOutcomes(path.join(dir, "nope.jsonl"))).toEqual([]);
     } finally {
