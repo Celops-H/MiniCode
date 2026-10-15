@@ -435,7 +435,7 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   }
   // tar 按模式判定：-t/--list 列表与 -d 比较放行，写模式拒绝，见 tarWriteVerdict
   if (first === "tar") return tarWriteVerdict(rest.slice(1));
-  // 压缩族默认就地改写文件，只有 -c/-t/-l 组成的旗标簇放行，见 compressWriteVerdict
+  // 压缩族默认就地改写文件，只有 -c/-t/-l 与纯查询旗标组成的簇放行，见 compressWriteVerdict
   if (COMPRESS_COMMAND_WORDS.has(first)) return compressWriteVerdict(rest.slice(1), first);
   if (first === "reg") {
     const sub = rest[1]?.toLowerCase();
