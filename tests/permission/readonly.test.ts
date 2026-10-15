@@ -276,9 +276,15 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
       "if errorlevel 1 del f",
       "if 1 lss 2 del f",
       "dir & for %%i in (*) do del %%i",
+      // 包装词排在 if/for 之前：剥包装后再取内层命令
+      "call if exist f del f",
+      "call for %f in *.log do rm %f",
+      "timeout 10 if exist f del f",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
     }
+    expect(readOnlyWriteShell("for %%i in (*.txt) do del %%i", "cmd")).toMatch(/写命令 del/);
+    expect(readOnlyWriteShell("if exist f (echo start) else (del f)", "cmd")).toMatch(/写命令 del/);
     for (const command of [
       'for /f "delims=" %i in (list.txt) do @echo %i',
       "for %%f in (*.txt) do type %%f",
@@ -288,6 +294,11 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
       "if errorlevel 1 echo fail",
       "if 1 lss 2 echo yes",
       "dir /b src",
+      // 非 if/for 段的括号是字面文本，切段会误拦（echo (del)、findstr (copy)）
+      "echo (del)",
+      "echo (copy) (move)",
+      "findstr (copy) src",
+      "type report (copy).txt",
     ]) {
       expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
     }

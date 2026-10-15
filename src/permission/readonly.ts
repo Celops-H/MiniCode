@@ -21,8 +21,9 @@
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
  *   整体拒绝，落盘出口（下载、sort 输出文件、certutil 编解码）与持久化写（注册表、
- *   setx、计划任务、服务控制）按形态判定，cmd 的括号分组按段切开、if/for 先取内层命令再判
- *   （if 条件按枚举形态跳过，未识别的条件形态放行），见 segmentWriteVerdict 各分支；
+ *   setx、计划任务、服务控制）按形态判定，cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
+ *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
+ *   见 segmentWriteVerdict 各分支；
  * - ssh 的远端命令不判定：`ssh host rm x` 与 `ssh host 'rm x'`（引号包住的整串）同属边界，
  *   远端执行的写入不在本机守卫范围，只读 agent 的远端读由内置工具覆盖。
  */
@@ -82,12 +83,14 @@ function bashWriteViolation(command: string, shell: CommandShellKind): string | 
   // 重定向到文件：> >> 2> &> 等（>&2 / 2>&1 是 fd 复制不写文件；
   // >( 进程替换由危险命令检查拦截——该检查挂在权限管线，管线缺失时不兜底）
   if (/>{1,2}(?!&\d)(?!\()/.test(stripped)) return "命令含重定向写文件";
-  // cmd 的括号是命令分组（if a (x) else (y)、for %%i in (*) do cmd），组内命令一并切段判定
-  const separators = shell === "cmd" ? /[|;&\n()]/ : /[|;&\n]/;
-  for (const segment of stripped.split(separators)) {
-    const words = segment.trim().split(/\s+/).filter(Boolean);
-    const verdict = segmentWriteVerdict(words, shell);
-    if (verdict) return verdict;
+  for (const segment of stripped.split(/[|;&\n]/)) {
+    // cmd 的括号只在 if/for 语句里是命令分组，其余位置是字面文本（echo (del)、findstr (copy)）
+    const parts = shell === "cmd" && isCmdIfForSegment(segment) ? segment.split(/[()]/) : [segment];
+    for (const part of parts) {
+      const words = part.trim().split(/\s+/).filter(Boolean);
+      const verdict = segmentWriteVerdict(words, shell);
+      if (verdict) return verdict;
+    }
   }
   return undefined;
 }
@@ -209,6 +212,19 @@ const CMD_IF_KEYWORDS = new Set(["exist", "defined", "errorlevel", "cmdextversio
 const CMD_IF_COMPARE_OPS = new Set(["equ", "neq", "lss", "leq", "gtr", "geq"]);
 
 /**
+ * cmd 段是否为 if/for 语句（含 else 分支段与剥掉 do/else 关键字后的段）：
+ * 只有这类段的括号是命令分组，其余位置是字面文本。
+ * @param segment 命令段原文
+ */
+function isCmdIfForSegment(segment: string): boolean {
+  const words = segment.trim().split(/\s+/).filter(Boolean);
+  let i = 0;
+  while (i < words.length && /^(do|else)$/i.test(words[i]!)) i++;
+  const head = normalizeCommandWord(words[i] ?? "");
+  return head === "if" || head === "for";
+}
+
+/**
  * cmd 段首 if/for 的内层命令词表：for 取 do 之后的词，if 取条件之后的词。
  * if 的条件按可枚举形态跳过：/i 与 not 前缀、exist/defined/errorlevel/cmdextversion
  * 各带一个操作数、含 == 的比较式、两操作数夹一个比较运算符。
@@ -244,10 +260,15 @@ function cmdInlineCommand(words: string[]): string[] {
  * @returns 违规原因；只读安全返回 undefined
  */
 function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
-  // cmd 的 if/for 段首看不出真实命令词，先取内层命令（见 cmdInlineCommand）
-  const { rest, queried } = stripCommandPrefix(shell === "cmd" ? cmdInlineCommand(words) : words);
+  // cmd 的 if/for 段首看不出真实命令词，先剥包装（call/sudo/timeout 可能排在 if 之前）
+  // 再取内层命令，内层命令自身也可能带包装，取完重新剥一遍（见 cmdInlineCommand）
+  let { rest, queried } = stripCommandPrefix(words);
   // command -v/-V 只查询命令路径，不执行后续词
   if (queried) return undefined;
+  if (shell === "cmd") {
+    ({ rest, queried } = stripCommandPrefix(cmdInlineCommand(rest)));
+    if (queried) return undefined;
+  }
   const first = rest[0] === undefined ? undefined : normalizeCommandWord(rest[0]);
   if (!first) return undefined;
   // shell 家族与 Windows 脚本宿主：-c 内联、脚本文件、stdin 都是无法核验的内层代码，
