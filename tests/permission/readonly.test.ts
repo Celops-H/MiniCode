@@ -1024,6 +1024,7 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
       "gunzip -d f.gz",
       "gunzip -dk f.gz",
       "unzip -o a.zip",
+      "unzip -o f.zip",
       "sudo gunzip f.gz",
       "xargs unzip",
     ]) {
@@ -1042,6 +1043,8 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
       "unzip -t a.zip",
       "unzip -v a.zip",
       "unzip -Z a.zip",
+      "unzip -Z1 a.zip",
+      "unzip -Z2 a.zip",
       "gzip --help",
       "gzip --version",
       "gzip -h",

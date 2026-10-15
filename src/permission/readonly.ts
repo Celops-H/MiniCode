@@ -674,7 +674,8 @@ const COMPRESS_READ_LONG_OPTIONS = new Set(["--stdout", "--to-stdout", "--test",
  * 压缩族的模式判定：只有 -c/-t/-l 与纯查询旗标（-h/-V 与 --help/--version）组成的旗标簇
  * （及等价的长选项）放行，其余形态都改写文件，按写拒绝：裸用与 - 操作数（读 stdin 写 stdout，
  * 形态罕见）、-d 解压、-k、-9，以及含 -c 的混合簇（-dc/-cv 输出 stdout 不落盘，按保守拒绝）。
- * unzip 的只读旗标多认 -p/-v/-z/-Z（见 UNZIP_READ_LETTERS）。
+ * unzip 的只读旗标多认 -p/-v/-z/-Z（见 UNZIP_READ_LETTERS），-Z 后跟数字的 zipinfo
+ * 列表级别（-Z1/-Z2）一并放行。
  * 读压缩内容用 zcat/xzcat/zstdcat，三者不在本表内，照常放行。
  * @param words 压缩命令之后的词
  * @param first 命令词（拼拒绝理由用）
@@ -691,7 +692,13 @@ function compressWriteVerdict(words: string[], first: string): string | undefine
       continue;
     }
     const letters = word.slice(1);
-    if (letters.length === 0 || ![...letters].every((ch) => readLetters.has(ch))) {
+    // unzip 的 -Z 切到 zipinfo 列表模式，其后跟数字选列表级别（-Z1 逐行列名、-Z2 分级列表），
+    // 同为纯读；裸 -1/-2 不是 unzip 选项，不认
+    const zIndex = first === "unzip" ? letters.indexOf("Z") : -1;
+    const readCluster = [...letters].every(
+      (ch, i) => readLetters.has(ch) || (zIndex !== -1 && i > zIndex && /\d/.test(ch)),
+    );
+    if (letters.length === 0 || !readCluster) {
       return `写命令 ${first} ${word}（压缩改写文件）`;
     }
     readMode = true;
