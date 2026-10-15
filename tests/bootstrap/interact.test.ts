@@ -815,6 +815,58 @@ describe("交互循环", () => {
     expect(loaded.getMessages().at(-1)).toMatchObject({ role: "error", content: "连接中断" });
   });
 
+  it("run 抛错且宿主未注入 onError：异常直退也执行收尾，收件箱滞留消息注入并落盘", async () => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
+    const store = new SessionStore(dir);
+    const session = await store.createSession({ model: "mock" });
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "error", message: "连接中断" };
+          throw new Error("连接中断");
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+    });
+
+    async function* inputs(): AsyncIterable<string> {
+      yield "这轮会出错的消息";
+    }
+    await expect(
+      interact({
+        agent,
+        store,
+        session,
+        inputs: inputs(),
+        write: () => {},
+        onEvent: (event) => {
+          // 出错轮内投递的中断标记：轮起点已过，滞留收件箱等会话收尾注入
+          if (event.type === "error") {
+            agent.deliver({
+              type: "INTERRUPTED",
+              from: AgentPath.parse("/root/task_1") as AgentPath,
+              content: "子代理 task_1 已中断，任务未完成。",
+              triggerTurn: false,
+            });
+          }
+        },
+      }),
+    ).rejects.toThrow("连接中断");
+
+    // 异常穿过 interact：收尾照常执行，滞留的中断标记注入历史并落盘（恢复会话有迹可循）
+    expect(agent.getMessages().at(-1)).toMatchObject({ role: "user", agentPath: "/root/task_1" });
+    const loaded = await store.loadSession(session.meta.id);
+    expect(loaded.getMessages().map((m) => m.role)).toEqual(["user", "error", "user"]);
+    expect(loaded.getMessages().at(-1)).toMatchObject({
+      role: "user",
+      source: "system",
+      agentPath: "/root/task_1",
+      content: "【中断】from /root/task_1:\n子代理 task_1 已中断，任务未完成。",
+    });
+  });
+
   it("会话收尾注入收件箱滞留消息：Esc 打断的中断标记随会话结束落盘（恢复会话有迹可循）", async () => {
     dir = mkdtempSync(path.join(os.tmpdir(), "minicode-cli-"));
     const store = new SessionStore(dir);
