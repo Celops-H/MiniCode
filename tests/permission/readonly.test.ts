@@ -253,6 +253,39 @@ describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
     expect(readOnlyWriteShell("cmd /d dir", "cmd")).toBeUndefined();
   });
 
+  it("cmd 的 if/for 取内层命令判定：分组、do 与简写形态都命中，只读内层照常放行", () => {
+    for (const command of [
+      'for /f "delims=" %i in (list.txt) do @del %i',
+      "for %%i in (*.txt) do del %%i",
+      "for /l %%i in (1,1,3) do del f%%i",
+      "for %f in *.log do rm %f",
+      "for %%i in (*) do (rd /s /q build)",
+      "if exist out.txt (del out.txt)",
+      "if exist a (rd /s /q a) else (echo none)",
+      "if exist f (echo start) else (del f)",
+      "if not exist f del f",
+      "if /i x==y del f",
+      "if 1==1 (copy a b)",
+      "if errorlevel 1 del f",
+      "if 1 lss 2 del f",
+      "dir & for %%i in (*) do del %%i",
+    ]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeDefined();
+    }
+    for (const command of [
+      'for /f "delims=" %i in (list.txt) do @echo %i',
+      "for %%f in (*.txt) do type %%f",
+      "for %f in *.log do echo %f",
+      "if exist f.txt (echo yes) else (echo no)",
+      "if exist f.txt echo yes",
+      "if errorlevel 1 echo fail",
+      "if 1 lss 2 echo yes",
+      "dir /b src",
+    ]) {
+      expect(readOnlyWriteShell(command, "cmd"), command).toBeUndefined();
+    }
+  });
+
   it("attrib 与 icacls 显示形态放行，修改旗标拒绝", () => {
     expect(readOnlyWriteShell("attrib +r file.txt", "cmd")).toMatch(/attrib/);
     expect(readOnlyWriteShell("attrib -h file.txt", "cmd")).toMatch(/attrib/);

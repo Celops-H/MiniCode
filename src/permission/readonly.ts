@@ -80,7 +80,9 @@ function bashWriteViolation(command: string, shell: CommandShellKind): string | 
   // 重定向到文件：> >> 2> &> 等（>&2 / 2>&1 是 fd 复制不写文件；
   // >( 进程替换由危险命令检查拦截——该检查挂在权限管线，管线缺失时不兜底）
   if (/>{1,2}(?!&\d)(?!\()/.test(stripped)) return "命令含重定向写文件";
-  for (const segment of stripped.split(/[|;&\n]/)) {
+  // cmd 的括号是命令分组（if a (x) else (y)、for %%i in (*) do cmd），组内命令一并切段判定
+  const separators = shell === "cmd" ? /[|;&\n()]/ : /[|;&\n]/;
+  for (const segment of stripped.split(separators)) {
     const words = segment.trim().split(/\s+/).filter(Boolean);
     const verdict = segmentWriteVerdict(words, shell);
     if (verdict) return verdict;
@@ -198,6 +200,40 @@ function xargsVerdict(words: string[], idx: number, shell: CommandShellKind): st
   return segmentWriteVerdict(words.slice(idx), shell);
 }
 
+/** cmd if 的条件关键字：各带一个操作数（exist f、errorlevel 1、defined var） */
+const CMD_IF_KEYWORDS = new Set(["exist", "defined", "errorlevel", "cmdextversion"]);
+
+/** cmd if 的数值比较运算符（if 1 lss 2 cmd） */
+const CMD_IF_COMPARE_OPS = new Set(["equ", "neq", "lss", "leq", "gtr", "geq"]);
+
+/**
+ * cmd 段首 if/for 的内层命令词表：for 取 do 之后的词，if 取条件之后的词。
+ * if 的条件按可枚举形态跳过：/i 与 not 前缀、exist/defined/errorlevel/cmdextversion
+ * 各带一个操作数、含 == 的比较式、两操作数夹一个比较运算符。
+ * 段首不是 if/for 或条件不属于上述形态时原样返回（首词 if/for 不入黑名单，按只读放行）。
+ * @param words 命令段分词
+ * @returns 内层命令词表
+ */
+function cmdInlineCommand(words: string[]): string[] {
+  let rest = words;
+  // do 与 else 是关键字：for 的内层命令在 do 之后，if 各分组经 ;|& 切段后首词可能是 else
+  while (rest.length > 0 && /^(do|else)$/i.test(rest[0]!)) rest = rest.slice(1);
+  const head = normalizeCommandWord(rest[0] ?? "");
+  if (head === "for") {
+    const doIdx = rest.findIndex((w) => /^do$/i.test(w));
+    return doIdx === -1 ? rest : rest.slice(doIdx + 1);
+  }
+  if (head !== "if") return rest;
+  let i = 1;
+  if (/^\/i$/i.test(rest[i] ?? "")) i++;
+  if (/^not$/i.test(rest[i] ?? "")) i++;
+  if (CMD_IF_KEYWORDS.has((rest[i] ?? "").toLowerCase())) i += 2;
+  else if ((rest[i] ?? "").includes("==")) i += 1;
+  else if (CMD_IF_COMPARE_OPS.has((rest[i + 1] ?? "").toLowerCase())) i += 3;
+  else return rest;
+  return rest.slice(i);
+}
+
 /**
  * 单个命令段的写判定：剥开段首包装与分组符号（与危险命令检查同口径，
  * 见 dangerous.ts stripCommandPrefix），按真实命令词查黑名单。
@@ -206,7 +242,8 @@ function xargsVerdict(words: string[], idx: number, shell: CommandShellKind): st
  * @returns 违规原因；只读安全返回 undefined
  */
 function segmentWriteVerdict(words: string[], shell: CommandShellKind): string | undefined {
-  const { rest, queried } = stripCommandPrefix(words);
+  // cmd 的 if/for 段首看不出真实命令词，先取内层命令（见 cmdInlineCommand）
+  const { rest, queried } = stripCommandPrefix(shell === "cmd" ? cmdInlineCommand(words) : words);
   // command -v/-V 只查询命令路径，不执行后续词
   if (queried) return undefined;
   const first = rest[0] === undefined ? undefined : normalizeCommandWord(rest[0]);
