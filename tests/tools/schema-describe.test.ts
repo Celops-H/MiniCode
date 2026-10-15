@@ -56,13 +56,12 @@ describe("协作工具与 skill 工具的入参字段说明与输出上限提示
   });
   const tools: Tool[] = [...collabTools, createSkillTool([])];
 
-  it("六个协作工具与 skill 工具均在覆盖范围内", () => {
+  it("五个协作工具与 skill 工具均在覆盖范围内", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "spawn_agent",
       "send_message",
       "followup_task",
       "list_agents",
-      "wait_agent",
       "interrupt_agent",
       "skill",
     ]);
@@ -70,7 +69,7 @@ describe("协作工具与 skill 工具的入参字段说明与输出上限提示
 
   it("全部入参字段都带 description（list_agents 无入参字段）", () => {
     // 有字段的工具先确认字段非空，防空 schema 让下面的循环空转
-    for (const name of ["spawn_agent", "send_message", "followup_task", "wait_agent", "interrupt_agent", "skill"]) {
+    for (const name of ["spawn_agent", "send_message", "followup_task", "interrupt_agent", "skill"]) {
       const tool = tools.find((t) => t.name === name)!;
       expect(Object.keys(schemaFields(tool)).length, `${name} 无任何字段`).toBeGreaterThan(0);
     }
@@ -90,8 +89,8 @@ describe("协作工具与 skill 工具的入参字段说明与输出上限提示
   });
 
   it("入参说明与实际规则对齐：绝对路径须以 /root 开头", () => {
-    // agent-path.ts 的 parse 只认 /root 前缀，四处 target 说明不得写成「/ 开头」
-    for (const name of ["send_message", "followup_task", "wait_agent", "interrupt_agent"]) {
+    // agent-path.ts 的 parse 只认 /root 前缀，各处 target 说明不得写成「/ 开头」
+    for (const name of ["send_message", "followup_task", "interrupt_agent"]) {
       const tool = tools.find((t) => t.name === name)!;
       const target = schemaFields(tool).target!;
       expect(target.description, name).toContain("/root");

@@ -6,7 +6,7 @@ import { AgentPath } from "../../src/agent/agent-path.js";
 import { Team } from "../../src/agent/team.js";
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import { createCollaborationTools } from "../../src/tools/index.js";
-import { COLLAB_SUBAGENT_PROMPT } from "../../src/tools/builtin/collab.js";
+import { COLLAB_SUBAGENT_PROMPT, COLLAB_TOOL_NAMES } from "../../src/tools/builtin/collab.js";
 import type { Tool } from "../../src/tools/base.js";
 import type { ModelClient } from "../../src/agent/agent.js";
 
@@ -483,7 +483,7 @@ describe("协作工具集（多 agent 环境）", () => {
     await sleep(30);
     const workerTools: string[] = toolsSeen[2] ?? ([] as string[]);
     // 协作工具恰一份（未因 team 重复注册）
-    for (const collab of ["spawn_agent", "send_message", "followup_task", "list_agents", "wait_agent", "interrupt_agent"]) {
+    for (const collab of ["spawn_agent", "send_message", "followup_task", "list_agents", "interrupt_agent"]) {
       expect(workerTools.filter((n) => n === collab)).toHaveLength(1);
     }
     // 父的自定义工具被继承
@@ -621,127 +621,20 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(finalMail).toBe(true);
   });
 
-  it("wait_agent：目标空闲时立即返回，忙碌时等待完成后返回", async () => {
-    const team = new Team();
-    const root = new Agent({
-      modelClient: toolThenTextClient("wait_agent", { target: "worker" }),
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    team.registerRoot(root);
-    // worker 空闲（从未驱动）：区分口径——调用前就空闲的，不报「已完成当前任务」，
-    // 防模型把 0ms 返回的空闲当成刚等完的同步完成而反复再等
-    const worker = new Agent({ modelClient: toolThenTextClient("x", {}), modelId: "mock", systemPrompt: "助手", team });
-    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
-    team.commitSpawn(path, worker);
-    root.start("等");
-    for await (const _ of root.run()) {
-      // 消费
-    }
-    const result = root.getMessages().find((m) => m.role === "tool_result");
-    expect(String(result?.content)).toContain("已空闲");
-    expect(String(result?.content)).not.toContain("已完成当前任务");
-
-    // 忙碌目标：等待其完成（mock 慢 80ms）
-    let busyCalls = 0;
-    const busy = new Agent({
-      modelClient: {
-        async *stream() {
-          busyCalls++;
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          yield { type: "text_delta", text: "done" };
-          yield { type: "done", stopReason: "end_turn" };
-        },
-      },
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    const busyPath = team.reserveSpawn(AgentPath.root(), "busy") as AgentPath;
-    team.commitSpawn(busyPath, busy);
-    const waitTool = collabTool(team, "wait_agent");
-    await team.sendMessage(busyPath, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    // 忙碌中：等待直到完成
-    expect(await waitTool.execute({ target: "busy", timeoutMs: 1000 })).toContain("已完成当前任务");
-  });
-
-  it("wait_agent：超时返回", async () => {
-    const team = new Team();
-    const root = new Agent({
-      modelClient: toolThenTextClient("wait_agent", { target: "worker" }),
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    team.registerRoot(root);
-    // 一直忙碌的目标（慢模型 500ms，wait 100ms 超时）
-    const busy = new Agent({
-      modelClient: {
-        async *stream() {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          yield { type: "text_delta", text: "done" };
-          yield { type: "done", stopReason: "end_turn" };
-        },
-      },
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    const busyPath = team.reserveSpawn(AgentPath.root(), "busy") as AgentPath;
-    team.commitSpawn(busyPath, busy);
-    const waitTool = collabTool(team, "wait_agent");
-    await team.sendMessage(busyPath, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    const start = Date.now();
-    expect(expectFailure(await waitTool.execute({ target: "busy", timeoutMs: 100 }))).toContain("超时");
-    expect(Date.now() - start).toBeGreaterThanOrEqual(100);
-  });
-
-  it("wait_agent：目标被中断时明确返回未完成", async () => {
-    const team = new Team();
-    const root = new Agent({ modelClient: toolThenTextClient("x", {}), modelId: "mock", systemPrompt: "助手", team });
-    team.registerRoot(root);
-    // 被中断的目标：interrupt 置终态，等待立即返回且不带「已完成」字样
-    const busy = new Agent({
-      modelClient: {
-        async *stream() {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          yield { type: "text_delta", text: "done" };
-          yield { type: "done", stopReason: "end_turn" };
-        },
-      },
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    const busyPath = team.reserveSpawn(AgentPath.root(), "busy") as AgentPath;
-    team.commitSpawn(busyPath, busy);
-    await team.sendMessage(busyPath, {
-      type: "NEW_TASK",
-      from: AgentPath.root(),
-      content: "干活",
-      triggerTurn: true,
-    });
-    // 等目标真正进入活跃循环再打断：interrupt 落在 resume 入口前会被复活复位吞掉
-    await vi.waitFor(() => {
-      expect(busy.isActive()).toBe(true);
-    });
-    busy.interrupt();
-    const waitTool = collabTool(team, "wait_agent");
-    const result = await waitTool.execute({ target: "busy", timeoutMs: 1000 });
-    expect(String(result)).toContain("已被中断");
-    expect(String(result)).toContain("未完成");
-    expect(String(result)).not.toContain("已完成当前任务");
+  it("无挂起等待工具：spawn_agent 描述要求派活后继续本地工作或结束本轮", () => {
+    // 挂起式等待已移除：状态查询由 list_agents 覆盖，子 agent 完成自动唤醒回灌结论
+    expect(COLLAB_TOOL_NAMES.has("wait_agent")).toBe(false);
+    expect([...COLLAB_TOOL_NAMES]).toEqual([
+      "spawn_agent",
+      "send_message",
+      "followup_task",
+      "list_agents",
+      "interrupt_agent",
+    ]);
+    const spawn = collabTool(new Team(), "spawn_agent");
+    expect(spawn.description).toContain("直接结束本轮");
+    expect(spawn.description).toContain("自动唤醒你");
+    expect(spawn.description).not.toContain("wait_agent");
   });
 
   it("interrupt_agent：中断目标（当前 turn 结束后停止），root/自己不可中断", async () => {
@@ -1067,23 +960,6 @@ describe("协作工具集（多 agent 环境）", () => {
   it("协作子 agent 提示词要求结论回传原始命令与绝对路径", () => {
     expect(COLLAB_SUBAGENT_PROMPT).toContain("原始命令");
     expect(COLLAB_SUBAGENT_PROMPT).toContain("绝对路径");
-  });
-
-  it("wait_agent：不能等待自己", async () => {
-    const team = new Team();
-    const root = new Agent({
-      modelClient: toolThenTextClient("wait_agent", { target: "worker" }),
-      modelId: "mock",
-      systemPrompt: "助手",
-      team,
-    });
-    team.registerRoot(root);
-    root.start("等");
-    for await (const _ of root.run()) {
-      // 消费
-    }
-const waitTool = collabTool(team, "wait_agent");
-    expect(expectFailure(await waitTool.execute({ target: "/root" }))).toContain("不能等待自己");
   });
 
   it("协作工具失败：结果带失败原因，执行器补发 PostToolUseFailure（评测失败口径不漏计）", async () => {

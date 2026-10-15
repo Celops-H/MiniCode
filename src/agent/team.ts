@@ -326,7 +326,6 @@ export class Team {
    * 把其结论回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源：
    * 正常完成走 FINAL_ANSWER，失败终态（驱动失败或结论不可信）走 FAILED，见对应分支。
    * 被中断时不投结论，只排队中断标记不唤醒（INTERRUPTED 类型，见中断分支）。
-   * wait_agent 只挂起不消费结论，避免重复投递。
    * @param agent 完成的子 agent
    * @param failure 驱动失败：非 undefined 时走失败终态——不合并 worktree、
    *   回灌明确失败文本（半截文本/「未产出结论」不再被当结论误导父 agent）

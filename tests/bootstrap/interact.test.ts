@@ -115,7 +115,9 @@ describe("多 Agent 组装", () => {
       // 消费
     }
     expect(toolsSeen).toContain("spawn_agent");
-    expect(toolsSeen).toContain("wait_agent");
+    expect(toolsSeen).toContain("list_agents");
+    // 挂起式等待已移除：派生后继续本地工作或结束本轮，子完成唤醒回灌
+    expect(toolsSeen).not.toContain("wait_agent");
     expect(systemPrompt).toContain("团队协调者");
     // 证据要求文案单一出处：协调者提示指向 spawn_agent 工具描述，正文不再重复
     expect(systemPrompt).toContain("spawn_agent");

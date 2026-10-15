@@ -43,7 +43,7 @@ import {
 
 /** 无文件写副作用、只读 agent 可用的状态类工具（协作调度与会话内任务管理） */
 const STATE_TOOL_ALLOW = new Set([
-  "spawn_agent", "send_message", "followup_task", "list_agents", "wait_agent", "interrupt_agent",
+  "spawn_agent", "send_message", "followup_task", "list_agents", "interrupt_agent",
   "todo", "bash_task",
 ]);
 

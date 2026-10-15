@@ -1,8 +1,9 @@
 /**
- * 多 Agent 协作工具：spawn_agent / send_message / followup_task / list_agents / wait_agent / interrupt_agent。
+ * 多 Agent 协作工具：spawn_agent / send_message / followup_task / list_agents / interrupt_agent。
  * 只在多 agent 环境注册（AgentOptions.team 传入时由 Agent 构造注册），普通单 agent 会话不可见。
+ * 没有挂起等待工具：派生后继续本地工作或结束本轮，子 agent 完成自动唤醒回灌结论。
  * 权限：send_message / list_agents 免审批（skipsPermission）；
- * spawn_agent / followup_task / wait_agent / interrupt_agent 走正常审批链。
+ * spawn_agent / followup_task / interrupt_agent 走正常审批链。
  */
 import { z } from "zod";
 import { outputLimitNote } from "../base.js";
@@ -18,7 +19,6 @@ export const COLLAB_TOOL_NAMES = new Set([
   "send_message",
   "followup_task",
   "list_agents",
-  "wait_agent",
   "interrupt_agent",
 ]);
 
@@ -72,7 +72,6 @@ export function createCollaborationTools(deps: CollabDeps): Tool[] {
     sendMessageTool(deps),
     followupTaskTool(deps),
     listAgentsTool(deps),
-    waitAgentTool(deps),
     interruptAgentTool(deps),
   ];
 }
@@ -92,8 +91,9 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       "worktree 参数控制是否给子 agent 独立的 git worktree 工作区（缺省随全局设置）：会写文件的任务建议开启，" +
       "避免并行写冲突；纯只读任务不必。隔离不可用时子 agent 与你共享工作目录，结果中会注明。" +
       "只有当任务能具体、独立成子任务且与你的本地工作并行推进时才派生，否则继续本地处理；" +
-      "多个互不依赖的子任务可在同一轮并行派生，等待期间可继续做不依赖它们结果的本地工作，" +
-      "需要等结果时用 wait_agent。" +
+      "多个互不依赖的子任务可在同一轮并行派生。" +
+      "派活后继续做不依赖它们结果的本地工作，或直接结束本轮。" +
+      "子 agent 完成会自动唤醒你并把结论回灌，不必等待。" +
       outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
       agentName: z
@@ -243,52 +243,6 @@ function resolveTarget(deps: CollabDeps, target: string): AgentPath | string {
   return current.resolve(target);
 }
 
-/** 挂起等待目标 agent 完成当前任务（空闲），只返回摘要不消费结论；结论由 watcher 回灌 */
-function waitAgentTool(deps: CollabDeps): Tool {
-  return {
-    name: "wait_agent",
-    description:
-      "挂起等待目标 agent 完成当前任务（空闲且收件箱无消息），或超时返回；" +
-      "返回区分「调用前已空闲」与「等待后完成」，目标被中断时明确告知未完成；" +
-      "目标结论由完成通知自动回灌，本工具只返回等待结果。" +
-      outputLimitNote(MAX_RESULT_CHARS),
-    inputSchema: z.object({
-      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或以 /root 开头的绝对路径（如 /root/worker）"),
-      timeoutMs: z.number().optional().describe("等待毫秒数，到点返回超时；缺省 30000"),
-    }),
-    isReadOnly: false,
-    maxResultSizeChars: MAX_RESULT_CHARS,
-    execute: async (input) => {
-      const { target, timeoutMs } = input as { target: string; timeoutMs?: number };
-      const targetPath = resolveTarget(deps, target);
-      if (typeof targetPath === "string") return failure(targetPath);
-      if (targetPath.toString() === (deps.getAgentPath() ?? AgentPath.root()).toString()) {
-        return failure("不能等待自己");
-      }
-      const targetAgent = deps.team.resolveAgent(targetPath)?.agent;
-      if (!targetAgent) return failure(`目标 agent ${targetPath} 不存在`);
-      // 调用时的忙碌状态决定返回口径：调用前就空闲要和等待后完成分开说，
-      // 模型才不会把 0ms 返回的「已完成」当成刚等完的同步完成而反复再等
-      const wasBusy = targetAgent.isActive() || targetAgent.hasPendingMail();
-      const startedAt = Date.now();
-      while (targetAgent.isActive() || targetAgent.hasPendingMail()) {
-        if (Date.now() >= startedAt + (timeoutMs ?? 30_000)) {
-          return failure(`等待 ${targetPath} 超时，目标仍未完成或收件箱仍有待处理消息`);
-        }
-        await sleep(50);
-      }
-      if (targetAgent.isInterrupted()) {
-        return `${targetPath} 已被中断，当前任务未完成，结论不会回灌；需要续做可用 followup_task 重新分派`;
-      }
-      if (!wasBusy) {
-        return `${targetPath} 在本次等待前已空闲（当前任务早已结束），结论由完成通知自动回灌，无需再等待`;
-      }
-      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-      return `${targetPath} 已完成当前任务（等待 ${seconds} 秒后结束），结论由完成通知自动回灌`;
-    },
-  };
-}
-
 /** 中断目标 agent（turn 内）：立即中止当前模型流/工具执行；后续 followup 仍可复活 */
 function interruptAgentTool(deps: CollabDeps): Tool {
   return {
@@ -316,9 +270,4 @@ function interruptAgentTool(deps: CollabDeps): Tool {
       return `已请求中断 ${targetPath}`;
     },
   };
-}
-
-/** 毫秒睡眠（wait_agent 轮询用） */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
