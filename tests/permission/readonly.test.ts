@@ -442,6 +442,87 @@ describe("只读 agent 写拦截判定（脚本执行形态）", () => {
   });
 });
 
+describe("只读 agent 写拦截判定（包管理器与临时包执行）", () => {
+  it("安装与脚本执行子命令拒绝（含隐式 run 与未知子命令），查询子命令放行", () => {
+    for (const command of [
+      "pnpm install",
+      "pnpm i",
+      "pnpm install --frozen-lockfile",
+      "pnpm add -D vitest",
+      "pnpm remove lodash",
+      "pnpm update",
+      "pnpm dedupe",
+      "pnpm dlx cowsay",
+      "pnpm exec tsc --noEmit",
+      "pnpm run build",
+      "pnpm build",
+      "pnpm test",
+      "pnpm deploy ./out",
+      "npm install",
+      "npm i",
+      "npm ci",
+      "npm add lodash",
+      "npm rm lodash",
+      "npm publish",
+      "npm link",
+      "npm init -y",
+      "npm create vite@latest",
+      "npm run test",
+      "npm x tsc",
+      "yarn install",
+      "yarn add zod",
+      "yarn remove zod",
+      "yarn run build",
+      "yarn dlx cowsay",
+      "yarn workspace a build",
+      "bun install",
+      "bun add zod",
+      "bun run dev",
+      "bun x tsc",
+      "bun test.ts",
+      "corepack enable",
+      "corepack prepare pnpm@9 --activate",
+      "npx cowsay",
+      "npx --yes create-vite app",
+      "pnpx cowsay",
+      "bunx cowsay",
+      "npx.exe cowsay",
+      "pnpm.exe install",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/写命令 (npm|pnpm|yarn|bun|corepack|npx|pnpx|bunx)/);
+    }
+    expect(readOnlyWrite("pnpm install")).toMatch(/安装写依赖/);
+    expect(readOnlyWrite("pnpm dlx cowsay")).toMatch(/脚本执行无法核验/);
+    expect(readOnlyWrite("npx cowsay")).toMatch(/临时包执行无法核验/);
+    expect(readOnlyWrite("pnpm test")).toMatch(/子命令无法核验/);
+    for (const command of [
+      "pnpm ls",
+      "pnpm list --depth 0",
+      "pnpm why react",
+      "pnpm outdated",
+      "pnpm audit",
+      "pnpm view react version",
+      "pnpm --version",
+      "pnpm -v",
+      "npm ls --depth=0",
+      "npm view react",
+      "npm info react",
+      "npm outdated",
+      "npm audit",
+      "npm root -g",
+      "npm help install",
+      "npm ping",
+      "npm -v",
+      "yarn why react",
+      "yarn list",
+      "yarn info react",
+      "corepack --version",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+});
+
 describe("只读 agent 写拦截判定（分组符号与 @ 前缀）", () => {
   it("括号/花括号分组与 cmd @ 静默前缀的写命令照常命中", () => {
     for (const command of [

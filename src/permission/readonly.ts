@@ -104,6 +104,29 @@ const SC_READ_SUBCOMMANDS = new Set([
   "interrogate", "enumdepend", "sdshow", "showsid", "getdisplayname", "getkeyname", "querylock",
 ]);
 
+/** npm 家族包管理器：安装写 node_modules 与锁文件，run/exec 执行任意脚本，按子命令判定 */
+const PACKAGE_MANAGER_WORDS = new Set(["npm", "pnpm", "yarn", "bun", "corepack"]);
+
+/** 临时包执行器：包从远端取来即执行，包来源与脚本内容均无法核验，整体拒绝 */
+const PACKAGE_EXEC_WORDS = new Set(["npx", "pnpx", "bunx"]);
+
+/** 包管理器只读子命令：读本地清单或远端元数据，不落盘、不执行脚本 */
+const PKG_READ_SUBCOMMANDS = new Set([
+  "ls", "list", "ll", "la", "why", "view", "info", "show", "outdated", "audit", "doctor",
+  "help", "root", "bin", "prefix", "explain", "repo", "search", "ping", "whoami", "fund",
+  "bugs", "licenses", "dist-tags",
+]);
+
+/** 包管理器安装与依赖变更子命令：写 node_modules 与锁文件 */
+const PKG_INSTALL_SUBCOMMANDS = new Set([
+  "install", "i", "ci", "add", "remove", "rm", "uninstall", "un", "update", "up", "upgrade",
+  "dedupe", "prune", "link", "unlink", "publish", "patch", "set", "init", "create", "import",
+  "rebuild",
+]);
+
+/** 包管理器脚本执行子命令：跑 package.json 脚本、临时包或任意二进制 */
+const PKG_EXEC_SUBCOMMANDS = new Set(["run", "run-script", "exec", "x", "dlx"]);
+
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
  *  变量，perl 的 -E 才是内联执行），按命令词分设；命中一行流即放行，否则出现脚本操作数即拒绝 */
 const INTERPRETER_INLINE_FLAGS: Record<string, (word: string) => boolean> = {
@@ -255,6 +278,14 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
       if (verdict) return verdict;
     }
     return undefined;
+  }
+  if (PACKAGE_EXEC_WORDS.has(first)) return `写命令 ${first}（临时包执行无法核验）`;
+  if (PACKAGE_MANAGER_WORDS.has(first)) {
+    const sub = rest.slice(1).find((w) => !w.startsWith("-"))?.toLowerCase();
+    if (sub === undefined || PKG_READ_SUBCOMMANDS.has(sub)) return undefined;
+    if (PKG_INSTALL_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（安装写依赖）`;
+    if (PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
+    return `写命令 ${first} ${sub}（子命令无法核验）`;
   }
   if (WRITE_COMMAND_WORDS.has(first)) return `写命令 ${first}`;
   // 落盘与持久化形态（黑名单外按旗标/子命令判定）：
