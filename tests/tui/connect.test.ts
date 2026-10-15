@@ -5,8 +5,8 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { it, expect } from "vitest";
-import { connectProvider, writeGlobalConfig, writeGlobalDefaultModel, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset, type ModelListEntry } from "../../src/tui/connect.js";
+import { describe, it, expect } from "vitest";
+import { connectProvider, planConnectSubmit, writeGlobalConfig, writeGlobalDefaultModel, fetchProviderModels, PROVIDER_PRESETS, type ProviderPreset, type ModelListEntry } from "../../src/tui/connect.js";
 
 const deepseek = PROVIDER_PRESETS.find((p) => p.id === "deepseek")!;
 const qwen = PROVIDER_PRESETS.find((p) => p.id === "qwen")!;
@@ -263,4 +263,43 @@ it("opencode 预设拆 Go/Zen 两端点（域名实测 zen/v1 与 zen/go/v1）",
   expect(go?.baseUrl).toBe("https://opencode.ai/zen/go/v1");
   expect(zen?.apiKeyEnv).toBe("OPENCODE_API_KEY");
   expect(go?.apiKeyEnv).toBe("OPENCODE_API_KEY");
+});
+
+describe("planConnectSubmit：/connect key 提交后的界面动作", () => {
+  it("失败且弹窗已关：仍提示错误文本（原先静默丢 error 字段），不重建、不留弹窗", () => {
+    const plan = planConnectSubmit({ ok: false, error: "写配置失败：EACCES" }, "DeepSeek", false);
+    expect(plan).toEqual({ toast: "写配置失败：EACCES", reconfigure: false, retryInModal: false });
+  });
+
+  it("失败且弹窗仍开：提示错误文本，并保留弹窗清 key 重输", () => {
+    const plan = planConnectSubmit({ ok: false, error: "写配置失败：磁盘满" }, "DeepSeek", true);
+    expect(plan).toEqual({ toast: "写配置失败：磁盘满", reconfigure: false, retryInModal: true });
+  });
+
+  it("失败且无 error 字段：兜底「连接失败」文案", () => {
+    expect(planConnectSubmit({ ok: false }, "DeepSeek", true).toast).toBe("连接失败");
+  });
+
+  it("成功且弹窗仍开：提示已连接并请求重建，带拉取到的模型数", () => {
+    expect(planConnectSubmit({ ok: true, fetchedModels: 12 }, "DeepSeek", true)).toEqual({
+      toast: "DeepSeek 已连接，已拉取 12 个模型，正在重建会话…",
+      reconfigure: true,
+      retryInModal: false,
+    });
+    // 未拉到模型（回落预设占位）：不带数量，其余不变
+    expect(planConnectSubmit({ ok: true }, "DeepSeek", true)).toEqual({
+      toast: "DeepSeek 已连接，正在重建会话…",
+      reconfigure: true,
+      retryInModal: false,
+    });
+  });
+
+  it("成功但弹窗已关：提示配置已写入、当前会话未切换，不请求重建", () => {
+    const plan = planConnectSubmit({ ok: true, fetchedModels: 3 }, "DeepSeek", false);
+    expect(plan).toEqual({
+      toast: "配置已写入（连接成功），当前会话未切换：可 /model 使用新厂商",
+      reconfigure: false,
+      retryInModal: false,
+    });
+  });
 });

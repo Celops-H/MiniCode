@@ -14,7 +14,7 @@ import type { StreamEvent } from "../core/index.js";
 import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
 import { decideEsc } from "./keymap.js";
-import { connectProvider, PROVIDER_PRESETS, writeGlobalDefaultModel } from "./connect.js";
+import { connectProvider, planConnectSubmit, PROVIDER_PRESETS, writeGlobalDefaultModel } from "./connect.js";
 import { buildMcpRows, buildSkillRows, diffExtensionRows, setMcpServerEnabled, setSkillDisabled, syncDisabledList, type ExtensionRow } from "./extensions.js";
 import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
@@ -682,22 +682,15 @@ export async function runTui(options: TuiLoopOptions): Promise<{
     try {
       const key = conn.key.trim();
       const result = await connectProvider(preset, key);
-      // await 期间用户 Esc 取消（弹窗关闭）：写配置副作用已发生、不可中止——配置实际已写入，
-      // 提示用户；当前会话未重建（模型保持），要使用新厂商可再 /model 选
-      if (state.modal?.kind !== "connect-key") {
-        if (result.ok) showToast("配置已写入（连接成功），当前会话未切换：可 /model 使用新厂商");
-        return;
-      }
-      if (result.ok) {
-        // 拉全量模型成功带数量提示；未拉到静默（回落预设占位，/model 仍可用预设模型）
-        const fetched = result.fetchedModels != null ? `，已拉取 ${result.fetchedModels} 个模型` : "";
-        showToast(`${conn.providerName} 已连接${fetched}，正在重建会话…`);
+      // await 期间用户 Esc 取消（弹窗关闭）：写配置副作用已发生、不可中止——无论成败都给提示，
+      // 成功提示当前会话未重建（要用新厂商可再 /model 选），失败提示错误文本
+      const plan = planConnectSubmit(result, conn.providerName, state.modal?.kind === "connect-key");
+      showToast(plan.toast);
+      if (plan.retryInModal) commit({ ...state, modal: { ...conn, key: "" } });
+      if (plan.reconfigure) {
         pendingReconfigure = true;
         exitLoop();
-        return;
       }
-      showToast(result.error ?? "连接失败");
-      commit({ ...state, modal: { ...conn, key: "" } });
     } finally {
       connecting = false;
     }

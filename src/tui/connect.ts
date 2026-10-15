@@ -179,3 +179,32 @@ export async function connectProvider(
     return { ok: false, error: `写配置失败：${msg}` };
   }
 }
+
+/** /connect key 提交后的界面动作规划 */
+export interface ConnectSubmitPlan {
+  /** 提示文案：失败带错误文本（弹窗已关也提示，不静默丢 error 字段） */
+  toast: string;
+  /** 请求装配层重读配置重建会话（成功且弹窗仍开，当前会话换到新厂商） */
+  reconfigure: boolean;
+  /** 弹窗保留并清空 key 缓冲（失败且弹窗仍开，用户可重输） */
+  retryInModal: boolean;
+}
+
+/**
+ * /connect key 提交结果 → 界面动作。写盘副作用在 await 期间不可中止，
+ * 弹窗被 Esc 关掉时配置也已落盘：失败提示错误文本，成功提示已写入但当前会话未切换。
+ */
+export function planConnectSubmit(
+  result: { ok: boolean; error?: string; fetchedModels?: number },
+  providerName: string,
+  modalOpen: boolean,
+): ConnectSubmitPlan {
+  if (!result.ok) {
+    return { toast: result.error ?? "连接失败", reconfigure: false, retryInModal: modalOpen };
+  }
+  if (!modalOpen) {
+    return { toast: "配置已写入（连接成功），当前会话未切换：可 /model 使用新厂商", reconfigure: false, retryInModal: false };
+  }
+  const fetched = result.fetchedModels != null ? `，已拉取 ${result.fetchedModels} 个模型` : "";
+  return { toast: `${providerName} 已连接${fetched}，正在重建会话…`, reconfigure: true, retryInModal: false };
+}
