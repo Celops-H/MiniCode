@@ -1,6 +1,6 @@
 import type { Context, StreamEvent } from "../core/index.js";
 import type { Provider, ModelInfo } from "./types.js";
-import { isSwitchableError, type ModelRouter } from "./router.js";
+import { isRetryableError, isSwitchableError, type ModelRouter } from "./router.js";
 
 /** Models 构造选项 */
 export interface ModelsOptions {
@@ -8,6 +8,24 @@ export interface ModelsOptions {
   router?: ModelRouter;
   /** 优先级链：主模型在前，备选在后；缺省退化为单模型 */
   chain?: string[];
+  /** 可重试瞬时错误的原模型退避重试次数，默认 2；0 = 不重试，直接记失败切备选 */
+  retryAttempts?: number;
+  /** 退避基数 ms：第 n 次重试前等待 base * 2^(n-1)，默认 500（测试传 0 免真实等待） */
+  retryBackoffMs?: number;
+}
+
+/** 退避等待：到期或 signal 中止即返回，中止的处置由调用方决定 */
+function waitBackoff(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 /** Models 集合：注册 Provider、解析模型 → Provider、路由 stream 调用 */
@@ -15,10 +33,14 @@ export class Models {
   private readonly providers = new Map<string, Provider>();
   private readonly router?: ModelRouter;
   private readonly chain?: string[];
+  private readonly retryAttempts: number;
+  private readonly retryBackoffMs: number;
 
   constructor(options: ModelsOptions = {}) {
     this.router = options.router;
     this.chain = options.chain;
+    this.retryAttempts = options.retryAttempts ?? 2;
+    this.retryBackoffMs = options.retryBackoffMs ?? 500;
   }
 
   /**
@@ -71,8 +93,8 @@ export class Models {
 
   /**
    * 按模型 id 路由到对应 Provider 的流式调用。配置了 router 时从优先级链选模型：
-   * 可切换错误（限流/5xx/网络等）切到下一个健康模型，每个模型最多试一次；
-   * 不可切换错误（参数/权限等确定性错误）或已产出内容后直接上抛，避免混流。
+   * 可切换的瞬时错误（限流/5xx/网络/超时）先在原模型退避重试，重试耗尽才记一次失败
+   * 并切到下一个健康模型；不可切换错误（参数/权限等确定性错误）或已产出内容后直接上抛，避免混流。
    * @param modelId 模型 id（路由模式下为优先级链主模型）
    * @param context 一次模型调用的完整输入
    * @returns 统一事件流
@@ -119,42 +141,59 @@ export class Models {
         selected = next;
         continue;
       }
-      let contentEmitted = false;
-      let streamFailed = false;
-      try {
-        for await (const event of resolved.provider.stream(selected, context, options)) {
-          // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标；
-          // 也不算「已吐出内容」——首 token 前的厂商故障（空闲超时、
-          // 流内 error 后异常收尾）仍可切换备选，与「可切换错误」口径一致。
-          // done 等 非 error 事件都置位：厂商宣告正常完成（done 收尾）不进冷却
-          if (event.type === "error") streamFailed = true;
-          else contentEmitted = true;
-          yield event;
+      // 单模型的尝试回合：可重试瞬时错误在此退避重试，耗尽后记失败并换下一个模型
+      let retries = 0;
+      for (;;) {
+        let contentEmitted = false;
+        let streamFailed = false;
+        try {
+          for await (const event of resolved.provider.stream(selected, context, options)) {
+            // 流内产出 error 事件（厂商报错/意外断流）不算成功，路由健康度不虚标；
+            // 也不算「已吐出内容」——首 token 前的厂商故障（空闲超时、
+            // 流内 error 后异常收尾）仍可重试/切换备选，与「可切换错误」口径一致。
+            // done 等 非 error 事件都置位：厂商宣告正常完成（done 收尾）不进冷却
+            if (event.type === "error") streamFailed = true;
+            else contentEmitted = true;
+            yield event;
+          }
+          if (streamFailed) {
+            // 以 error 收尾对齐异常路径记健康度：未产出任何内容记失败进冷却——
+            // 否则报错厂商永不进冷却，每次请求都先撞一遍再失败；已产出内容属半截响应，不误标
+            if (!contentEmitted) router.recordFailure(selected);
+          } else {
+            router.recordSuccess(selected);
+          }
+          return;
+        } catch (err) {
+          lastError = err;
+          // 用户打断（signal 已中止）：控制流而非模型故障，直接上抛——不重试不切备选不标冷却
+          // （否则会带着已中止的 signal 挨个真实请求备选链，白白计费）
+          if (options?.signal?.aborted) throw err;
+          // 确定性错误或已吐出内容（重试/切换会混流）：直接上抛；error 事件不算内容，
+          // 首 token 前的故障仍走下面的重试/切换
+          if (!isSwitchableError(err) || contentEmitted) throw err;
+          // 瞬时错误先在原模型退避重试：网络抖动/限流/服务器故障多能自愈，直接切换
+          // 会白付一次备选调用费，也让本可用的主模型背上冷却。401/402/409 不重试
+          // （见 isRetryableError）
+          if (isRetryableError(err) && retries < this.retryAttempts) {
+            retries += 1;
+            yield { type: "model_retry", model: selected, attempt: retries, total: this.retryAttempts };
+            await waitBackoff(this.retryBackoffMs * 2 ** (retries - 1), options?.signal);
+            // 退避期间用户打断：按控制流上抛，不再发起下一次真实请求
+            if (options?.signal?.aborted) throw err;
+            continue;
+          }
+          // 重试耗尽（或本就不重试）：整轮只在此处记一次失败，重试次数不与冷却机制叠加计数
+          router.recordFailure(selected);
+          const next = router.select(chain);
+          // 主模型失败、切换备选：发观察事件（TUI 常驻通知行「已切换」），避免静默路由——
+          // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等。
+          // 但只在真的换了一个未尝试的模型时才发：select 全挂兜底会返回链首，链首若是
+          // 自身或已试过的模型，发「已切换」就是虚假通知
+          if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next, reason: "error" };
+          selected = next;
+          break;
         }
-        if (streamFailed) {
-          // 以 error 收尾对齐异常路径记健康度：未产出任何内容记失败进冷却——
-          // 否则报错厂商永不进冷却，每次请求都先撞一遍再失败；已产出内容属半截响应，不误标
-          if (!contentEmitted) router.recordFailure(selected);
-        } else {
-          router.recordSuccess(selected);
-        }
-        return;
-      } catch (err) {
-        lastError = err;
-        // 用户打断（signal 已中止）：控制流而非模型故障，直接上抛——不切备选不标冷却
-        // （否则会带着已中止的 signal 挨个真实请求备选链，白白计费）
-        if (options?.signal?.aborted) throw err;
-        // 确定性错误或已吐出内容（切换会混流）：直接上抛；error 事件不算内容，
-        // 首 token 前的故障仍走下面的切换
-        if (!isSwitchableError(err) || contentEmitted) throw err;
-        router.recordFailure(selected);
-        const next = router.select(chain);
-        // 主模型失败、切换备选：发观察事件（TUI 常驻通知行「已切换」），避免静默路由——
-        // 用户主动切的模型不可用时能知道发生了什么，而不是只见「运行中」干等。
-        // 但只在真的换了一个未尝试的模型时才发：select 全挂兜底会返回链首，链首若是
-        // 自身或已试过的模型，发「已切换」就是虚假通知
-        if (next && !tried.has(next)) yield { type: "model_fallback", from: selected, to: next, reason: "error" };
-        selected = next;
       }
     }
     throw lastError ?? new Error("模型调用全部失败");

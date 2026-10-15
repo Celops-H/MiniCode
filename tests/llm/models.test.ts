@@ -101,7 +101,8 @@ describe("Models 集合", () => {
 describe("Models 路由（配置 ModelRouter 后）", () => {
   it("主模型可切换失败时切到备选，并记录主模型失败", async () => {
     const router = new ModelRouter();
-    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    // retryAttempts: 0 关掉原模型重试：本组用例只看切换口径，重试行为由下方专组覆盖
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1"));
     const events: StreamEvent[] = [];
@@ -117,7 +118,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
 
   it("主模型失败切换备选：发 model_fallback 观察事件（from/to），避免静默路由", async () => {
     const router = new ModelRouter();
-    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1"));
     const events: StreamEvent[] = [];
@@ -165,7 +166,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     const first: StreamEvent[] = [];
     for await (const e of models.stream("openrouter-1", createContext("s"))) first.push(e);
     expect(first[0]).toEqual({ type: "model_fallback", from: "openrouter-1", to: "deepseek-1", reason: "error" });
-    expect(openrouterCalls).toBe(1);
+    expect(openrouterCalls).toBe(1); // 401 属账号级不可用：不重试（重试也必然同样失败）
 
     // 冷却期内第二次：select 直接跳过主模型，主模型一次都没被请求；轮开始跳过也发
     // model_fallback 观察事件（署名与提示跟实际产出者）
@@ -191,7 +192,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
   });
 
   it("整链全部失败时抛最后的错误", async () => {
-    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "backup-1"] });
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "backup-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
     const events: StreamEvent[] = [];
@@ -232,7 +233,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
 
   it("首 token 前厂商故障（error 事件后异常收尾）仍切备选：error 事件不算已产出内容", async () => {
     const router = new ModelRouter({ cooldownMs: 60_000 });
-    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryAttempts: 0 });
     // 模拟空闲超时路径：协议先 yield error 事件再抛异常（此前 error 置 started 挡住切换）
     const timeoutProvider: Provider = {
       id: "main",
@@ -362,7 +363,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
 
   it("链上不可解析条目跳过继续下一个，两次切换都有观察事件", async () => {
     const router = new ModelRouter();
-    const models = new Models({ router, chain: ["main-1", "ghost-1", "backup-1"] });
+    const models = new Models({ router, chain: ["main-1", "ghost-1", "backup-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1"));
     const events: StreamEvent[] = [];
@@ -377,7 +378,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
   });
 
   it("整链尝试完后抛最后的真实错误，不被「未知模型」遮蔽", async () => {
-    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1", "backup-1"] });
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1", "backup-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     models.register(makeFaultyProvider("backup", "backup-1", { failWith: 503 }));
     await expect(async () => {
@@ -399,7 +400,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
   });
 
   it("单条目链真实失败：不发自我切换事件，直接上抛真实错误", async () => {
-    const models = new Models({ router: new ModelRouter(), chain: ["main-1"] });
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     const events: StreamEvent[] = [];
     await expect(async () => {
@@ -409,7 +410,7 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
   });
 
   it("真实失败在前、死条目收尾：抛真实厂商错误，不被「未知模型」反向遮蔽", async () => {
-    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1"] });
+    const models = new Models({ router: new ModelRouter(), chain: ["main-1", "ghost-1"], retryAttempts: 0 });
     models.register(makeFaultyProvider("main", "main-1", { failWith: 429 }));
     const events: StreamEvent[] = [];
     await expect(async () => {
@@ -417,5 +418,133 @@ describe("Models 路由（配置 ModelRouter 后）", () => {
     }).rejects.toThrow("main 失败");
     // 主模型切到死条目有观察事件；死条目之后无未尝试模型，不再发第二次
     expect(events).toEqual([{ type: "model_fallback", from: "main-1", to: "ghost-1", reason: "error" }]);
+  });
+});
+
+describe("Models 可切换瞬时错误的退避重试", () => {
+  /** 前 failTimes 次调用抛 err、之后正常产出：模拟限流/网络抖动自愈 */
+  function flakyProvider(
+    id: string,
+    modelId: string,
+    failTimes: number,
+    err: () => Error,
+  ): { provider: Provider; counter: { calls: number } } {
+    const counter = { calls: 0 };
+    const provider: Provider = {
+      id,
+      name: id,
+      baseUrl: `https://${id}.example.com`,
+      auth: { configured: true },
+      getModels: () => [{ id: modelId, name: modelId, api: "openai-chat-completions", providerId: id }],
+      async *stream() {
+        counter.calls += 1;
+        if (counter.calls <= failTimes) throw err();
+        yield { type: "text_delta", text: `${id}:${modelId}` };
+        yield { type: "done", stopReason: "stop" };
+      },
+    };
+    return { provider, counter };
+  }
+
+  it("429 限流：原模型退避重试至成功，不切备选也不记失败", async () => {
+    const router = new ModelRouter({ cooldownMs: 60_000 });
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryBackoffMs: 0 });
+    const { provider, counter } = flakyProvider("main", "main-1", 2, () =>
+      Object.assign(new Error("rate limited"), { status: 429 }),
+    );
+    models.register(provider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    expect(counter.calls).toBe(3); // 首次请求 + 2 次重试
+    expect(events).toEqual([
+      { type: "model_retry", model: "main-1", attempt: 1, total: 2 },
+      { type: "model_retry", model: "main-1", attempt: 2, total: 2 },
+      { type: "text_delta", text: "main:main-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+    expect(router.isHealthy("main-1")).toBe(true); // 自愈成功：不进冷却
+  });
+
+  it("无 HTTP 状态的网络错误同样重试（网络/超时路径）", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryBackoffMs: 0 });
+    const { provider, counter } = flakyProvider("main", "main-1", 1, () => new Error("fetch failed"));
+    models.register(provider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    expect(counter.calls).toBe(2);
+    expect(events).toEqual([
+      { type: "model_retry", model: "main-1", attempt: 1, total: 2 },
+      { type: "text_delta", text: "main:main-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("重试耗尽：发满 model_retry 后记一次失败切备选，冷却不按重试次数叠加", async () => {
+    vi.useFakeTimers();
+    // maxFailures 2 + 熔断 60s：若首次请求与 2 次重试各记一次失败（3 次）即误判熔断，
+    // 把熔断阈值调低即可用「冷却时长」区分记录次数
+    const router = new ModelRouter({ cooldownMs: 1_000, circuitBreakerMs: 60_000, maxFailures: 2 });
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryBackoffMs: 0 });
+    const { provider, counter } = flakyProvider("main", "main-1", Number.POSITIVE_INFINITY, () =>
+      Object.assign(new Error("rate limited"), { status: 429 }),
+    );
+    models.register(provider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    expect(counter.calls).toBe(3);
+    expect(events).toEqual([
+      { type: "model_retry", model: "main-1", attempt: 1, total: 2 },
+      { type: "model_retry", model: "main-1", attempt: 2, total: 2 },
+      { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" },
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+    // 只记一次失败：短冷却到期主模型即可被 select 重新选中；按 3 次计会落进 60s 熔断
+    vi.advanceTimersByTime(1_001);
+    expect(router.select(["main-1", "backup-1"])).toBe("main-1");
+  });
+
+  it("409 锁冲突不重试：可切换但不属瞬时类，直接切备选", async () => {
+    const router = new ModelRouter();
+    const models = new Models({ router, chain: ["main-1", "backup-1"], retryBackoffMs: 0 });
+    const { provider, counter } = flakyProvider("main", "main-1", 1, () =>
+      Object.assign(new Error("conflict"), { status: 409 }),
+    );
+    models.register(provider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const events: StreamEvent[] = [];
+    for await (const e of models.stream("main-1", createContext("s"))) events.push(e);
+    expect(counter.calls).toBe(1);
+    expect(events).toEqual([
+      { type: "model_fallback", from: "main-1", to: "backup-1", reason: "error" },
+      { type: "text_delta", text: "backup:backup-1" },
+      { type: "done", stopReason: "stop" },
+    ]);
+  });
+
+  it("退避期间用户打断：不再发起下一次真实请求，直接上抛", async () => {
+    const router = new ModelRouter();
+    // 默认退避 500ms：靠打断立即返回，不用等满（等待本身可被 signal 中止）
+    const models = new Models({ router, chain: ["main-1", "backup-1"] });
+    const { provider, counter } = flakyProvider("main", "main-1", Number.POSITIVE_INFINITY, () =>
+      Object.assign(new Error("rate limited"), { status: 429 }),
+    );
+    models.register(provider);
+    models.register(makeFaultyProvider("backup", "backup-1"));
+    const controller = new AbortController();
+    const events: StreamEvent[] = [];
+    await expect(async () => {
+      for await (const e of models.stream("main-1", createContext("s"), { signal: controller.signal })) {
+        events.push(e);
+        if (e.type === "model_retry") controller.abort();
+      }
+    }).rejects.toThrow("rate limited");
+    expect(counter.calls).toBe(1);
+    expect(events).toEqual([{ type: "model_retry", model: "main-1", attempt: 1, total: 2 }]);
+    expect(router.isHealthy("main-1")).toBe(true); // 打断不计数
   });
 });

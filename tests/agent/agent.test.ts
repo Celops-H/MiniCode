@@ -1450,6 +1450,25 @@ describe("结论文本与消息署名", () => {
     expect(lastAssistant?.meta?.model).toBe("backup");
   });
 
+  it("model_retry 只是观察事件：不误当已产出（中断收尾不落空回复）", async () => {
+    const agent: Agent = new Agent({
+      modelClient: {
+        async *stream() {
+          // 重试提示后用户打断：本轮除观察事件外没有任何产出
+          yield { type: "model_retry", model: "mock", attempt: 1, total: 2 };
+          agent.interrupt();
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("跑");
+    for await (const _ of agent.run()) {
+      // 消费事件流
+    }
+    expect(agent.getMessages().filter((m) => m.role === "assistant")).toEqual([]);
+  });
+
   it("conclusionText 只认最后一条 assistant 消息：全程无正文返回空串而非早期旧文本", () => {
     const agent = new Agent({
       modelClient: mockTextClient("x"),

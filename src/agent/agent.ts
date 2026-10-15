@@ -572,9 +572,25 @@ export class Agent {
             attemptStopReason = undefined;
             attemptError = undefined;
           }
-          // 观察事件（模型路由切换提示）只透传宿主观测，不进 collected——否则 assemble 会把
+          if (event.type === "model_retry") {
+            // 原模型退避重试：上一次尝试真实发起过且失败（同上 ModelFallback 的 error 分支口径），
+            // 每次尝试各收口一条 LlmCallEnd；新尝试重新计时并清掉前次故障文本——否则重试成功
+            // 那次会被记成失败，无产出的成功轮还会误落错误记录
+            await this.emitLlmCallEnd({
+              model: event.model,
+              durationMs: Date.now() - attemptStart,
+              firstEventMs: attemptFirstEventMs,
+              error: attemptError ?? "模型调用失败，已重试",
+            });
+            attemptStart = Date.now();
+            attemptFirstEventMs = undefined;
+            attemptUsage = undefined;
+            attemptStopReason = undefined;
+            attemptError = undefined;
+          }
+          // 观察事件（模型路由切换/重试提示）只透传宿主观测，不进 collected——否则 assemble 会把
           // 它的长度误算为「已产出」（中断收尾以 collected.length 判断要不要落半截回复）
-          if (event.type !== "model_fallback") collected.push(event);
+          if (event.type !== "model_fallback" && event.type !== "model_retry") collected.push(event);
           if (event.type === "done") {
             attemptStopReason = event.stopReason;
             attemptUsage = event.usage;

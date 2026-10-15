@@ -146,7 +146,7 @@ describe("优先级链总开关（modelChainEnabled）", () => {
     };
   }
 
-  /** 按厂商分流的 mock client：厂商 a 一律抛可切换错误（429），b 正常收尾；calls 记录「端点#模型」 */
+  /** 按厂商分流的 mock client：厂商 a 一律抛可切换错误（401），b 正常收尾；calls 记录「端点#模型」 */
   function splitFactory(calls: string[]): ChatCompletionsClientFactory {
     return (_apiKey, baseUrl) => ({
       chat: {
@@ -154,7 +154,7 @@ describe("优先级链总开关（modelChainEnabled）", () => {
           async create(request) {
             calls.push(`${baseUrl}#${String(request.model)}`);
             if (baseUrl === "https://a.example.com") {
-              throw Object.assign(new Error("rate limited"), { status: 429 });
+              throw Object.assign(new Error("unauthorized"), { status: 401 });
             }
             return (async function* () {
               yield { choices: [{ delta: {}, finish_reason: "stop", index: 0 }] };
@@ -185,7 +185,7 @@ describe("优先级链总开关（modelChainEnabled）", () => {
         // 消费流
       }
     };
-    await expect(consume()).rejects.toMatchObject({ status: 429 });
+    await expect(consume()).rejects.toMatchObject({ status: 401 });
     expect(calls).toEqual(["https://a.example.com#a-1"]);
   });
 

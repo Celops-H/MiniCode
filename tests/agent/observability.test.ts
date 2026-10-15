@@ -417,6 +417,33 @@ describe("LlmCallEnd 事件：调用耗时与用量", () => {
     expect(ends.events[1]!.error).toBeUndefined();
   });
 
+  it("退避重试：每次尝试各一条 LlmCallEnd，成功那次不带前次故障文本", async () => {
+    const hooks = new HookBus();
+    const ends = collector(hooks, "LlmCallEnd");
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          // 空闲超时口径：先发 error 事件再退避重试，第二次尝试正常收尾
+          yield { type: "error", message: "模型响应超时" };
+          yield { type: "model_retry", model: "main", attempt: 1, total: 2 };
+          yield { type: "text_delta", text: "重试成功" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      },
+      modelId: "main",
+      systemPrompt: "助手",
+      hooks,
+    });
+    agent.start("问题");
+    await drain(agent);
+
+    expect(ends.events).toHaveLength(2);
+    // 失败那次带 error 事件的原因；成功那次不受前次故障污染（否则轨迹把成功记成失败）
+    expect(ends.events[0]).toMatchObject({ model: "main", error: "模型响应超时" });
+    expect(ends.events[1]).toMatchObject({ model: "main", stopReason: "end_turn" });
+    expect(ends.events[1]!.error).toBeUndefined();
+  });
+
   it("冷却跳过（reason=cooldown）：主模型未发起调用，只有备选一条 LlmCallEnd", async () => {
     const hooks = new HookBus();
     const ends = collector(hooks, "LlmCallEnd");

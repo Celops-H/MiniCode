@@ -19,6 +19,20 @@ export function isSwitchableError(error: unknown): boolean {
   return false; // 参数、权限、模型不存在等确定性错误
 }
 
+/**
+ * 判断错误是否属「瞬时可重试」类：可切换错误里值得在原模型退避重试的子集——
+ * 无 HTTP 状态（网络/连接/超时）、408（超时）、429（限流）、5xx（服务器）。
+ * 401/402（认证/余额不足）与 409（锁冲突）不重试：账号级状态与冲突不会因重试改变，
+ * 重试只多花时间与调用费，直接走切换。
+ * @param error 捕获的错误对象
+ * @returns 是否在原模型重试
+ */
+export function isRetryableError(error: unknown): boolean {
+  const status = (error as { status?: number } | null | undefined)?.status;
+  if (status === undefined) return true; // 无 HTTP 状态：网络/连接/超时
+  return status === 408 || status === 429 || status >= 500;
+}
+
 /** 路由配置项（均可选，用默认值） */
 export interface RouterOptions {
   /** 单次失败的短冷却 ms，默认 2min（该时间内直接跳过，不再半开试探反复干等） */
