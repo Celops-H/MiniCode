@@ -181,6 +181,14 @@ describe("只读 agent 写拦截判定", () => {
     expect(readOnlyWrite('uniq -f "1" in.txt out.txt')).toBeUndefined();
   });
 
+  it("已知边界：cmd 下 \\\" 的转义口径差异致重定向漏判（记录口径，非期望行为）", () => {
+    // cmd 不把 \ 当转义符，\" 之后的引号在 cmd 下闭合引号、其后的 > 是真重定向；
+    // 剥除按转义引号口径把这一整段当引号内容删掉，重定向漏判（stripQuotedSpans 的已知边界）
+    expect(readOnlyWriteShell('echo "a\\" > f"', "cmd")).toBeUndefined();
+    // 同形态在 bash 下 \" 是转义引号，> 确在引号内，不判写属正确行为
+    expect(readOnlyWriteShell('echo "a\\" > f"', "bash")).toBeUndefined();
+  });
+
   it("已知边界：ssh 远端命令不判定（记录口径，非期望行为）", () => {
     // 远端执行的写入不在本机守卫范围，守卫只看本机命令词，见文件头边界
     expect(readOnlyWrite("ssh host rm x")).toBeUndefined();

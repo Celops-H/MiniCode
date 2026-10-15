@@ -62,7 +62,8 @@ const DANGEROUS_PATTERNS: Array<{
  * 单引号按 shell 语义区分：bash 与 PowerShell 把单引号当引号，一并剥除；cmd 不把单引号
  * 当引号（echo hi '>' out.txt 里的 '>' 仍是重定向符号），只剥双引号，否则重定向漏判。
  * 引号不配对时残段留在原文里照常参与匹配，不会漏检。双引号段各 shell 沿用同一转义口径
- * （\" 视为转义引号），cmd 不把 \ 当转义符，echo "a\"> f 这类形态可能漏判重定向，属已知边界。
+ * （\" 视为转义引号），cmd 不把 \ 当转义符，其后的引号在 cmd 下照常闭合引号：echo "a\" > f"
+ * 的 > 是 cmd 的真重定向，剥除却把这一整段当引号内容删掉，重定向漏判，属已知边界。
  * @param shell 命令实际执行方的 shell 语义，缺省按 bash（单双都剥）
  */
 export function stripQuotedSpans(command: string, shell: CommandShellKind = "bash"): string {
