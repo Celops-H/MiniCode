@@ -177,6 +177,25 @@ it("/session 新建：defaultModel 已下线时会话模型经 resolveSessionMod
   expect(resolveSessionModel(startup.models, session.meta.model, startup.modelId)).toBe("m-1");
 });
 
+it("启动载入会话（-c/显式 id）的模型经 resolveSessionModel 归位：已下线归位主模型，可解析保持原值", async () => {
+  const store = makeStore();
+  const config = configSchema.parse({
+    providers: [{ id: "p", baseUrl: "https://p.example.com", apiKeyEnv: "P_API_KEY", apiKey: "sk", models: [{ id: "m-1" }, { id: "m-2" }] }],
+  });
+  const startup = createModelsOrGuide(config);
+  expect(startup.modelId).toBe("m-1");
+  // 反例：会话模型已从配置删除（或所属厂商 key 删掉）→ 归位当前主模型，不再报「未知模型」
+  const ghost = await store.createSession({ model: "ghost-1", title: "已下线" });
+  const loadedGhost = await resolveInitialSession({ sessionId: ghost.meta.id }, store, startup.modelId);
+  expect(loadedGhost.resumed).toBe(true);
+  expect(loadedGhost.session.meta.model).toBe("ghost-1"); // 盘上仍是原值，归位在内存
+  expect(resolveSessionModel(startup.models, loadedGhost.session.meta.model, startup.modelId)).toBe("m-1");
+  // 正例：会话模型可解析 → 保持原值
+  const live = await store.createSession({ model: "m-2", title: "可用" });
+  const loadedLive = await resolveInitialSession({ sessionId: live.meta.id }, store, startup.modelId);
+  expect(resolveSessionModel(startup.models, loadedLive.session.meta.model, startup.modelId)).toBe("m-2");
+});
+
 it("createModelsOrGuide：零可用厂商返回引导态（空模型集合 + needsConnect）", () => {
   const startup = createModelsOrGuide(undefined);
   expect(startup.needsConnect).toBe(true);

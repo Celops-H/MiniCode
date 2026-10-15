@@ -195,6 +195,10 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
   // 会话启动形态（SessionStart.reason）：新建/草稿 cold，载入既有会话 resume
   const initial = await resolveInitialSession(options, store, modelId);
   let session = initial.session;
+  // 载入既有会话（-c / 显式 id）时会话模型可能已从配置删除、或所属厂商 key 已删：
+  // 经 resolveSessionModel 归位到当前主模型（与 reconfigure/切会话同链），
+  // 免得重启后仍用旧模型、首条消息报「未知模型」；引导态零可用厂商保持原值不归位
+  session.meta.model = resolveSessionModel(models, session.meta.model, modelId);
   let sessionStartReason: "cold" | "resume" = initial.resumed ? "resume" : "cold";
   // 思考等级盒子跨 reconfigure 持久：/model 设置后切模型/换厂商不丢
   const thinkingLevelBox: { value: ThinkingLevel | undefined } = { value: undefined };
