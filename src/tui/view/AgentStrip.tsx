@@ -11,21 +11,26 @@
 import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "@opentui/solid";
 import type { AgentNode } from "../state.js";
+import { AgentPath } from "../../agent/agent-path.js";
 import { theme } from "./theme.js";
 
 /** 完成条目展示时长（ms），超时从树消失 */
 const DONE_VISIBLE_MS = 10_000;
 
-/** 路径 → 父路径（/root 的子 agent → /root；深层 → 上一段） */
-function parentPath(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i <= 0 ? "/root" : path.slice(0, i);
+/** 路径字符串 → AgentPath：树条目路径来自 agent 注册与注入消息重建，恒为合法绝对路径 */
+function asPath(path: string): AgentPath {
+  return AgentPath.parse(path) as AgentPath;
 }
 
-/** 路径末段（展示名，不带括号）：/root → main；/root/task_1 → task_1 */
+/** 路径 → 父路径（/root 的父是自身） */
+function parentPath(path: string): string {
+  return asPath(path).parent().toString();
+}
+
+/** 路径末段展示名：root 在树里显 main，子 agent 取末段 */
 function agentName(path: string): string {
-  if (path === "/root") return "main";
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+  const parsed = asPath(path);
+  return parsed.isRoot() ? "main" : parsed.name();
 }
 
 /** 完成耗时展示：1s 内显示 <1s，否则整秒 */
@@ -87,16 +92,15 @@ function renderTree(nodes: AgentNode[]): AgentRow[] {
    *  局限：父链完全同名时仍可能同显，纯展示歧义不影响操作（切换功能未做）。 */
   const displayName = new Map<string, string>();
   {
-    const leafOf = (p: string): string => (p === "/root" ? "main" : p.split("/").filter(Boolean).at(-1) ?? p);
     const leafCount = new Map<string, number>();
     for (const n of nodes) {
-      const l = leafOf(n.path);
+      const l = agentName(n.path);
       leafCount.set(l, (leafCount.get(l) ?? 0) + 1);
     }
     for (const n of nodes) {
       if (n.path === "/root") continue;
-      const l = leafOf(n.path);
-      if ((leafCount.get(l) ?? 0) > 1) displayName.set(n.path, `${leafOf(parentPath(n.path))}/${l}`);
+      const l = agentName(n.path);
+      if ((leafCount.get(l) ?? 0) > 1) displayName.set(n.path, `${agentName(parentPath(n.path))}/${l}`);
     }
   }
 
