@@ -19,6 +19,7 @@ import {
   TRACE_FORMAT_VERSION,
 } from "../../src/observability/index.js";
 import { resolveSessionsDir } from "../../src/config/paths.js";
+import { liveWriterCount } from "../../src/observability/trace-writer.js";
 
 // 攒批落盘依赖定时器与磁盘写入，受整机负载影响大：按自身耗时设独立超时，不用全局默认 5s
 vi.setConfig({ testTimeout: 15_000 });
@@ -541,6 +542,116 @@ describe("TraceWriter：flushSync 与 header 去重", () => {
       const lines = await readLines(file);
       expect(lines).toHaveLength(3); // 原有 2 行 + 追加 1 行，无第二个 header
       expect(lines.filter((l) => l.format === TRACE_FORMAT)).toHaveLength(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("TraceWriter：进程收尾登记摘除", () => {
+  it("未落盘行在册，冲刷干净或 dispose 后摘除；摘除后再写入重新在册", async () => {
+    const dir = await tmpDir();
+    try {
+      const tracesDir = path.join(dir, "traces");
+      const file = path.join(tracesDir, "registry.jsonl");
+      const headerLine = JSON.stringify({
+        format: TRACE_FORMAT,
+        formatVersion: 1,
+        sessionId: "registry",
+        cwd: "x",
+        minicodeVersion: "0.0.1",
+        startedAt: "t",
+      });
+      const base = liveWriterCount();
+      const event = (name: string): string =>
+        JSON.stringify({ kind: "event", event: name, agentPath: "/root", timestamp: "t", data: {} });
+
+      const writer = new TraceWriter(file, headerLine, 1000);
+      // 空缓冲不占登记：reconfigure 每轮新建 writer 不因构造而累积
+      expect(liveWriterCount()).toBe(base);
+
+      writer.appendLine(event("SessionStart"));
+      expect(liveWriterCount()).toBe(base + 1);
+      expect(existsSync(file)).toBe(false); // 攒批中
+
+      // 冲刷干净自动摘除（SessionEnd 冲刷与 exit/信号处理器同路径）
+      writer.flushSync();
+      expect(liveWriterCount()).toBe(base);
+      const first = await readLines(file);
+      expect(first).toHaveLength(2); // header + 事件
+      expect(first[1]).toMatchObject({ kind: "event", event: "SessionStart" });
+
+      // 会话收尾后的迟到行（团队收尾后在途驱动的子 agent 终态事件）重新在册
+      writer.appendLine(event("AgentInterrupted"));
+      expect(liveWriterCount()).toBe(base + 1);
+
+      // dispose 冲刷残余并摘除
+      writer.dispose();
+      expect(liveWriterCount()).toBe(base);
+      const second = await readLines(file);
+      expect(second).toHaveLength(3); // 迟到的 AgentInterrupted 未丢
+      expect(second[2]).toMatchObject({ kind: "event", event: "AgentInterrupted" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("Recorder 会话收尾冲刷即摘除登记，dispose 同链（reconfigure 轮换不累积）", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const base = liveWriterCount();
+      const recorder = new Recorder(bus, {
+        sessionId: "s-teardown",
+        cwd: os.tmpdir(),
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+      });
+      expect(liveWriterCount()).toBe(base);
+      await bus.emit({ type: "SessionStart", reason: "cold" });
+      await bus.emit({ type: "Stop", agentPath: "/root" });
+      expect(liveWriterCount()).toBe(base + 1);
+
+      await bus.emit({ type: "SessionEnd", reason: "reconfigure" });
+      // 会话收尾已冲刷：登记摘除，后续轮次新建 writer 不再把本 writer 累积到进程收尾
+      expect(liveWriterCount()).toBe(base);
+      const lines = await readLines(path.join(dir, "traces", "s-teardown.jsonl"));
+      expect(lines).toHaveLength(4); // header + SessionStart + Stop + SessionEnd（收尾行已落盘）
+
+      recorder.dispose();
+      // dispose 后再有事件（订阅已取消）不再落到本 writer
+      await bus.emit({ type: "Stop", agentPath: "/root" });
+      expect(liveWriterCount()).toBe(base);
+      expect(await readLines(path.join(dir, "traces", "s-teardown.jsonl"))).toHaveLength(4);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispose 冲刷失败时保留登记，残余留给进程收尾重试", async () => {
+    const dir = await tmpDir();
+    try {
+      // 占位文件挡在轨迹目录位置：mkdir 与 append 都失败
+      const blocked = path.join(dir, "blocked");
+      await writeFile(blocked, "x", "utf8");
+      const file = path.join(blocked, "fail.jsonl");
+      const writer = new TraceWriter(file, "header", 1000);
+      const base = liveWriterCount();
+      writer.appendLine(JSON.stringify({ kind: "event", event: "Stop", agentPath: "/root", timestamp: "t", data: {} }));
+      expect(liveWriterCount()).toBe(base + 1);
+
+      writer.dispose();
+      // 冲刷失败：残余已回填缓冲，登记保留——进程收尾还会冲刷一次，不丢行
+      expect(liveWriterCount()).toBe(base + 1);
+      expect(existsSync(file)).toBe(false);
+
+      // 障碍移除后再冲刷（exit/SIGINT/SIGTERM 处理器同路径）成功即摘除
+      await rm(blocked, { force: true });
+      writer.flushSync();
+      expect(liveWriterCount()).toBe(base);
+      expect(existsSync(file)).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

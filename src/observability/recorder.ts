@@ -85,10 +85,14 @@ export class Recorder {
     return this.tracesDir;
   }
 
-  /** 取消订阅并释放（测试收尾用；生产装配随进程存亡，无需调用） */
+  /**
+   * 取消订阅、冲刷残余缓冲并从进程收尾登记摘除 writer。会话收尾（SessionEnd）已冲刷摘除，
+   * 本方法供宿主显式释放与测试收尾调用。
+   */
   dispose(): void {
     for (const off of this.subscriptions) off();
     this.subscriptions.length = 0;
+    this.writer.dispose();
   }
 
   /**

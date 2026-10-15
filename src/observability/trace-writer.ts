@@ -6,9 +6,11 @@ import path from "node:path";
 const DEFAULT_BATCH_SIZE = 32;
 
 /**
- * 进程级收尾冲刷登记：TraceWriter 构造即登记，exit/信号处理器只装一次，
- * 收尾时同步冲刷全部存活 writer 的残余缓冲。跨会话轮换（TUI reconfigure）会
- * 陆续创建 writer，登记表只增不减但每轮 SessionEnd 已冲刷、残余为空，收尾开销可忽略。
+ * 进程级收尾冲刷登记：登记表只覆盖「缓冲里还有未落盘行」的 writer——写入时登记，
+ * 冲刷干净或 dispose 后摘除。exit/信号处理器只装一次，收尾时同步冲刷全部残余缓冲。
+ * 跨会话轮换（TUI reconfigure 每轮新建 writer）不再把历史 writer 累积到进程收尾；
+ * 会话收尾后仍有迟到行写入的 writer（团队收尾后在途驱动的子 agent 终态事件）重新登记，
+ * 残余照旧由进程收尾冲刷，不丢行。
  */
 const liveWriters = new Set<TraceWriter>();
 let processHooksInstalled = false;
@@ -16,6 +18,11 @@ let processHooksInstalled = false;
 /** 冲刷全部存活 writer 的残余缓冲（exit 处理器与信号处理器共用） */
 function flushAllWriters(): void {
   for (const writer of liveWriters) writer.flushSync();
+}
+
+/** 登记表条目数（含未落盘行的 writer；测试观测摘除是否生效） */
+export function liveWriterCount(): number {
+  return liveWriters.size;
 }
 
 /**
@@ -73,12 +80,12 @@ export class TraceWriter {
     private readonly batchSize: number = DEFAULT_BATCH_SIZE,
   ) {
     installProcessFlushHooks();
-    liveWriters.add(this);
   }
 
   /**
    * 追加一行（同步记账进缓冲）：调用即同步入队保证到达序=发生序，
-   * 实际落盘攒批到阈值或冲刷时才发生。
+   * 实际落盘攒批到阈值或冲刷时才发生。有未落盘行即入收尾登记
+   * （dispose 或冲刷干净后摘除，见各自注释）。
    * @param line 序列化好的轨迹行（不含换行符）
    */
   appendLine(line: string): void {
@@ -88,6 +95,7 @@ export class TraceWriter {
       this.headerQueued = true;
     }
     this.buffer.push(line);
+    liveWriters.add(this);
     if (this.buffer.length >= this.batchSize) void this.flush();
   }
 
@@ -100,13 +108,15 @@ export class TraceWriter {
     return this.flushChain;
   }
 
-  /** 串行链上的单次写（同一时刻至多一次 append） */
+  /** 串行链上的单次写（同一时刻至多一次 append）；写空即摘除收尾登记 */
   private async doFlush(): Promise<void> {
     if (this.buffer.length === 0) return;
     const batch = this.buffer.splice(0);
     try {
       await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
       await appendFile(this.filePath, `${batch.join("\n")}\n`, { mode: 0o600, encoding: "utf8" });
+      // 写空且写期间无新行入队才摘除：新行入队时已重新登记
+      if (this.buffer.length === 0) liveWriters.delete(this);
     } catch {
       this.buffer.unshift(...batch);
     }
@@ -115,7 +125,7 @@ export class TraceWriter {
   /**
    * 同步冲刷（进程 exit / 信号处理器用：exit 处理器只能同步 IO）。
    * 失败处理同 flush：批次放回缓冲（此时进程将终止，等价于丢最后一批——
-   * append-only 设计下已有内容不受损）。
+   * append-only 设计下已有内容不受损）。写空同样摘除收尾登记。
    */
   flushSync(): void {
     if (this.buffer.length === 0) return;
@@ -123,8 +133,18 @@ export class TraceWriter {
     try {
       mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
       appendFileSync(this.filePath, `${batch.join("\n")}\n`, { mode: 0o600 });
+      if (this.buffer.length === 0) liveWriters.delete(this);
     } catch {
       this.buffer.unshift(...batch);
     }
+  }
+
+  /**
+   * 释放：冲刷残余缓冲并摘除收尾登记（Recorder.dispose 调用，与会话收尾同链）。
+   * 摘除后进程收尾不再冲刷本 writer，故先冲刷；冲刷失败（残余已回填缓冲）时保留登记，
+   * 残余交进程收尾再试一次，不因释放丢行。
+   */
+  dispose(): void {
+    this.flushSync();
   }
 }
