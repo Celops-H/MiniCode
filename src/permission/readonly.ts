@@ -19,10 +19,12 @@
  *   改名后的命令词绕过黑名单，不做别名反解；
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
- *   落盘出口（下载、sort 输出文件）与持久化写（注册表、setx、计划任务、服务控制）
- *   按形态判定，见 segmentWriteVerdict 各分支；
- * - 包管理器安装与脚本执行（pnpm install 等）、for 循环 do 内嵌命令、certutil -decode
- *   等其余执行与落盘形态未覆盖（缺口记录 request.md E190）。
+ *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
+ *   整体拒绝，落盘出口（下载、sort 输出文件、certutil 编解码）与持久化写（注册表、
+ *   setx、计划任务、服务控制）按形态判定，cmd 的括号分组按段切开、if/for 先取内层命令再判
+ *   （if 条件按枚举形态跳过，未识别的条件形态放行），见 segmentWriteVerdict 各分支；
+ * - ssh 的远端命令不判定：`ssh host rm x` 与 `ssh host 'rm x'`（引号包住的整串）同属边界，
+ *   远端执行的写入不在本机守卫范围，只读 agent 的远端读由内置工具覆盖。
  */
 import {
   normalizeCommandWord,

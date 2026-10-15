@@ -173,6 +173,13 @@ describe("只读 agent 写拦截判定", () => {
     expect(readOnlyWrite('sudo -r "x" rm y')).toBeUndefined();
     expect(readOnlyWrite('sudo -u "root" rm x')).toBeUndefined();
   });
+
+  it("已知边界：ssh 远端命令不判定（记录口径，非期望行为）", () => {
+    // 远端执行的写入不在本机守卫范围，守卫只看本机命令词，见文件头边界
+    expect(readOnlyWrite("ssh host rm x")).toBeUndefined();
+    expect(readOnlyWrite("ssh host 'rm -rf /tmp/x'")).toBeUndefined();
+    expect(readOnlyWrite("ssh -p 22 host 'tar -xf a.tar'")).toBeUndefined();
+  });
 });
 
 describe("只读 agent 写拦截判定（Windows 命令语义）", () => {
