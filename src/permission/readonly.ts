@@ -22,7 +22,7 @@
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
  *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
- *   压缩族非 -c/-t/-l 旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
+ *   压缩族非 -c/-t/-l 与纯查询旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
  *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
  *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
@@ -630,25 +630,35 @@ function tarWriteVerdict(words: string[]): string | undefined {
   return undefined;
 }
 
-/** 压缩族命令：默认就地压缩或解压改写文件，只有输出 stdout 与检查模式不改写 */
-const COMPRESS_COMMAND_WORDS = new Set(["gzip", "bzip2", "xz", "zstd"]);
+/** 压缩族命令：默认就地压缩或解压改写文件，只有输出 stdout 与检查模式不改写。
+ *  解压命令（gunzip/bunzip2/unxz/unzstd/uncompress/unzip）默认就地解压落盘，同族判定 */
+const COMPRESS_COMMAND_WORDS = new Set([
+  "gzip", "bzip2", "xz", "zstd",
+  "gunzip", "bunzip2", "unxz", "unzstd", "uncompress", "unzip",
+]);
 
-/** 压缩族的只读旗标字母：-c 输出 stdout、-t 校验、-l 列表；其余字母（-d/-k/-9 等）都改写文件 */
-const COMPRESS_READ_LETTERS = new Set(["c", "t", "l"]);
+/** 压缩族的只读旗标字母：-c 输出 stdout、-t 校验、-l 列表，-h/-H 帮助与 -V 版本为纯查询；
+ *  其余字母（-d/-k/-9 等）都改写文件 */
+const COMPRESS_READ_LETTERS = new Set(["c", "t", "l", "h", "H", "V"]);
 
-/** 压缩族只读旗标的长选项形态（等价于 c/t/l） */
-const COMPRESS_READ_LONG_OPTIONS = new Set(["--stdout", "--to-stdout", "--test", "--list"]);
+/** unzip 的只读旗标字母：在压缩族基础上多认 -p/-v/-z/-Z（输出 stdout、详细列表、注释、zipinfo） */
+const UNZIP_READ_LETTERS = new Set(["c", "t", "l", "p", "v", "z", "Z", "h", "H", "V"]);
+
+/** 压缩族只读旗标的长选项形态（等价于 c/t/l 与纯查询的 help/version） */
+const COMPRESS_READ_LONG_OPTIONS = new Set(["--stdout", "--to-stdout", "--test", "--list", "--help", "--version"]);
 
 /**
- * 压缩族的模式判定：只有 -c/-t/-l 组成的旗标簇（与三者等价的长选项）放行，
- * 其余形态都改写文件，按写拒绝：裸用与 - 操作数（读 stdin 写 stdout，形态罕见）、
- * -d 解压、-k、-9，以及含 -c 的混合簇（-dc/-cv 输出 stdout 不落盘，按保守拒绝）。
+ * 压缩族的模式判定：只有 -c/-t/-l 与纯查询旗标（-h/-V 与 --help/--version）组成的旗标簇
+ * （及等价的长选项）放行，其余形态都改写文件，按写拒绝：裸用与 - 操作数（读 stdin 写 stdout，
+ * 形态罕见）、-d 解压、-k、-9，以及含 -c 的混合簇（-dc/-cv 输出 stdout 不落盘，按保守拒绝）。
+ * unzip 的只读旗标多认 -p/-v/-z/-Z（见 UNZIP_READ_LETTERS）。
  * 读压缩内容用 zcat/xzcat/zstdcat，三者不在本表内，照常放行。
  * @param words 压缩命令之后的词
  * @param first 命令词（拼拒绝理由用）
  * @returns 违规原因；只读安全返回 undefined
  */
 function compressWriteVerdict(words: string[], first: string): string | undefined {
+  const readLetters = first === "unzip" ? UNZIP_READ_LETTERS : COMPRESS_READ_LETTERS;
   let readMode = false;
   for (const word of words) {
     if (!word.startsWith("-")) continue;
@@ -658,7 +668,7 @@ function compressWriteVerdict(words: string[], first: string): string | undefine
       continue;
     }
     const letters = word.slice(1);
-    if (letters.length === 0 || ![...letters].every((ch) => COMPRESS_READ_LETTERS.has(ch))) {
+    if (letters.length === 0 || ![...letters].every((ch) => readLetters.has(ch))) {
       return `写命令 ${first} ${word}（压缩改写文件）`;
     }
     readMode = true;
