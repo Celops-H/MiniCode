@@ -3,7 +3,7 @@
  * 通道（approver/feedRoot/hooks）由 runTui 就绪后回调，这里用它 createSessionAgent；
  * /session 切换的会话重建循环也在此完成（装配层）。
  */
-import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir, resolveSessionsRoot, resolveTracesDir } from "../config/index.js";
+import { applyEnvFile, ensureGlobalConfigSeed, loadConfig, resolveSessionsDir, resolveSessionsRoot, resolveTracesDir } from "../config/index.js";
 import { buildInstructionsPrompt, loadInstructionFiles } from "../context/index.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -252,7 +252,8 @@ export async function runTuiEntry(options: RunTuiEntryOptions): Promise<void> {
         // 成功提示（模型已切换/已连接/配置已写入）正常显示、到期自然消失
         setSharedState({ modal: undefined });
         // reconfigure（/connect 连接成功、/model 切换、/mcp 与 /settings 应用）原位重建配置链：
-        // 重读 config + .env、重建模型客户端；引导态下 /settings、/mcp 应用同链到达，
+        // 重读 config + .env（.env 按文件当前内容刷新本进程注入过的键）、重建模型客户端；
+        // 引导态下 /settings、/mcp 应用同链到达，
         // 零可用厂商不报错退出，回到空模型集合的引导态继续（不重开连接弹窗）。
         // 会话内视图不按盘上消息重建（store 内容原样续接，历史固定）；切会话/新建草稿才重建视图。
         // 装配告警随重建重置重收
@@ -497,12 +498,10 @@ async function runTuiSession(opts: {
   }
 }
 
-/** 从 cwd/.env 加载环境变量注入 process.env（已存在不覆盖）；TUI 独立启动时保证 API key 可用 */
+/** 从 cwd/.env 加载环境变量注入 process.env。启动与重读同一套判定：进程外导出的变量优先，
+ *  重读按文件当前内容刷新本进程注入过的键，手改 .env 后重装配即生效 */
 async function loadDotEnv(): Promise<void> {
-  const vars = await loadEnvFile(path.join(process.cwd(), ".env"));
-  for (const [key, value] of Object.entries(vars)) {
-    process.env[key] = value;
-  }
+  await applyEnvFile(path.join(process.cwd(), ".env"));
 }
 
 // 独立启动走 src/tui/dev.tsx（vite-node 下 import.meta.url 检测不可靠，故入口文件仅导出，由 dev 入口引导）

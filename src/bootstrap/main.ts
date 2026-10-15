@@ -6,7 +6,7 @@
 import { Command } from "commander";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
+import { applyEnvFile, ensureGlobalConfigSeed, loadConfig, resolveSessionsDir } from "../config/index.js";
 import { killAllMcpServers } from "../mcp/index.js";
 import { SessionStore, MODEL_PLACEHOLDER } from "../storage/index.js";
 import { killAllBackgroundTasks } from "../tools/index.js";
@@ -131,10 +131,7 @@ export async function main(): Promise<void> {
 
 /** 启动时从 cwd/.env 加载环境变量注入 process.env（已有变量不覆盖，见 parseEnvFile），API key 免手动 export */
 async function loadDotEnv(): Promise<void> {
-  const vars = await loadEnvFile(path.join(process.cwd(), ".env"));
-  for (const [key, value] of Object.entries(vars)) {
-    process.env[key] = value;
-  }
+  await applyEnvFile(path.join(process.cwd(), ".env"));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

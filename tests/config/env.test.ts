@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadEnvFile, parseEnvFile } from "../../src/config/index.js";
+import { applyEnvFile, loadEnvFile, parseEnvFile } from "../../src/config/index.js";
 
 describe("parseEnvFile（.env 解析）", () => {
   it("解析 KEY=VALUE 行", () => {
@@ -73,5 +73,79 @@ describe("loadEnvFile（读文件）", () => {
 
   it("文件不存在返回空对象", async () => {
     expect(await loadEnvFile("/nonexistent/.env", {})).toEqual({});
+  });
+});
+
+describe("applyEnvFile（注入环境对象）", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  function envFilePath(): string {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "minicode-env-"));
+    dirs.push(dir);
+    return path.join(dir, ".env");
+  }
+
+  it("目标已有的键保持原值，只补文件新键（进程外导出的变量优先）", async () => {
+    const file = envFilePath();
+    writeFileSync(file, "API_KEY=from-file\nNEW_KEY=added\n");
+    const env: Record<string, string | undefined> = { API_KEY: "from-shell" };
+    await applyEnvFile(file, env);
+    expect(env).toEqual({ API_KEY: "from-shell", NEW_KEY: "added" });
+  });
+
+  it("改 .env 后重读：此前注入的键按文件当前内容刷新", async () => {
+    const file = envFilePath();
+    writeFileSync(file, "API_KEY=old-value\n");
+    const env: Record<string, string | undefined> = {};
+    await applyEnvFile(file, env);
+    expect(env.API_KEY).toBe("old-value");
+
+    writeFileSync(file, "API_KEY=new-value\n");
+    await applyEnvFile(file, env);
+    expect(env.API_KEY).toBe("new-value");
+  });
+
+  it("重读不覆盖目标原有的键（进程外导出的同名变量始终优先）", async () => {
+    const file = envFilePath();
+    writeFileSync(file, "API_KEY=from-file-1\n");
+    const env: Record<string, string | undefined> = { API_KEY: "from-shell" };
+    await applyEnvFile(file, env);
+
+    writeFileSync(file, "API_KEY=from-file-2\n");
+    await applyEnvFile(file, env);
+    expect(env.API_KEY).toBe("from-shell");
+  });
+
+  it("重读补注入文件新增的键", async () => {
+    const file = envFilePath();
+    writeFileSync(file, "A=1\n");
+    const env: Record<string, string | undefined> = {};
+    await applyEnvFile(file, env);
+
+    writeFileSync(file, "A=1\nB=2\n");
+    await applyEnvFile(file, env);
+    expect(env).toEqual({ A: "1", B: "2" });
+  });
+
+  it("文件删掉的行不撤销已注入的键：重读保留旧值", async () => {
+    const file = envFilePath();
+    writeFileSync(file, "A=1\nB=2\n");
+    const env: Record<string, string | undefined> = {};
+    await applyEnvFile(file, env);
+
+    writeFileSync(file, "A=1\n");
+    await applyEnvFile(file, env);
+    expect(env).toEqual({ A: "1", B: "2" });
+  });
+
+  it("文件不存在不报错也不改动环境对象", async () => {
+    const env: Record<string, string | undefined> = { API_KEY: "keep" };
+    await applyEnvFile("/nonexistent/.env", env);
+    expect(env).toEqual({ API_KEY: "keep" });
   });
 });

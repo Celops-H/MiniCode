@@ -70,6 +70,33 @@ export async function loadEnvFile(
   return parseEnvFile(text, env);
 }
 
+/** 本进程由 applyEnvFile 注入过的键，按目标环境对象记录：
+ *  重读时这些键按文件当前内容刷新；目标对象里原有的键（进程外导出的变量）始终不动 */
+const injectedKeys = new WeakMap<object, Set<string>>();
+
+/**
+ * 读取 .env 文件并把变量注入目标环境对象；文件不存在则不做改动。
+ * 目标对象里原有的变量保持原值（进程外导出的优先，启动与重读一致）；
+ * 本函数此前注入过的键按文件当前内容刷新，手改 .env 后重读即生效。
+ * @param file .env 文件路径
+ * @param target 目标环境对象（缺省 process.env）
+ */
+export async function applyEnvFile(
+  file: string,
+  target: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  // 以空环境为基准解析取文件全部键：解析层会按已有环境过滤键，该不该写由这里判定
+  const vars = await loadEnvFile(file, {});
+  const injected = injectedKeys.get(target) ?? new Set<string>();
+  injectedKeys.set(target, injected);
+  for (const [key, value] of Object.entries(vars)) {
+    if (injected.has(key) || target[key] === undefined) {
+      target[key] = value;
+      injected.add(key);
+    }
+  }
+}
+
 /** 剥离配对包裹的单双引号 */
 function stripQuotes(value: string): string {
   if (
