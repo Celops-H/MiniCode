@@ -16,6 +16,23 @@ it("系统提示词要求汇报区分实测与推断", () => {
   expect(SYSTEM_PROMPT).toContain("未验证");
 });
 
+it("系统提示词要求先探目录规模，不递归进生成目录", () => {
+  expect(SYSTEM_PROMPT).toContain("规模");
+  expect(SYSTEM_PROMPT).toContain("node_modules");
+  expect(SYSTEM_PROMPT).toContain("递归");
+});
+
+it("系统提示词要求搜文件用内置 grep、读文件用内置 read", () => {
+  expect(SYSTEM_PROMPT).toContain("grep");
+  expect(SYSTEM_PROMPT).toContain("read");
+  expect(SYSTEM_PROMPT).toContain("内置");
+});
+
+it("系统提示词给出待办清单使用时机", () => {
+  expect(SYSTEM_PROMPT).toContain("todo");
+  expect(SYSTEM_PROMPT).toContain("待办清单");
+});
+
 it("系统提示词自身不带 markdown 符号（不给模型示范要禁止的格式）", () => {
   expect(SYSTEM_PROMPT).not.toContain("**");
   expect(SYSTEM_PROMPT).not.toContain("```");
