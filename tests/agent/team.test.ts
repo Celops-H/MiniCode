@@ -244,8 +244,9 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(completed).toHaveLength(1);
     expect(completed[0]!.failed).toBe(true);
     expect(completed[0]!.conclusion).toContain("不可信");
+    // 失败终态邮件头部「任务失败」，与成功结论「任务结论」不同形（恢复会话据此重建失败态）
     const mail = root.getMessages().find(
-      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务结论】"),
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务失败】"),
     );
     expect(String(mail?.content)).toContain("产出不可信");
   });
@@ -347,7 +348,7 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(completed[0]!.failed).toBe(true);
     expect(completed[0]!.conclusion).toContain("流意外结束");
     const mail = root.getMessages().find(
-      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务结论】"),
+      (m) => m.role === "user" && m.source === "system" && String(m.content).includes("【任务失败】"),
     );
     expect(String(mail?.content)).toContain("执行失败");
     expect(String(mail?.content)).toContain("任务未完成");

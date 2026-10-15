@@ -323,7 +323,8 @@ export class Team {
 
   /**
    * completion watcher：子 agent 达到终态（resume 结束）时，
-   * 把其结论以 FINAL_ANSWER 回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源。
+   * 把其结论回灌父 agent（triggerTurn 唤醒父），是父拿结论的唯一来源：
+   * 正常完成走 FINAL_ANSWER，失败终态（驱动失败或结论不可信）走 FAILED，见对应分支。
    * 被中断时不投结论，只排队中断标记不唤醒（INTERRUPTED 类型，见中断分支）。
    * wait_agent 只挂起不消费结论，避免重复投递。
    * @param agent 完成的子 agent
@@ -392,7 +393,8 @@ export class Team {
     }
     if (failureText !== undefined) {
       // 失败终态：驱动失败或末轮出错未产出结论——不合并 worktree（产出不完整），
-      // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本/旧文本当结论
+      // 回灌明确失败文本让父 agent 决定重试或调整，不拿半截文本/旧文本当结论。
+      // 邮件用 FAILED 类型（头部「任务失败」），恢复会话据此重建失败态
       await this.safeEmit({
         type: "AgentCompleted",
         path: path.toString(),
@@ -401,7 +403,7 @@ export class Team {
         failed: true,
       });
       await this.sendMessage(parentPath, {
-        type: "FINAL_ANSWER",
+        type: "FAILED",
         from: path,
         content: `子代理 ${name} 执行失败（${failureText}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
         triggerTurn: true,
@@ -421,7 +423,7 @@ export class Team {
         failed: true,
       });
       await this.sendMessage(parentPath, {
-        type: "FINAL_ANSWER",
+        type: "FAILED",
         from: path,
         content: `子代理 ${name} 产出不可信（${reason}），任务未完成。可换名重新 spawn 重试（原路径保留未释放），或放弃该子任务。`,
         triggerTurn: true,

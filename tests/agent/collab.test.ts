@@ -1177,10 +1177,11 @@ describe("子 agent 失败终态", () => {
     expect(completed).toHaveLength(1);
     expect(completed[0]!.failed).toBe(true);
     expect(completed[0]!.conclusion).toContain("模型链耗尽");
-    // 父 agent 收到的是明确失败文本（不带 worktree 合并信息、不拿「未产出结论」顶包）
+    // 父 agent 收到的是明确失败文本（不带 worktree 合并信息、不拿「未产出结论」顶包），
+    // 邮件头部为「任务失败」（失败终态与成功结论不同形）
     const finalMail = root
       .getMessages()
-      .find((m) => m.role === "user" && m.source === "system" && m.content.includes("【任务结论】"));
+      .find((m) => m.role === "user" && m.source === "system" && m.content.includes("【任务失败】"));
     expect(finalMail).toBeDefined();
     expect((finalMail as { content: string }).content).toContain("执行失败");
     expect((finalMail as { content: string }).content).toContain("模型链耗尽");

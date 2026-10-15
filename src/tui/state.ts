@@ -466,11 +466,13 @@ export function initState(messages: Message[], title = "", modelLabel = "", tool
             completedAt: null,
           };
           agentNodes.set(message.agentPath, node);
-          if (mail.type === "FINAL_ANSWER") {
-            node.status = "completed";
+          if (mail.type === "FINAL_ANSWER" || mail.type === "FAILED") {
+            // 失败终态邮件（FAILED）重建为失败活动行与失败树条目，与 live 的红字「失败」同态
+            const failed = mail.type === "FAILED";
+            node.status = failed ? "failed" : "completed";
             blocks.push({
               kind: "agent",
-              event: "completed",
+              event: failed ? "failed" : "completed",
               path: message.agentPath,
               tools: [],
               conclusion: mail.body,

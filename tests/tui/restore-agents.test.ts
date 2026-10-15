@@ -1,6 +1,6 @@
 /**
  * 层 1：恢复会话重建多 agent 历史——带 agentPath 的注入消息重演为 agent 活动行
- * （结论/中断）并重建 agent 树条目，不再以「你」消息块铺全文；老数据无 agentPath
+ * （结论/失败/中断）并重建 agent 树条目，不再以「你」消息块铺全文；老数据无 agentPath
  * 字段照旧走消息渲染，无需迁移。
  */
 import { describe, expect, it } from "vitest";
@@ -14,6 +14,9 @@ const pathOf = (from: string): AgentPath => AgentPath.parse(from) as AgentPath;
 
 const finalAnswer = (from: string, body: string): Message =>
   userMessage(formatMailMessage({ type: "FINAL_ANSWER", from: pathOf(from), content: body, triggerTurn: true }), "system", undefined, undefined, from);
+
+const failedAnswer = (from: string, body: string): Message =>
+  userMessage(formatMailMessage({ type: "FAILED", from: pathOf(from), content: body, triggerTurn: true }), "system", undefined, undefined, from);
 
 const interrupted = (from: string, body: string): Message =>
   userMessage(formatMailMessage({ type: "INTERRUPTED", from: pathOf(from), content: body, triggerTurn: false }), "system", undefined, undefined, from);
@@ -101,4 +104,23 @@ describe("恢复会话重建 agent 树与活动行", () => {
       state.blocks.some((b) => b.kind === "message" && b.source === "system" && b.text === "注入内容但格式异常"),
     ).toBe(true);
   });
+
+  it("失败终态注入重演为失败活动行，树条目为失败态（不再与完成同形）", () => {
+    const state = initState([
+      userMessage("派活"),
+      failedAnswer("/root/task_1", "子代理 task_1 执行失败（模型链耗尽），任务未完成。"),
+    ]);
+    expect(state.agents[1]).toMatchObject({ path: "/root/task_1", status: "failed" });
+    expect(state.blocks.filter((b) => b.kind === "agent")).toEqual([
+      {
+        kind: "agent",
+        event: "failed",
+        path: "/root/task_1",
+        tools: [],
+        conclusion: "子代理 task_1 执行失败（模型链耗尽），任务未完成。",
+        collapsed: true,
+      },
+    ]);
+  });
+
 });

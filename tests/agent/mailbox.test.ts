@@ -41,11 +41,14 @@ describe("Mailbox（agent 邮箱）", () => {
       .toBe("【新任务】from /root:\n任务");
     expect(formatMailMessage({ type: "FINAL_ANSWER", from: AgentPath.root(), content: "结论", triggerTurn: true }))
       .toBe("【任务结论】from /root:\n结论");
+    // 失败终态与成功结论在文本层不同形：头部独立，恢复会话据此重建失败态
+    expect(formatMailMessage({ type: "FAILED", from: AgentPath.root(), content: "失败了", triggerTurn: true }))
+      .toBe("【任务失败】from /root:\n失败了");
   });
 
-  it("parseMailText 反解四类头部与正文；非注入消息格式返回 undefined", () => {
+  it("parseMailText 反解各类头部与正文；非注入消息格式返回 undefined", () => {
     const from = AgentPath.parse("/root/task_1") as AgentPath;
-    for (const type of ["MESSAGE", "NEW_TASK", "INTERRUPTED", "FINAL_ANSWER"] as const) {
+    for (const type of ["MESSAGE", "NEW_TASK", "INTERRUPTED", "FINAL_ANSWER", "FAILED"] as const) {
       const text = formatMailMessage({ type, from, content: "正文第一行\n第二行", triggerTurn: false });
       expect(parseMailText(text)).toEqual({ type, body: "正文第一行\n第二行" });
     }
