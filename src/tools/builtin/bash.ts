@@ -32,9 +32,31 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 
 /**
+ * 白名单内命令的写选项：命中即写文件或改系统状态，判非只读。
+ * sort/tree/file 的输出旗标落盘（只读守卫的 sort 分支同口径），date 的 -s/--set 设系统时间，
+ * history 的 -w/-a 写历史文件。短选项取值可与旗标同词（sort -oout.txt、date -s2020-01-01），
+ * 按前缀匹配。只覆盖旗标形态：操作数落盘（uniq 的第二操作数）与包装命令（env 后跟写命令）
+ * 不在此判定内。
+ */
+const WRITE_OPTION_RE: Record<string, RegExp> = {
+  // cmd 的 /o 与 POSIX 的 -o/--output：输出写入文件；/o 按整词匹配，
+  // 不误伤以 /o 开头的路径操作数（如 /opt/f.txt）；命令名不分大小写，/O 一并认
+  sort: /^\/o$|^-[A-Za-z]*o|^--output(=|$)/i,
+  // -s/--set 设系统时间；-d/-r/-I 等显示形态不写（-Iseconds 这类带值旗标不误判）
+  date: /^-s|^--set(=|$)/,
+  // -o/--output 输出写入文件
+  tree: /^-[A-Za-z]*o|^--output(=|$)/,
+  // -C/--compile 编译魔数库落盘（小写 -c 是检查打印，不误判）
+  file: /^-[A-Za-z]*C|^--compile(=|$)/,
+  // -w 写、-a 追加历史文件；-r/-n 读、-c 清内存不写
+  history: /^-[A-Za-z]*[wa]$/,
+};
+
+/**
  * 判断 bash 命令是否只读安全（可并发执行）。
  * 只认简单命令 + 命令名在白名单；出现重定向、管道、连接符、后台、
  * 子 shell、命令替换、变量赋值前缀等任何可能修改状态的结构，一律非只读（保守）。
+ * 白名单内的命令带写选项（sort -o、date -s 等）同样判非只读。
  * @param command 命令原文
  * @returns 是否只读安全
  */
@@ -47,7 +69,8 @@ export function isReadOnlyBashCommand(command: string): boolean {
   if (/[<>|;&()]/.test(trimmed)) return false;
   // 命令替换（$() / 反引号）、变量赋值前缀（VAR=x cmd）→ 改变状态
   if (/\$\(|\x60|^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed)) return false;
-  const first = trimmed.split(/\s+/)[0];
+  const words = trimmed.split(/\s+/);
+  const first = words[0];
   if (!first) return false;
   // find 的写操作（delete/exec/execdir/okdir/ok/print 到文件等）→ 改变状态
   if (
@@ -56,6 +79,9 @@ export function isReadOnlyBashCommand(command: string): boolean {
   ) {
     return false;
   }
+  // 白名单命令带写选项 → 写文件或改系统状态
+  const writeOption = WRITE_OPTION_RE[first];
+  if (writeOption && words.slice(1).some((word) => writeOption.test(word))) return false;
   return READ_ONLY_COMMANDS.has(first);
 }
 

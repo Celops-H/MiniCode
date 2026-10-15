@@ -50,6 +50,32 @@ describe("isReadOnlyBashCommand（bash 只读判定）", () => {
     expect(isReadOnlyBashCommand("find . -ok rm {} \\;")).toBe(false);
   });
 
+  it("白名单命令带写选项判为非只读（输出落盘或改系统状态），显示形态放行", () => {
+    // 输出写入文件（含短选项取值与旗标同词的粘连形态）
+    expect(isReadOnlyBashCommand("sort -o out.txt in.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("sort -oout.txt in.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("sort --output=out.txt in.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("sort /o out.txt in.txt")).toBe(false);
+    expect(isReadOnlyBashCommand("tree -o out.txt src")).toBe(false);
+    expect(isReadOnlyBashCommand("tree -oout.txt src")).toBe(false);
+    expect(isReadOnlyBashCommand("file -C -m magic")).toBe(false);
+    // 改系统状态或持久化写
+    expect(isReadOnlyBashCommand('date -s "2020-01-01"')).toBe(false);
+    expect(isReadOnlyBashCommand("date -s2020-01-01")).toBe(false);
+    expect(isReadOnlyBashCommand("date --set=2020-01-01")).toBe(false);
+    expect(isReadOnlyBashCommand("history -w history.txt")).toBe(false);
+    // 无写选项的显示形态照常放行
+    expect(isReadOnlyBashCommand("sort -n in.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("sort /opt/data.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("tree src")).toBe(true);
+    expect(isReadOnlyBashCommand("file a.txt")).toBe(true);
+    expect(isReadOnlyBashCommand("date +%Y")).toBe(true);
+    expect(isReadOnlyBashCommand("date -u")).toBe(true);
+    // -Iseconds 是 -I 的带值形态，不是 -s 写旗标，不误判
+    expect(isReadOnlyBashCommand("date -Iseconds")).toBe(true);
+    expect(isReadOnlyBashCommand("history")).toBe(true);
+  });
+
   it("多行命令（含换行）判为非只读（第二行可写）", () => {
     expect(isReadOnlyBashCommand("echo hi\nrm file.txt")).toBe(false);
     expect(isReadOnlyBashCommand("ls\r\nrm file.txt")).toBe(false);
