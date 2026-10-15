@@ -84,7 +84,7 @@ function spawnAgentTool(deps: CollabDeps): Tool {
     description:
       "派生一个子 agent 并下达初始任务：子 agent 有全新上下文（看不到你的历史）、继承团队运行时，" +
       "任务会唤醒它开始执行，完成后结论会自动回灌给你；受团队并发上限与 spawn 深度上限约束。" +
-      "agent 名只能用小写字母、数字和下划线。" +
+      "agent 名只能用小写字母、数字和下划线，root、.、.. 是保留名。" +
       "readOnly 为 true 时子 agent 只读：写类工具与 bash 写命令会被权限层拒绝，" +
       "审查、代码调研等不改文件的任务固定用只读派生；只读 agent 派生的子 agent 强制只读。" +
       "prompt 里写明证据要求：让子 agent 回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径，" +
@@ -99,9 +99,12 @@ function spawnAgentTool(deps: CollabDeps): Tool {
       agentName: z
         .string()
         .regex(AGENT_NAME_PATTERN, "agent 名只能用小写字母、数字和下划线")
-        .describe("子 agent 名，只能用小写字母、数字和下划线，成为其路径末段"),
+        .describe("子 agent 名，只能用小写字母、数字和下划线，不能是保留名 root、.、..，成为其路径末段"),
       prompt: z.string().describe("初始任务内容，子 agent 看不到你的历史，须自带完整上下文与证据要求"),
-      worktree: z.boolean().optional().describe("true 时给子 agent 独立 git worktree 工作区；缺省随全局设置"),
+      worktree: z
+        .boolean()
+        .optional()
+        .describe("true 时给子 agent 独立 git worktree 工作区；缺省随全局设置；readOnly 为 true 时忽略（只读子 agent 不写文件）"),
       readOnly: z.boolean().optional().describe("true 时子 agent 只读：写类工具与 bash 写命令会被拒绝"),
     }),
     isReadOnly: false,
@@ -154,10 +157,10 @@ function sendMessageTool(deps: CollabDeps): Tool {
   return {
     name: "send_message",
     description:
-      "给指定 agent 发消息（排队投递，不唤醒对方）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）。" +
+      "给指定 agent 发消息（排队投递，不唤醒对方）：目标可为相对路径（相对你自己的路径）或以 /root 开头的绝对路径。" +
       outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或以 /root 开头的绝对路径（如 /root/worker）"),
       message: z.string().describe("消息内容，排队投递，不唤醒对方"),
     }),
     isReadOnly: false,
@@ -184,11 +187,11 @@ function followupTaskTool(deps: CollabDeps): Tool {
   return {
     name: "followup_task",
     description:
-      "给指定 agent 投递新任务（投递并唤醒对方开始执行）：目标可为相对路径（相对你自己的路径）或绝对路径（/ 开头）。" +
-      "消息里写明证据要求：回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径。" +
+      "给指定 agent 投递新任务（投递并唤醒对方开始执行）：目标可为相对路径（相对你自己的路径）或以 /root 开头的绝对路径。" +
+      "任务写法和证据要求同 spawn_agent。" +
       outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或以 /root 开头的绝对路径（如 /root/worker）"),
       message: z.string().describe("任务内容，投递后唤醒对方开始执行"),
     }),
     isReadOnly: false,
@@ -250,7 +253,7 @@ function waitAgentTool(deps: CollabDeps): Tool {
       "目标结论由完成通知自动回灌，本工具只返回等待结果。" +
       outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或以 /root 开头的绝对路径（如 /root/worker）"),
       timeoutMs: z.number().optional().describe("等待毫秒数，到点返回超时；缺省 30000"),
     }),
     isReadOnly: false,
@@ -295,7 +298,7 @@ function interruptAgentTool(deps: CollabDeps): Tool {
       "收件箱已有排队消息时新任务会继续处理，后续 followup_task 可让它复活。" +
       outputLimitNote(MAX_RESULT_CHARS),
     inputSchema: z.object({
-      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或绝对路径（/ 开头）"),
+      target: z.string().describe("目标 agent 路径：可传相对路径（相对你自己）或以 /root 开头的绝对路径（如 /root/worker）"),
     }),
     isReadOnly: false,
     maxResultSizeChars: MAX_RESULT_CHARS,

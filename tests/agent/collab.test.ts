@@ -1050,16 +1050,17 @@ describe("协作工具集（多 agent 环境）", () => {
     expect(events.some((e) => e.startsWith("complete:/root/slow"))).toBe(false);
   });
 
-  it("spawn_agent 与 followup_task 描述写明证据要求", () => {
+  it("spawn_agent 描述写明证据要求，followup_task 指向同一口径", () => {
     const team = new Team();
     const spawn = collabTool(team, "spawn_agent");
     expect(spawn.description).toContain("原始命令");
     expect(spawn.description).toContain("绝对路径");
     // 只读声明说明：审查/调研类任务固定只读派生
     expect(spawn.description).toContain("readOnly");
+    // 证据要求文案单一出处：followup_task 不重复正文，指向 spawn_agent
     const followup = collabTool(team, "followup_task");
-    expect(followup.description).toContain("原始命令");
-    expect(followup.description).toContain("绝对路径");
+    expect(followup.description).toContain("证据要求");
+    expect(followup.description).toContain("spawn_agent");
   });
 
   it("wait_agent：不能等待自己", async () => {

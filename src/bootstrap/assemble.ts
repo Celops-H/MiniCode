@@ -44,11 +44,10 @@ export const SYSTEM_PROMPT = [
   "13. 破坏性操作（删除/覆盖/强制提交等）先征得用户同意；不外泄密钥/隐私。",
 ].join("\n");
 
-/** 多 agent 协作开启时追加的协调者角色定位（具体协作引导在 spawn_agent 工具描述里） */
+/** 多 agent 协作开启时追加的协调者角色定位（任务写法与证据要求见 spawn_agent 工具描述） */
 const COORDINATOR_PROMPT =
   "你是团队协调者：可派生子 agent 并行执行任务，汇总结论后回复用户。" +
-  "给子 agent 的任务必须写明证据要求：回传执行的原始命令与关键输出片段，涉及的文件一律用绝对路径；" +
-  "只凭摘要无法核实子 agent 的结论。";
+  "下达任务的写法与证据要求见 spawn_agent 工具描述。";
 
 /** 项目版本号（轨迹 header、--version 用；与 package.json version 保持同步） */
 export const MINICODE_VERSION = "0.0.1";

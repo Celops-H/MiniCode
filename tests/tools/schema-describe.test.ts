@@ -88,4 +88,32 @@ describe("协作工具与 skill 工具的入参字段说明与输出上限提示
       expect(tool.description, tool.name).toContain(String(tool.maxResultSizeChars));
     }
   });
+
+  it("入参说明与实际规则对齐：绝对路径须以 /root 开头", () => {
+    // agent-path.ts 的 parse 只认 /root 前缀，四处 target 说明不得写成「/ 开头」
+    for (const name of ["send_message", "followup_task", "wait_agent", "interrupt_agent"]) {
+      const tool = tools.find((t) => t.name === name)!;
+      const target = schemaFields(tool).target!;
+      expect(target.description, name).toContain("/root");
+      expect(target.description, name).not.toContain("（/ 开头）");
+    }
+    // 工具描述里的目标写法与入参说明同口径
+    for (const name of ["send_message", "followup_task"]) {
+      const tool = tools.find((t) => t.name === name)!;
+      expect(tool.description, name).toContain("/root");
+    }
+  });
+
+  it("入参说明与实际规则对齐：agentName 保留名与 worktree 的只读忽略", () => {
+    const spawn = tools.find((t) => t.name === "spawn_agent")!;
+    const fields = schemaFields(spawn);
+    // agent-path.ts 保留 root/. /..，schema 说明写明
+    const agentName = fields.agentName!;
+    expect(agentName.description).toContain("保留名");
+    expect(agentName.description).toContain("root");
+    // readOnly 为 true 时实现强制不建 worktree（collab.ts execute 分支），说明写明
+    const worktree = fields.worktree!;
+    expect(worktree.description).toContain("readOnly");
+    expect(worktree.description).toContain("忽略");
+  });
 });
