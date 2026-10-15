@@ -66,10 +66,10 @@ export function extractRecoveryContext(
     }
   }
 
-  // 会话起始上下文：首条真实用户消息（排除系统注入的摘要）
+  // 会话起始上下文：首条真实用户消息（排除系统注入的摘要与命令痕迹）
   const firstUser = messages.find(
     (message): message is UserMessage =>
-      message.role === "user" && message.source !== "system",
+      message.role === "user" && (message.source ?? "human") === "human",
   );
   const sessionStart = firstUser ? truncateRequest(firstUser.content) : undefined;
 

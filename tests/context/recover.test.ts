@@ -92,6 +92,27 @@ describe("extractRecoveryContext（恢复上下文提取）", () => {
     expect(context.recentRequests).toEqual(["真实的用户请求"]);
     expect(context.sessionStart).toBe("真实的用户请求");
   });
+
+  it("命令痕迹（source: command）不计入会话起始", () => {
+    const messages: Message[] = [
+      userMessage("【命令】/init", "command"),
+      userMessage("真实的用户请求"),
+      assistantMessage([{ type: "text", text: "好" }]),
+    ];
+    const context = extractRecoveryContext(messages);
+    expect(context.recentRequests).toEqual(["真实的用户请求"]);
+    expect(context.sessionStart).toBe("真实的用户请求");
+  });
+
+  it("只有命令痕迹时 sessionStart 为空", () => {
+    const messages: Message[] = [
+      userMessage("【命令】/init", "command"),
+      assistantMessage([{ type: "text", text: "好" }]),
+    ];
+    const context = extractRecoveryContext(messages);
+    expect(context.sessionStart).toBeUndefined();
+    expect(context.recentRequests).toEqual([]);
+  });
 });
 
 describe("buildRecoveryText（恢复文本）", () => {
