@@ -33,6 +33,12 @@ it("系统提示词给出待办清单使用时机", () => {
   expect(SYSTEM_PROMPT).toContain("待办清单");
 });
 
+it("多 Agent 协作口径：派活后结束本轮，等子 agent 完成唤醒再汇总（无挂起等待）", () => {
+  expect(SYSTEM_PROMPT).toContain("自动唤醒你");
+  // 已无等待工具：不写「等结论齐全」这类挂起等待口径
+  expect(SYSTEM_PROMPT).not.toContain("等结论齐全");
+});
+
 it("系统提示词自身不带 markdown 符号（不给模型示范要禁止的格式）", () => {
   expect(SYSTEM_PROMPT).not.toContain("**");
   expect(SYSTEM_PROMPT).not.toContain("```");
