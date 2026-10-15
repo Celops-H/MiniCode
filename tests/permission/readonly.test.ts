@@ -895,6 +895,104 @@ describe("只读 agent 写拦截判定（归档、压缩与拆分形态）", () 
       expect(readOnlyWrite(command), command).toMatch(/写命令 (split|csplit|mktemp|ed)/);
     }
   });
+
+  it("tar 按模式判定：列表与比较放行，写模式、无歧义缩写与旧式无横线写字母形态拒绝", () => {
+    for (const command of [
+      "tar -xf a.tar",
+      "tar xf a.tar",
+      "tar cf a.tar src",
+      "tar -czf a.tgz src",
+      "tar -rf a.tar f",
+      "tar -uf a.tar f",
+      "tar -Af a.tar b.tar",
+      "tar --extract -f a.tar",
+      "tar --create -f a.tar src",
+      "tar --append -f a.tar f",
+      "tar --update -f a.tar f",
+      "tar --concatenate -f a.tar b.tar",
+      "tar --delete -f a.tar f",
+      // GNU getopt_long 的无歧义缩写同写模式（tar --cre 等于 --create）
+      "tar --cre -f a.tar src",
+      "tar --ext -f a.tar",
+      "tar --del -f a.tar f",
+      "sudo tar -xf a.tar",
+      "xargs tar -xf a.tar",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/写命令 tar/);
+    }
+    for (const command of [
+      "tar",
+      "tar --version",
+      "tar -tf a.tar",
+      "tar -tvf a.tar",
+      "tar tf a.tar",
+      "tar -df a.tar",
+      "tar --list -f a.tar",
+      "tar --file=a.tar --list",
+      "tar --diff -f a.tar",
+      "tar -C /tmp -tf a.tar",
+      "tar --exclude=x -tf a.tar",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("压缩族仅 -c/-t/-l 组成的旗标簇放行，裸用与解压等改写形态拒绝", () => {
+    for (const command of [
+      "gzip f",
+      "gzip -d f.gz",
+      "gzip -9 f",
+      "gzip -k f",
+      "gzip --decompress f.gz",
+      "bzip2 f",
+      "bzip2 -d f.bz2",
+      "bzip2 -k f",
+      "xz f",
+      "xz -dk f.xz",
+      "xz --compress f",
+      "zstd f",
+      "zstd -19 f",
+      "zstd --ultra -22 f",
+    ]) {
+      expect(readOnlyWrite(command), command).toMatch(/压缩改写文件/);
+    }
+    for (const command of [
+      "gzip -c f",
+      "gzip -t f.gz",
+      "gzip -l f.gz",
+      "gzip -cl f.gz",
+      "gzip --stdout f",
+      "gzip --to-stdout f",
+      "gzip --test f.gz",
+      "gzip --list f.gz",
+      "bzip2 -c f",
+      "bzip2 -t f.bz2",
+      "xz -c f",
+      "xz -t f.xz",
+      "xz -l f.xz",
+      "xz --to-stdout f.xz",
+      "zstd -c f",
+      "zstd -t f.zst",
+      "zstd -l f.zst",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+
+  it("已知边界：压缩族的混合簇与 stdin 形态按保守拒绝（记录口径，非期望行为）", () => {
+    // -dc/-cv 输出到 stdout 实际不落盘，但按需求口径只有 -c/-t/-l 组成的簇放行；
+    // 裸用与 - 操作数（读 stdin 写 stdout）同理，形态罕见，保守拒绝
+    expect(readOnlyWrite("gzip -dc f.gz")).toBeDefined();
+    expect(readOnlyWrite("gzip -cd f.gz")).toBeDefined();
+    expect(readOnlyWrite("gzip -cv f")).toBeDefined();
+    expect(readOnlyWrite("xz -dc f.xz")).toBeDefined();
+    expect(readOnlyWrite("gzip")).toBeDefined();
+    expect(readOnlyWrite("gzip -")).toBeDefined();
+    // 读压缩内容的替代形态不在压缩族表内，照常放行
+    expect(readOnlyWrite("zcat f.gz")).toBeUndefined();
+    expect(readOnlyWrite("xzcat f.xz")).toBeUndefined();
+    expect(readOnlyWrite("zstdcat f.zst")).toBeUndefined();
+  });
 });
 
 describe("只读 agent 写拦截判定（git 子命令形态）", () => {

@@ -21,8 +21,9 @@
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
- *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码）与持久化写（注册表、
- *   setx、计划任务、服务控制）按形态判定，cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
+ *   整体拒绝，落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
+ *   压缩族非 -c/-t/-l 旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
+ *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
  *   见 segmentWriteVerdict 各分支；
  * - ssh 的远端命令不判定：`ssh host rm x` 与 `ssh host 'rm x'`（引号包住的整串）同属边界，
@@ -389,6 +390,10 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   }
   // uniq 的输出位有文件操作数即落盘（uniq in.txt out.txt），见 uniqWriteVerdict
   if (first === "uniq") return uniqWriteVerdict(rest.slice(1));
+  // tar 按模式判定：-t/--list 列表与 -d 比较放行，写模式拒绝，见 tarWriteVerdict
+  if (first === "tar") return tarWriteVerdict(rest.slice(1));
+  // 压缩族默认就地改写文件，只有 -c/-t/-l 组成的旗标簇放行，见 compressWriteVerdict
+  if (COMPRESS_COMMAND_WORDS.has(first)) return compressWriteVerdict(rest.slice(1), first);
   if (first === "reg") {
     const sub = rest[1]?.toLowerCase();
     return sub !== undefined && REG_WRITE_SUBCOMMANDS.has(sub) ? `写命令 reg ${sub}` : undefined;
@@ -551,6 +556,80 @@ function uniqWriteVerdict(words: string[]): string | undefined {
     operands.push(w);
   }
   return operands.length > 1 && operands[1] !== "-" ? "写命令 uniq（第二操作数落盘）" : undefined;
+}
+
+/** tar 的写模式字母：创建、解包、追加、更新、拼接，命中即写（-t 列表与 -d 比较不写） */
+const TAR_WRITE_LETTERS = new Set(["c", "x", "r", "u", "A"]);
+
+/** tar 的写长选项；--list/--diff/--compare 等只读形态不在表内 */
+const TAR_WRITE_LONG_OPTIONS = new Set([
+  "--create", "--extract", "--get", "--append", "--update", "--concatenate", "--catenate", "--delete",
+]);
+
+/**
+ * tar 的模式判定：-t/--list 列表、-d 比较等只读形态放行，写模式拒绝。
+ * 模式字母大小写敏感（-x 解包写、-C 换目录读）。旧式无横线形态（tar xf a.tar）把
+ * 首个全字母参数当模式簇认（a.tar 带点不认），簇内命写字母即拒绝。
+ * 长选项按前缀命中写选项（GNU getopt_long 接受无歧义缩写，tar --cre 等于 --create）。
+ * 边界：取值旗标的参数以横线开头时被当模式簇（tar -C -rel dir -tf a.tar 误判写），
+ * 取值形态不做词位识别。
+ * @param words tar 之后的词
+ * @returns 违规原因；只读安全返回 undefined
+ */
+function tarWriteVerdict(words: string[]): string | undefined {
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (word.startsWith("--")) {
+      const name = word.split("=")[0]!;
+      if (name === "--") continue;
+      if ([...TAR_WRITE_LONG_OPTIONS].some((opt) => opt.startsWith(name))) {
+        return `写命令 tar ${name}（归档写操作）`;
+      }
+      continue;
+    }
+    const cluster = word.startsWith("-")
+      ? word.replace(/^-+/, "")
+      : i === 0 && /^[A-Za-z]+$/.test(word) ? word : "";
+    const hit = [...cluster].find((ch) => TAR_WRITE_LETTERS.has(ch));
+    if (hit) return `写命令 tar -${hit}（归档写操作）`;
+  }
+  return undefined;
+}
+
+/** 压缩族命令：默认就地压缩或解压改写文件，只有输出 stdout 与检查模式不改写 */
+const COMPRESS_COMMAND_WORDS = new Set(["gzip", "bzip2", "xz", "zstd"]);
+
+/** 压缩族的只读旗标字母：-c 输出 stdout、-t 校验、-l 列表；其余字母（-d/-k/-9 等）都改写文件 */
+const COMPRESS_READ_LETTERS = new Set(["c", "t", "l"]);
+
+/** 压缩族只读旗标的长选项形态（等价于 c/t/l） */
+const COMPRESS_READ_LONG_OPTIONS = new Set(["--stdout", "--to-stdout", "--test", "--list"]);
+
+/**
+ * 压缩族的模式判定：只有 -c/-t/-l 组成的旗标簇（与三者等价的长选项）放行，
+ * 其余形态都改写文件，按写拒绝：裸用与 - 操作数（读 stdin 写 stdout，形态罕见）、
+ * -d 解压、-k、-9，以及含 -c 的混合簇（-dc/-cv 输出 stdout 不落盘，按保守拒绝）。
+ * 读压缩内容用 zcat/xzcat/zstdcat，三者不在本表内，照常放行。
+ * @param words 压缩命令之后的词
+ * @param first 命令词（拼拒绝理由用）
+ * @returns 违规原因；只读安全返回 undefined
+ */
+function compressWriteVerdict(words: string[], first: string): string | undefined {
+  let readMode = false;
+  for (const word of words) {
+    if (!word.startsWith("-")) continue;
+    if (word.startsWith("--")) {
+      if (!COMPRESS_READ_LONG_OPTIONS.has(word.split("=")[0]!)) return `写命令 ${first} ${word}（压缩改写文件）`;
+      readMode = true;
+      continue;
+    }
+    const letters = word.slice(1);
+    if (letters.length === 0 || ![...letters].every((ch) => COMPRESS_READ_LETTERS.has(ch))) {
+      return `写命令 ${first} ${word}（压缩改写文件）`;
+    }
+    readMode = true;
+  }
+  return readMode ? undefined : `写命令 ${first}（压缩改写文件）`;
 }
 
 /**
