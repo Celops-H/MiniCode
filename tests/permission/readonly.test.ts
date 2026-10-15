@@ -110,6 +110,49 @@ describe("只读 agent 写拦截判定", () => {
     }
   });
 
+  it("bash 段剥除段首关键字（do/then/else/if/while/until/for/time/exec/!）后再取真词", () => {
+    for (const command of [
+      "for f in a b; do rm $f; done",
+      "for f in *.log; do git commit -m x; done",
+      "while read l; do mv $l out; done",
+      "until test -f x; do cp a b; done",
+      "if x; then cp a b; fi",
+      "if x; then echo ok; else mv a b; fi",
+      "if x; then echo a; elif y; then del f; fi",
+      "if rm x; then :; fi",
+      "time rm x",
+      "exec rm x",
+      "! rm x",
+      "! git add .",
+      "time sudo rm x",
+      "sudo time rm x",
+      "time ! rm x",
+      "cat f | while read l; do tee out; done",
+    ]) {
+      expect(readOnlyWriteShell(command, "bash"), command).toBeDefined();
+    }
+    expect(readOnlyWriteShell("for f in a b; do rm $f; done", "bash")).toMatch(/写命令 rm/);
+    expect(readOnlyWriteShell("if x; then cp a b; fi", "bash")).toMatch(/写命令 cp/);
+    expect(readOnlyWriteShell("time mv a b", "bash")).toMatch(/写命令 mv/);
+    for (const command of [
+      "for f in *.txt; do cat $f; done",
+      "for f in a; do grep x $f; done",
+      "while read l; do echo $l; done",
+      "until test -f x; do echo wait; done",
+      "if x; then ls; fi",
+      "if x; then echo ok; else echo no; fi",
+      "cat f | while read l; do echo $l; done",
+      "time ls",
+      "time git status",
+      "exec ls",
+      "! ls",
+      "! git log",
+      "sudo time ls",
+    ]) {
+      expect(readOnlyWriteShell(command, "bash"), command).toBeUndefined();
+    }
+  });
+
   it("只读命令与查询形态放行", () => {
     for (const command of [
       "git show HEAD",

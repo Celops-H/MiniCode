@@ -18,6 +18,8 @@
  *   整体拒绝兜住，root 侧该形态落入正常审批链；
  * - cmd 的 doskey 宏与 PowerShell 的 Set-Alias 可把写命令改名（如 sal wd Remove-Item），
  *   改名后的命令词绕过黑名单，不做别名反解；
+ * - 段首修饰关键字 time/exec 的选项排在命令词之前（time -p rm x、exec -a name rm x），
+ *   剥关键字后取到的是选项词或 -a 的参数，判只读放行，与包装命令的选项剥法不同源；
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
@@ -26,6 +28,8 @@
  *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
  *   cmd 的 if/for 语句按括号分组切开、剥包装后取内层命令
  *   再判（段内非分组的字面括号一并切开，宁可保守拒绝；未识别的 if 条件形态放行），
+ *   非 cmd 语义（bash 与 PowerShell）的段先剥段首关键字
+ *   （do/then/else/if/while/until/for/time/exec/!，见 stripShellKeywords）再取真词，
  *   见 segmentWriteVerdict 各分支；
  * - ssh 的远端命令不判定：`ssh host rm x` 与 `ssh host 'rm x'`（引号包住的整串）同属边界，
  *   远端执行的写入不在本机守卫范围，只读 agent 的远端读由内置工具覆盖。
@@ -281,6 +285,27 @@ function cmdInlineCommand(words: string[]): string[] {
   return rest.slice(i);
 }
 
+/** bash 与 PowerShell 的段首关键字：语句结构词与执行修饰词本身不是命令词。
+ *  do/then/else/elif/if/while/until/for 是语句结构词（命令按 ;|& 切段后各自单独成段，
+ *  循环与分支体在 do/then/else 段；if/while/until/for 段的命令是条件式）；
+ *  time 计时、exec 替换进程、! 取反退出码是修饰词。按归一后小写匹配：这些词在 shell 里
+ *  都是小写形态，误剥同名普通命令只会保守多拦，方向安全。 */
+const SHELL_KEYWORDS = new Set([
+  "do", "then", "else", "elif", "if", "while", "until", "for", "time", "exec", "!",
+]);
+
+/**
+ * 剥除段首的 bash/PowerShell 关键字，露出真实命令词。
+ * 关键字可连乘（time ! cmd），逐层剥干净。
+ * @param words 命令段分词
+ * @returns 剥除后的词表
+ */
+function stripShellKeywords(words: string[]): string[] {
+  const rest = [...words];
+  while (rest.length > 0 && SHELL_KEYWORDS.has(normalizeCommandWord(rest[0]!))) rest.shift();
+  return rest;
+}
+
 /**
  * 单个命令段的写判定：剥开段首包装与分组符号（见 core/shell-words.ts stripCommandPrefix），
  * 按真实命令词查黑名单。
@@ -292,12 +317,14 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   // cmd 的 if/for 段首看不出真实命令词，先剥包装（call/sudo/timeout 可能排在 if 之前）
   // 再取内层命令，内层命令自身也可能带包装，取完重新剥一遍（见 cmdInlineCommand）
   let { rest, queried } = stripCommandPrefix(words);
-  // command -v/-V 只查询命令路径，不执行后续词
-  if (queried) return undefined;
   if (shell === "cmd") {
     ({ rest, queried } = stripCommandPrefix(cmdInlineCommand(rest)));
-    if (queried) return undefined;
+  } else {
+    // bash/PowerShell 的关键字同样排在真实命令词之前，剥掉后再重剥一次包装
+    ({ rest, queried } = stripCommandPrefix(stripShellKeywords(rest)));
   }
+  // command -v/-V 只查询命令路径，不执行后续词
+  if (queried) return undefined;
   const first = rest[0] === undefined ? undefined : normalizeCommandWord(rest[0]);
   if (!first) return undefined;
   // shell 家族与 Windows 脚本宿主：-c 内联、脚本文件、stdin 都是无法核验的内层代码，
