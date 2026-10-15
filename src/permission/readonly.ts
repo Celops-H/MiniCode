@@ -298,8 +298,35 @@ const GIT_QUERY_FLAGS = new Set([
 /** git branch/tag 的写选项（与查询混用时仍按写拒绝，如 -d -v） */
 const GIT_WRITE_FLAG_RE = /^(-[dDmMcCsuF]|--delete|--move|--edit-description|--set-upstream|--unset-upstream)/;
 
+/** git config 的写旗标：改值、删值、改段与开编辑器，命中即写 */
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  "-e", "--edit", "--add", "--unset", "--unset-all", "--replace-all", "--remove-section", "--rename-section",
+]);
+
+/** git config 的取值旗标：其后一个词是旗标参数，不是操作数（-f file <name> 的 file） */
+const GIT_CONFIG_VALUE_FLAGS = new Set(["-f", "--file", "--blob", "--default", "--comment", "-t", "--type"]);
+
 /**
- * git 子命令写判定：变更子命令直接拒绝；branch/tag/worktree 区分查询形态。
+ * git config 的操作数个数：跳过旗标，取值旗标连其参数一并跳过。
+ * @param words config 之后的词
+ * @returns 非旗标操作数个数
+ */
+function gitConfigOperandCount(words: string[]): number {
+  let count = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (w.startsWith("-")) {
+      if (GIT_CONFIG_VALUE_FLAGS.has(w)) i++;
+      continue;
+    }
+    count++;
+  }
+  return count;
+}
+
+/**
+ * git 子命令写判定：变更子命令直接拒绝；branch/tag/worktree/stash/config/remote/submodule/reflog
+ * 区分查询形态，其余写子命令命中即拒绝。
  * @param words 以 git 开头的命令段分词
  * @returns 违规原因；只读安全返回 undefined
  */
@@ -324,14 +351,43 @@ function gitWriteVerdict(words: string[]): string | undefined {
     const mode = rest[0];
     return mode === undefined || (mode !== "list" && mode !== "show") ? "写命令 git stash" : undefined;
   }
+  if (sub === "config") {
+    // 写形态：写旗标（--add/--unset*/--replace-all/--remove-section/--rename-section/-e/--edit）命中，
+    // 或操作数多于一个（git config <name> <value> 写值）。
+    // 读形态：git config（列全部）、git config <name>（查值）与 --get*/--list/-l；
+    // 取值旗标的参数不计操作数（-f cfg <name>）
+    if (rest.some((w) => GIT_CONFIG_WRITE_FLAGS.has(w))) return "写命令 git config";
+    return gitConfigOperandCount(rest) > 1 ? "写命令 git config" : undefined;
+  }
+  if (sub === "remote") {
+    // 查询：无参数（列出远程名）、-v/--verbose（显示 URL 列表）、show、get-url；
+    // add/remove/rename/set-url/prune/update 等改配置
+    const mode = rest[0];
+    const isQuery = mode === undefined || mode === "-v" || mode === "--verbose" || mode === "show" || mode === "get-url";
+    return isQuery ? undefined : "写命令 git remote";
+  }
+  if (sub === "submodule") {
+    // 查询：无参数（列出子模块）、status；add/init/update/deinit/sync 等改仓库
+    const mode = rest[0];
+    return mode === undefined || mode === "status" ? undefined : "写命令 git submodule";
+  }
+  if (sub === "reflog") {
+    // 查询：无参数（默认 show）与 show；delete/expire 改写 reflog
+    const mode = rest[0];
+    return mode === undefined || mode === "show" ? undefined : "写命令 git reflog";
+  }
   return `写命令 git ${sub}`;
 }
 
-/** git 变更子命令：git <sub> 命中即写操作（branch/tag/worktree/stash 有查询豁免，见 gitWriteVerdict） */
+/** git 变更子命令：git <sub> 命中即写操作（branch/tag/worktree/stash/config/remote/submodule/reflog
+ *  有查询豁免，见 gitWriteVerdict） */
 const GIT_WRITE_SUBCOMMANDS = new Set([
   "add", "commit", "push", "pull", "merge", "rebase", "reset", "restore",
   "checkout", "switch", "clean", "cherry-pick", "revert", "apply", "am",
   "rm", "mv", "stash", "branch", "tag", "worktree",
+  // 配置、仓库与引用变更：config/remote 改配置、init 建仓库、fetch/submodule 拉取落盘、
+  // update-ref 改写引用、gc 与 reflog 重写仓库数据
+  "config", "init", "remote", "fetch", "submodule", "update-ref", "gc", "reflog",
 ]);
 
 /**

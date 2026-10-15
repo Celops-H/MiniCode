@@ -640,6 +640,74 @@ describe("只读 agent 写拦截判定（落盘与持久化形态）", () => {
   });
 });
 
+describe("只读 agent 写拦截判定（git 子命令形态）", () => {
+  it("变更子命令补全：config/init/remote/fetch/submodule/update-ref/gc/reflog 按形态拒绝", () => {
+    for (const command of [
+      "git config user.name x",
+      "git config --global user.name x",
+      "git config --global core.autocrlf true",
+      "git config --unset user.name",
+      "git config --unset-all user.name",
+      "git config --add user.name x",
+      "git config --replace-all user.name x",
+      "git config --remove-section user",
+      "git config --rename-section a b",
+      "git config -e",
+      "git config --global --edit",
+      "git config -f cfg user.name x",
+      "git init",
+      "git init --bare repo.git",
+      "git remote add origin https://x",
+      "git remote remove origin",
+      "git remote rename a b",
+      "git remote set-url origin https://y",
+      "git remote prune origin",
+      "git remote update",
+      "git fetch",
+      "git fetch origin main",
+      "git fetch --all",
+      "git submodule add https://x lib",
+      "git submodule update --init",
+      "git submodule deinit lib",
+      "git submodule sync",
+      "git update-ref refs/heads/main abc",
+      "git update-ref -d refs/heads/tmp",
+      "git gc",
+      "git gc --aggressive",
+      "git reflog delete HEAD@{1}",
+      "git reflog expire --all",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeDefined();
+    }
+  });
+
+  it("查询形态放行：config 列全部/查值/--get*/--list、remote 的 -v/show/get-url、submodule 的 status、reflog 的 show", () => {
+    for (const command of [
+      "git config",
+      "git config user.name",
+      "git config --global user.name",
+      "git config -f cfg user.name",
+      "git config --list",
+      "git config -l",
+      "git config --get user.name",
+      "git config --get-all user.name",
+      "git config --get-regexp ^user",
+      "git config --global --get user.email",
+      "git remote",
+      "git remote -v",
+      "git remote --verbose",
+      "git remote show origin",
+      "git remote get-url origin",
+      "git submodule",
+      "git submodule status",
+      "git reflog",
+      "git reflog show",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
+    }
+  });
+});
+
 /** bash 判定捷径（只读元数据 + bash 命令 + 指定 shell 语义） */
 function readOnlyWriteShell(command: string, shell: CommandShellKind): string | undefined {
   return readOnlyToolViolation("bash", false, command, shell);
