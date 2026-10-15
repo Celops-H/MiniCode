@@ -106,6 +106,22 @@ describe("/model 边界：模型调用 error 事件渲染进消息区且回到�
       isError: true,
     });
   });
+  it("恢复会话重演流内错误的部分产出：半截正文块在前、错误行在后，顺序不变", () => {
+    const s = initState([
+      userMessage("你好"),
+      assistantMessage([{ type: "text", text: "半截正文" }], { model: "model-a" }),
+      errorMessage("流意外结束（未收到 finish_reason）", "model-a"),
+    ]);
+    const tail = s.blocks.slice(-2);
+    expect(tail[0]).toMatchObject({ kind: "message", role: "assistant", model: "model-a", text: "半截正文" });
+    expect(tail[1]).toMatchObject({
+      kind: "message",
+      role: "assistant",
+      model: "model-a",
+      text: "流意外结束（未收到 finish_reason）",
+      isError: true,
+    });
+  });
   it("model_fallback 事件：追加常驻通知行到消息区（路由切换可见，非一闪而过 toast）", () => {
     const s = reduceEvent(initState([]), { type: "model_fallback", from: "gpt-4o", to: "deepseek-v4-flash", reason: "error" });
     expect(s.blocks.at(-1)).toMatchObject({

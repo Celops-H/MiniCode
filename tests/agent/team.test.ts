@@ -355,6 +355,45 @@ describe("子 agent 结论回灌终态口径", () => {
     expect(String(mail?.content)).not.toContain("第一轮开场白");
   });
 
+  it("子 agent 末轮流内错误但有部分产出：仍按失败终态回灌，半截正文不当结论", async () => {
+    const hooks = new HookBus();
+    const completed: Array<{ conclusion: string; failed?: boolean }> = [];
+    hooks.on("AgentCompleted", (e) => {
+      completed.push({ conclusion: e.conclusion, failed: e.failed });
+    });
+    const team = new Team({ hooks });
+    const root = new Agent({ modelClient: mockTextClient, modelId: "mock", systemPrompt: "助手", team, hooks });
+    team.registerRoot(root);
+    const path = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    const child = new Agent({
+      modelClient: {
+        async *stream() {
+          // 流内错误，但已有半截正文产出：落正文 + 错误记录（E210 路径）
+          yield { type: "text_delta", text: "半截正文" };
+          yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+      team,
+      hooks,
+    });
+    team.commitSpawn(path, child);
+    await team.sendMessage(path, {
+      type: "NEW_TASK",
+      from: AgentPath.root(),
+      content: "干活",
+      triggerTurn: true,
+    });
+    await sleep(300);
+
+    // 末轮留痕错误记录 → 失败终态：不拿半截正文当结论
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.failed).toBe(true);
+    expect(completed[0]!.conclusion).toContain("流意外结束");
+    expect(completed[0]!.conclusion).not.toContain("半截正文");
+  });
+
   it("结论含通用工具调用写法不误伤：正文讨论 <tool_call> 不判不可信", async () => {
     const hooks = new HookBus();
     const completed: Array<{ failed?: boolean }> = [];

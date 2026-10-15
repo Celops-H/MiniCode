@@ -1552,6 +1552,31 @@ describe("出错轮错误记录（重启后恢复展示用留痕）", () => {
     expect(messages[1]).toMatchObject({ content: "流意外结束（未收到 finish_reason）", model: "mock" });
   });
 
+  it("流内 error 且已有部分产出：正文与错误记录并存（恢复重演半截正文 + 错误行）", async () => {
+    const agent = new Agent({
+      modelClient: {
+        async *stream() {
+          yield { type: "text_delta", text: "半截正文" };
+          yield { type: "error", message: "流意外结束（未收到 finish_reason）" };
+        },
+      },
+      modelId: "mock",
+      systemPrompt: "助手",
+    });
+    agent.start("1");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    const messages = agent.getMessages();
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "error"]);
+    expect(messages[1]).toMatchObject({ role: "assistant", content: [{ type: "text", text: "半截正文" }] });
+    expect(messages[2]).toMatchObject({
+      role: "error",
+      model: "mock",
+      content: "流意外结束（未收到 finish_reason）",
+    });
+  });
+
   it("超窗错误且无工具回合可剥：落错误记录后上抛（文本与宿主错误块一致）", async () => {
     const agent = new Agent({
       modelClient: {

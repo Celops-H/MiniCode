@@ -699,13 +699,15 @@ export class Agent {
       await this.flushOwnSession();
       return;
     }
-    // 流内错误且无任何产出：落错误记录代替空 assistant——空 content 的 assistant
-    // 不带信息（请求组装时本就被剥除），落盘只会让恢复会话留下一笔无展示的痕迹；
-    // 错误记录按宿主渲染口径落盘，重启后错误行照常恢复
-    if (assistant.content.length === 0 && streamError !== undefined) {
-      await this.appendMessage(errorMessage(modelErrorText(streamError), effectiveModel));
-    } else {
+    // 流内错误留痕：无产出时错误记录代替空 assistant——空 content 的 assistant 不带信息
+    //（请求组装时本就被剥除），落盘只会让恢复会话留下一笔无展示的痕迹；已有部分产出时
+    // 正文照常落盘，其后同构补错误记录——恢复重演显示半截正文 + 错误行，原因不丢。
+    // 错误记录按宿主渲染口径落盘（请求组装时剥除，不影响模型回读）
+    if (assistant.content.length > 0 || streamError === undefined) {
       await this.appendMessage(assistant);
+    }
+    if (streamError !== undefined) {
+      await this.appendMessage(errorMessage(modelErrorText(streamError), effectiveModel));
     }
 
     const calls = toolCallsOf(assistant);
