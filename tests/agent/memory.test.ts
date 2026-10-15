@@ -535,4 +535,49 @@ describe("覆盖窗口与在途保留", () => {
     expect(memoryRequests.at(-1)!).not.toContain("记忆：清盘前内容");
     expect(memoryRequests.at(-1)!).toContain("清盘后对话");
   });
+
+  it("resetHistory 与在途记忆更新竞态：旧会话更新返回后不回写记忆与覆盖点", async () => {
+    const memoryRequests: string[] = [];
+    let releaseMemory: (() => void) | undefined;
+    let notifyStarted: (() => void) | undefined;
+    const updateStarted = new Promise<void>((resolve) => (notifyStarted = resolve));
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join(" "),
+          );
+          // 首次更新挂住不返回，模拟 /clear 时更新仍在途（fire-and-forget 未收尾）
+          if (memoryRequests.length === 1) {
+            notifyStarted?.();
+            await new Promise<void>((resolve) => (releaseMemory = resolve));
+          }
+          yield { type: "text_delta", text: "记忆：清盘前内容" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
+    agent.start("清盘前对话");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await updateStarted;
+    // 更新在途时清盘：旧会话更新此刻仍挂起
+    agent.resetHistory();
+    releaseMemory?.();
+    await agent.whenMemorySettled();
+    agent.start("清盘后对话");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 旧会话更新返回后不写回：新会话记忆请求既不带旧记忆文本，也带得上新输入（覆盖点未被旧下标顶掉）
+    expect(memoryRequests).toHaveLength(2);
+    expect(memoryRequests.at(-1)!).not.toContain("记忆：清盘前内容");
+    expect(memoryRequests.at(-1)!).toContain("清盘后对话");
+  });
 });

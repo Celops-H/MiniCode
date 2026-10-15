@@ -174,6 +174,8 @@ export class Agent {
   private memoryChain: Promise<void> = Promise.resolve();
   /** 更新跑动中又收到收尾触发的尾随标记：更新完成后按最新消息补跑一次 */
   private memoryQueued = false;
+  /** 会话纪元：resetHistory 每次清盘自增，在途记忆更新回写前比对，旧会话结果不灌回新会话 */
+  private sessionEpoch = 0;
   /** agent 邮箱：其他 agent 投递的消息队列，注入上下文供模型读取 */
   private readonly mailbox = new Mailbox();
   private messages: Message[] = [];
@@ -346,6 +348,9 @@ export class Agent {
     // 覆盖点也归零——它指旧会话下标会让新会话的消息永远进不了记忆、压缩时被当已覆盖替换
     this.memory = "";
     this.memoryCovered = 0;
+    // 纪元自增：清盘时在途记忆更新（fire-and-forget，/clear 不等待）返回后不得写回，
+    // 否则旧会话记忆与旧下标会灌进新会话
+    this.sessionEpoch++;
   }
 
   /**
@@ -773,6 +778,8 @@ export class Agent {
    * 更新期间新到消息留给下次更新，不误标已覆盖。
    */
   private async updateMemoryOnce(): Promise<void> {
+    // 取调用时刻的会话纪元：await 期间若发生 /clear 清盘，返回后的写回作废
+    const epoch = this.sessionEpoch;
     // 未覆盖区取最旧一批（时间序）：覆盖点按实际发送范围推进，多轮后台更新逐步消化积压
     const uncovered = this.messages.slice(this.memoryCovered);
     // 无未覆盖消息即短路：覆盖点错位时空批次也会白发一次模型调用（修复前的错位源已堵，
@@ -791,6 +798,8 @@ export class Agent {
         },
         this.interruptController.signal,
       );
+      // 会话已清盘（/clear）：本批属于旧会话，记忆文本与覆盖点都不回写
+      if (this.sessionEpoch !== epoch) return;
       if (updated.trim().length > 0) {
         this.memory = updated.trim().slice(0, MAX_MEMORY_CHARS);
         this.memoryCovered = Math.max(this.memoryCovered, coveredAt);
