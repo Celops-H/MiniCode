@@ -1,8 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ToolRegistry } from "../../src/tools/index.js";
+import { ToolRegistry, outputLimitNote } from "../../src/tools/index.js";
 import { McpManager, killAllMcpServers } from "../../src/mcp/manager.js";
 import { writeFakeServer } from "./helpers.js";
+
+/** 与 src/mcp/manager.ts 的 MCP_MAX_RESULT_CHARS 一致 */
+const MCP_MAX_RESULT_CHARS = 30_000;
 
 let serverFile: string;
 
@@ -54,6 +57,24 @@ describe("McpManager（生命周期与工具接入）", () => {
       type: "object",
       properties: { text: { type: "string" } },
     });
+  });
+
+  it("工具描述末尾附输出上限提示（与内置工具同口径）", async () => {
+    const manager = new McpManager({ fs: fakeConfig() });
+    managers.push(manager);
+    const tools = await manager.startAll();
+    const echo = tools.find((t) => t.name === "mcp__fs__echo")!;
+    expect(echo.description).toBe("回声工具" + outputLimitNote(MCP_MAX_RESULT_CHARS));
+    expect(echo.maxResultSizeChars).toBe(MCP_MAX_RESULT_CHARS);
+  });
+
+  it("server 未给描述时回落默认名，同样附输出上限提示", async () => {
+    const manager = new McpManager({
+      fs: { ...fakeConfig(), env: { FAKE_TOOLS: JSON.stringify([{ name: "nodesc" }]) } },
+    });
+    managers.push(manager);
+    const [tool] = await manager.startAll();
+    expect(tool?.description).toBe("MCP 服务 fs 的 nodesc 工具" + outputLimitNote(MCP_MAX_RESULT_CHARS));
   });
 
   it("工具 execute 经 client 调用，返回 text 拼接与失败标记", async () => {

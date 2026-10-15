@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServerConfig } from "../config/index.js";
-import type { Tool } from "../tools/index.js";
+import { outputLimitNote, type Tool } from "../tools/index.js";
 import { McpClient } from "./client.js";
 
 /** 接入的 MCP 工具结果字符上限 */
@@ -140,7 +140,10 @@ export class McpManager {
     // 工具集以装配时为准（重开会话重拉）
     return client.listTools().map((info) => ({
       name: `mcp__${client.name}__${info.name}`,
-      description: info.description ?? `MCP 服务 ${client.name} 的 ${info.name} 工具`,
+      // 与内置工具同口径：描述末尾附输出上限提示，模型事先知道截断阈值
+      description:
+        (info.description ?? `MCP 服务 ${client.name} 的 ${info.name} 工具`) +
+        outputLimitNote(MCP_MAX_RESULT_CHARS),
       inputSchema: z.unknown(),
       inputJsonSchema: info.inputSchema,
       isReadOnly: false, // 外部副作用不可判：走完整审批链
