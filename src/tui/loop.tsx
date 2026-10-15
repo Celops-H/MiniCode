@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { render } from "@opentui/solid";
-import { modelErrorText, ROOT_AGENT_PATH, type Message } from "../core/index.js";
+import { ROOT_AGENT_PATH, type Message } from "../core/index.js";
 import type { StreamEvent } from "../core/index.js";
 import { buildInitPrompt, INIT_PROMPT_PREFIX, readInstructionFile } from "../context/index.js";
 import type { TuiAction } from "./keymap.js";
@@ -20,7 +20,7 @@ import { buildSettingsRows, setSettingEnabled } from "./settings.js";
 import { scanSkills } from "../skills/index.js";
 import type { McpServerConfig, Config } from "../config/index.js";
 import type { McpServerStatus } from "../mcp/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, planModelConfirm, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, agentsInFlight, reassemblyBlocked, setCompacting, type QueuedItem, type TuiState } from "./state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, formatTime, promptEmpty, selectedPromptText, resetToNewState, NEW_SESSION_ID, sessionModalTarget, planModelConfirm, cyclePermissionMode, permissionModeLabel, cycleThinkingLevel, thinkingLevelLabel, agentsInFlight, reassemblyBlocked, setCompacting, reduceHostError, type QueuedItem, type TuiState } from "./state.js";
 import { pumpQueue, lastIndexOfItem } from "./queue.js";
 import { forceScrollToBottom, scrollByPages, scrollToTop } from "./scroll.js";
 import type { ThinkingLevel } from "../core/index.js";
@@ -1388,27 +1388,7 @@ export async function runTui(options: TuiLoopOptions): Promise<{
         suppressStream = false;
         suppressPending = false;
         if (initPolicyBox) initPolicyBox.value = false;
-        commit({
-          ...state,
-          blocks: [
-            ...state.blocks,
-            {
-              kind: "message",
-              id: `err_${state.blocks.length}`,
-              role: "assistant",
-              // 署名快照本轮产出模型（回落当前模型名的旧行为在切模型后会把旧错误行
-              // 署名翻转成新模型）；错误块标题行已带 ⚠（Messages 组件 isError 标题），
-              // text 不再加前缀防双 ⚠；modelErrorText 对模型类错误附「换模型/配 key」引导
-              model: state.activeModel,
-              text: modelErrorText(error),
-              isError: true,
-              time: formatTime(),
-              thinkingCollapsed: true,
-            },
-          ],
-          streaming: undefined,
-          status: "idle",
-        });
+        commit(reduceHostError(state, error));
       }
     }
   } finally {

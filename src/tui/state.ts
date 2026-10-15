@@ -391,6 +391,10 @@ export interface TuiState {
   /** 本轮实际产出模型：轮开始（UserPromptSubmit）快照当前模型，回退事件覆盖；
    *  done 落块作署名，工具循环续轮保留、回合结束清除 */
   activeModel?: string;
+  /** 本轮已按 error 事件渲染的流错误文本（渲染口径 modelErrorText）：宿主 catch 据此去重。
+   *  流中断异常先 yield error 再抛，错误事件与 catch 两处都会追加错误块；
+   *  记忆按轮作用域——轮收尾（done）与新一轮输入起点（UserPromptSubmit）清除 */
+  renderedStreamError?: string;
   /** agent 树（/root=main 恒在首位）：路径 + 运行/完成状态 + 派生/完成时刻——底栏 agent 树数据源 */
   agents: AgentNode[];
   /** 排队项：在途期间新消息与统一入队的命令，展示在输入框上方、不混进消息区 */
@@ -671,6 +675,7 @@ export function resetToNewState(state: TuiState): TuiState {
     candidate: undefined,
     agents: [{ path: ROOT_AGENT_PATH, status: "running", spawnedAt: null, completedAt: null }],
     contextTokens: undefined,
+    renderedStreamError: undefined,
     prompt: emptyPrompt(state.prompt.history),
   };
 }
@@ -816,6 +821,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         streaming: undefined,
         status,
         turnIndex: state.turnIndex + 1,
+        renderedStreamError: undefined,
       };
     }
     case "error": {
@@ -842,6 +848,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
               thinkingCollapsed: true,
             },
           ],
+          renderedStreamError: modelErrorText(event.message),
         };
       }
       // 带前缀内容的 error：按轮边界收口——半截正文/思考合并为 isError 消息块，
@@ -871,6 +878,7 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
         status: "idle",
         turnIndex: state.turnIndex + 1,
         blocks,
+        renderedStreamError: modelErrorText(event.message),
       };
     }
     case "model_fallback":
@@ -908,6 +916,44 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
     default:
       return state;
   }
+}
+
+/**
+ * 宿主 catch 的错误收口（流中断异常直退路径）：interact 未注入 onError 时异常上抛，
+ * 由 TUI 主循环 catch 渲染错误块并回空闲。
+ * 同一失败可能已按 error 事件渲染过——协议在抛错前先 yield error（观测通道），
+ * 事件与 catch 两处都补块会渲染两次；命中记忆则不再补块，记忆随之消费。
+ * 非流来源的异常（模型链不可解析、宿主 checkpoint 与收尾故障等）没有 error 事件，照常补块。
+ * 去重依据是异常文本与 error 事件文本相等：协议层、模型链与 agent 都原样重抛、不包装消息；
+ * 上游若改成包装异常（改写 message），此处失配，同一失败会退回渲染两次。
+ * @param state 当前状态
+ * @param error 异常消息（原始文本，渲染口径由 modelErrorText 统一）
+ * @returns 收口后的状态
+ */
+export function reduceHostError(state: TuiState, error: string): TuiState {
+  if (state.renderedStreamError === modelErrorText(error)) return { ...state, renderedStreamError: undefined };
+  return {
+    ...state,
+    blocks: [
+      ...state.blocks,
+      {
+        kind: "message",
+        id: `err_${state.blocks.length}`,
+        role: "assistant",
+        // 署名快照本轮产出模型（回落当前模型名的旧行为在切模型后会把旧错误行
+        // 署名翻转成新模型）；错误块标题行已带 ⚠（Messages 组件 isError 标题），
+        // text 不再加前缀防双 ⚠；modelErrorText 对模型类错误附「换模型/配 key」引导
+        model: state.activeModel,
+        text: modelErrorText(error),
+        isError: true,
+        time: formatTime(),
+        thinkingCollapsed: true,
+      },
+    ],
+    streaming: undefined,
+    status: "idle",
+    renderedStreamError: undefined,
+  };
 }
 
 /** 打断当前轮（Ctrl+C）：已产出的半截文本保留为消息块，未闭合的工具卡标中断失败，回空闲。
@@ -1076,6 +1122,7 @@ export function reduceHook(state: TuiState, event: AgentEventMeta): TuiState {
           },
         ],
         status: "running",
+        renderedStreamError: undefined,
       };
     }
     case "PreToolUse": {

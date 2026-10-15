@@ -7,7 +7,7 @@
  */
 import { it, expect, describe } from "vitest";
 import { assistantMessage, COMMAND_MARKER, errorMessage, userMessage } from "../../src/core/index.js";
-import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, planModelConfirm, promptEmpty, setCompacting, agentsInFlight, type BlockView, type TuiState } from "../../src/tui/state.js";
+import { initState, reduceAction, reduceEvent, reduceHook, interruptTurn, resetToNewState, reassemblyBlocked, sessionModalTarget, planModelConfirm, promptEmpty, setCompacting, agentsInFlight, reduceHostError, type BlockView, type TuiState } from "../../src/tui/state.js";
 import { mapKey, decideEsc } from "../../src/tui/keymap.js";
 
 function withKeyModal(state: TuiState): TuiState {
@@ -641,6 +641,73 @@ describe("流中断 error 按轮边界收口", () => {
     const last = s.blocks.at(-1)!;
     expect(last).toMatchObject({ kind: "message", isError: true });
     expect((last as { text?: string }).text).toContain("boom");
+  });
+
+  const errorBlocks = (s: TuiState): BlockView[] => s.blocks.filter((b) => b.kind === "message" && b.isError);
+
+  it("流中断异常：error 事件后异常上抛到宿主 catch，同一失败只渲染一次", () => {
+    let s = reduceHook(initState([]), { type: "UserPromptSubmit", input: "写个长回复" });
+    // 流中断异常路径：协议先 yield error（观测通道）再原样抛出，异常上抛到宿主 catch
+    s = reduceEvent(s, { type: "error", message: "模型响应超时" });
+    expect(errorBlocks(s)).toHaveLength(1);
+    s = reduceHostError(s, "模型响应超时");
+    expect(errorBlocks(s)).toHaveLength(1);
+    expect(s.status).toBe("idle");
+  });
+
+  it("error 带流式内容：半截正文并入错误块后，catch 同样不再补块", () => {
+    let s = reduceHook(initState([]), { type: "UserPromptSubmit", input: "写个长回复" });
+    s = reduceEvent(s, { type: "text_delta", text: "半截正文" });
+    s = reduceEvent(s, { type: "error", message: "流意外结束（未收到 finish_reason）" });
+    expect(errorBlocks(s)).toHaveLength(1);
+    s = reduceHostError(s, "流意外结束（未收到 finish_reason）");
+    expect(errorBlocks(s)).toHaveLength(1);
+  });
+
+  it("模型类错误按渲染口径记忆：catch 传原始文本同样命中（两边都套 modelErrorText）", () => {
+    let s = reduceEvent(initState([]), { type: "error", message: "401 令牌已过期或验证不正确" });
+    const before = s.blocks.length;
+    s = reduceHostError(s, "401 令牌已过期或验证不正确");
+    expect(s.blocks).toHaveLength(before);
+  });
+
+  it("非流来源异常（无 error 事件）：catch 照常补错误块并回空闲", () => {
+    const s = reduceHostError(initState([]), "未知模型：gpt-x");
+    const last = s.blocks.at(-1)!;
+    expect(last).toMatchObject({ kind: "message", role: "assistant", isError: true });
+    expect((last as { text: string }).text).toContain("/model 换模型");
+    expect(s.streaming).toBeUndefined();
+    expect(s.status).toBe("idle");
+  });
+
+  it("轮收尾（done）与新一轮输入起点清除记忆：同文本异常后续照常补块", () => {
+    let s = reduceEvent(initState([]), { type: "error", message: "模型响应超时" });
+    s = reduceEvent(s, { type: "done", stopReason: "tool_use" });
+    const afterRound = s.blocks.length;
+    s = reduceHostError(s, "模型响应超时");
+    expect(s.blocks).toHaveLength(afterRound + 1);
+
+    let t = reduceEvent(initState([]), { type: "error", message: "模型响应超时" });
+    t = reduceHook(t, { type: "UserPromptSubmit", input: "再试一次" });
+    const afterSubmit = t.blocks.length;
+    t = reduceHostError(t, "模型响应超时");
+    expect(t.blocks).toHaveLength(afterSubmit + 1);
+  });
+
+  it("/clear 清空消息区时清除记忆：清空后同文本异常照常补块", () => {
+    let s = reduceEvent(initState([]), { type: "error", message: "模型响应超时" });
+    s = resetToNewState(s);
+    expect(s.blocks).toHaveLength(0);
+    s = reduceHostError(s, "模型响应超时");
+    expect(s.blocks).toHaveLength(1);
+  });
+
+  it("命中即消费记忆：同文本异常再抛一次会重新补块（记忆不残留）", () => {
+    let s = reduceEvent(initState([]), { type: "error", message: "模型响应超时" });
+    s = reduceHostError(s, "模型响应超时");
+    expect(s.blocks).toHaveLength(1);
+    s = reduceHostError(s, "模型响应超时");
+    expect(s.blocks).toHaveLength(2);
   });
 });
 
