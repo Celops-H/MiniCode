@@ -820,6 +820,22 @@ export function reduceEvent(state: TuiState, event: StreamEvent): TuiState {
           },
         ],
       };
+    case "model_retry":
+      // 模型路由重试观察事件：同样追加常驻通知行（瞬时错误在原模型退避重试），
+      // 不与 model_fallback 合并——重试后可能同模型成功，也可能耗尽才切换，两种情况都要看得见；
+      // 不改 activeModel（重试期间产出模型不变）
+      return {
+        ...state,
+        blocks: [
+          ...state.blocks,
+          {
+            kind: "notice",
+            id: `notice_${state.blocks.length}`,
+            text: `模型 ${event.model} 调用失败，正在重试（${event.attempt}/${event.total}）`,
+            time: formatTime(),
+          },
+        ],
+      };
     default:
       return state;
   }

@@ -113,6 +113,15 @@ describe("/model 边界：模型调用 error 事件渲染进消息区且回到�
       text: "模型 gpt-4o 不可用，已切换 deepseek-v4-flash",
     });
   });
+  it("model_retry 事件：追加常驻通知行带重试次数，不改本轮产出模型", () => {
+    const s0 = { ...initState([]), activeModel: "gpt-4o" };
+    const s = reduceEvent(s0, { type: "model_retry", model: "gpt-4o", attempt: 2, total: 2 });
+    expect(s.blocks.at(-1)).toMatchObject({
+      kind: "notice",
+      text: "模型 gpt-4o 调用失败，正在重试（2/2）",
+    });
+    expect(s.activeModel).toBe("gpt-4o");
+  });
 });
 describe("/clear 回会话新建态（resetToNewState 纯函数）", () => {
   it("消息区/流式/弹层/候选/agent 树/输入清空，历史与标题保留", () => {
