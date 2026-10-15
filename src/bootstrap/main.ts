@@ -8,7 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { ensureGlobalConfigSeed, loadConfig, loadEnvFile, resolveSessionsDir } from "../config/index.js";
 import { killAllMcpServers } from "../mcp/index.js";
-import { SessionStore } from "../storage/index.js";
+import { SessionStore, MODEL_PLACEHOLDER } from "../storage/index.js";
 import { killAllBackgroundTasks } from "../tools/index.js";
 import { rebuildIfStale } from "./staleBuild.js";
 import { MINICODE_VERSION } from "../core/index.js";
@@ -32,7 +32,7 @@ program
     }
     for (const meta of sessions) {
       // 空模型＝引导态建的会话，显「未连接」占位（与 TUI 面板同口径）
-      console.log(`${meta.id}  ${meta.title}  ${meta.model || "未连接"}  ${meta.updatedAt}`);
+      console.log(`${meta.id}  ${meta.title}  ${meta.model || MODEL_PLACEHOLDER}  ${meta.updatedAt}`);
     }
   });
 

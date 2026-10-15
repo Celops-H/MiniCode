@@ -11,7 +11,7 @@
  */
 import type { JSX } from "@opentui/solid";
 import { DEFAULT_CONTEXT_WINDOW } from "../../llm/index.js";
-import { DEFAULT_SESSION_TITLE } from "../../storage/index.js";
+import { DEFAULT_SESSION_TITLE, MODEL_PLACEHOLDER } from "../../storage/index.js";
 import { theme } from "./theme.js";
 import { permissionModeLabel, formatTokens } from "../state.js";
 import { fitWidth } from "./fit.js";
@@ -38,7 +38,7 @@ export function StatusBar(props: StatusBarProps): JSX.Element {
   return (
     <box flexDirection="row" justifyContent="space-between" gap={1} paddingX={1} flexShrink={0}>
       <box flexDirection="row" gap={1} flexShrink={0}>
-        <text fg={props.model ? theme.modelColor : theme.textMuted}>{props.model || "未连接"}</text>
+        <text fg={props.model ? theme.modelColor : theme.textMuted}>{props.model || MODEL_PLACEHOLDER}</text>
         {/* 会话标题：最长 20 列截断（CJK 列宽），避免长标题把模式 chip/右侧提示顶出 */}
         <text fg={theme.textMuted}>
           · 会话 {fitWidth(props.title || DEFAULT_SESSION_TITLE, 20)}

@@ -15,7 +15,7 @@ import { useTerminalDimensions } from "@opentui/solid";
 import type { JSX } from "@opentui/solid";
 import type { ModalState, ConnectPickModalState, ConnectKeyModalState } from "../state.js";
 import { PERMISSION_OPTIONS, thinkingLevelLabel } from "../state.js";
-import { DEFAULT_SESSION_TITLE } from "../../storage/index.js";
+import { DEFAULT_SESSION_TITLE, MODEL_PLACEHOLDER } from "../../storage/index.js";
 import { theme } from "./theme.js";
 import { colWidth, fitWidth, padCols, relativeTime, formatBytes } from "./fit.js";
 
@@ -134,7 +134,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
     // 三列：标题第一列、模型第二列、哈希第三列；列宽按可见内容取最大（截断上限防顶开），列间距 GAP
     const titleCols = Math.min(26, Math.max(4, ...visible.map((s) => colWidth(s.title || DEFAULT_SESSION_TITLE))));
     // 空模型＝引导态建的会话，显「未连接」占位（与状态行同口径），列宽也按占位取
-    const modelCols = Math.min(18, Math.max(4, ...visible.map((s) => colWidth(s.model || "未连接"))));
+    const modelCols = Math.min(18, Math.max(4, ...visible.map((s) => colWidth(s.model || MODEL_PLACEHOLDER))));
     const idCols = 6;
     const GAP = 6;
     const items: JSX.Element[] = [];
@@ -155,7 +155,7 @@ function SessionModal(props: { modal: Extract<ModalState, { kind: "session" }> }
       const sel = start + i === selIndex;
       const title = padCols(fitWidth(s.title || DEFAULT_SESSION_TITLE, titleCols), titleCols);
       // 模型列同样补齐定宽：哈希列（第三列）不随各会话模型宽度错位
-      const model = padCols(fitWidth(s.model || "未连接", modelCols), modelCols);
+      const model = padCols(fitWidth(s.model || MODEL_PLACEHOLDER, modelCols), modelCols);
       const idCell = padCols(s.id.slice(0, idCols), idCols);
       const actionTag = sel ? (b.action === "delete" ? "  ✕ 删除" : "  ◀ 进入") : "";
       items.push(

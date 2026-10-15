@@ -24,6 +24,12 @@ export interface SessionSummary {
 /** 新会话默认标题：所有创建点共用；自动起名以「标题仍是默认值」判定未起过名 */
 export const DEFAULT_SESSION_TITLE = "新会话";
 
+/**
+ * 模型为空（零可用厂商的连接引导态）时的显示占位：命令行 list 输出、
+ * 会话面板、状态行、消息署名共用同一文案。
+ */
+export const MODEL_PLACEHOLDER = "未连接";
+
 /** 自动起名的标题长度上限（按码点截，emoji 代理对不切成乱码） */
 const TITLE_MAX_CODEPOINTS = 30;
 

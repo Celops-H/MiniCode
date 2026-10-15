@@ -11,6 +11,7 @@ import { createChannel } from "../../src/tui/loop.js";
 import { initState, reduceAction, reduceEvent, reduceHook, setCompacting, type TuiState } from "../../src/tui/state.js";
 import { messageScroller } from "../../src/tui/scroll.js";
 import { assistantMessage } from "../../src/core/index.js";
+import { MODEL_PLACEHOLDER } from "../../src/storage/index.js";
 
 /** 取首个文本等于 text 的 span 的 fg 颜色（hex）；无匹配或无颜色返回 undefined */
 function textFg(frame: { lines: Array<{ spans: Array<{ text: string; fg?: unknown }> }> }, text: string): string | undefined {
@@ -107,7 +108,7 @@ describe("view/App 渲染链", () => {
     );
     await setup.waitForVisualIdle();
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("未连接 · 会话");
+    expect(frame).toContain(`${MODEL_PLACEHOLDER} · 会话`);
     // 占位按次要信息着色（灰），不与真实模型名的模型蓝混淆
     expect(textFgContaining(setup.captureSpans(), "未连接")).toBe("#8f9096");
     // 连接成功后模型名切回：文案与颜色跟随 store 更新
