@@ -39,6 +39,25 @@ describe("危险命令检测", () => {
     expect(checkDangerousCommand(".env").dangerous).toBe(false);
   });
 
+  it("包装命令取值旗标剥净后判内建（timeout -k/-s、sudo -h/-r/-t/-U、stdbuf -i/-o/-e）", () => {
+    expect(checkDangerousCommand("timeout -k 5 10 eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("timeout --kill-after 5 10 eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("timeout -s 9 10 eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("sudo -h host eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("sudo -r sysadm source x").dangerous).toBe(true);
+    expect(checkDangerousCommand("sudo -t type eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("sudo -U other eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("stdbuf -i L -o L -e L eval x").dangerous).toBe(true);
+    // env -i 与 sudo -n 是无参旗标：不吞后继命令词，后继命令仍按首词判定
+    expect(checkDangerousCommand("env -i eval x").dangerous).toBe(true);
+    expect(checkDangerousCommand("sudo -n eval x").dangerous).toBe(true);
+    // 剥净后不是危险内建的照常放行
+    expect(checkDangerousCommand("timeout -k 5 10 ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("sudo -r sysadm ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("stdbuf -o L ls").dangerous).toBe(false);
+    expect(checkDangerousCommand("env -i ls").dangerous).toBe(false);
+  });
+
   it("命令替换危险", () => {
     expect(checkDangerousCommand("echo $(whoami)").dangerous).toBe(true);
     expect(checkDangerousCommand("echo `whoami`").dangerous).toBe(true);

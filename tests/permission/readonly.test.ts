@@ -73,6 +73,23 @@ describe("只读 agent 写拦截判定", () => {
       "env -i rm x",
       "timeout 10 rm x",
       "nice -n 5 rm x",
+      // 包装命令的取值旗标剥净后仍按真实命令词判写（-k/-s、-h/-r/-t/-U、-i/-o/-e）
+      "timeout -k 5 10 rm x",
+      "timeout --kill-after 5 10 rm x",
+      "timeout -s 9 10 rm x",
+      "sudo -h host rm x",
+      "sudo -r sysadm rm x",
+      "sudo -t type rm x",
+      "sudo -U other rm x",
+      "sudo --role sysadm rm x",
+      "stdbuf -i L rm x",
+      "stdbuf -o L rm x",
+      "stdbuf -e L rm x",
+      "stdbuf --output L rm x",
+      // 长旗标等号粘连、嵌套包装、无参旗标不吃后继命令词
+      "sudo --role=sysadm rm x",
+      "sudo timeout -k 5 10 rm x",
+      "sudo -n rm x",
       "sh -c 'rm x'",
       "bash -c \"rm x\"",
       "find . -name '*.ts' | xargs rm",
@@ -106,6 +123,16 @@ describe("只读 agent 写拦截判定", () => {
       "node -e 'console.log(1)'",
       "command -v git",
       "sudo -u root git log --oneline", // 剥包装后是查询命令
+      // 取值旗标剥净后是只读命令，照常放行；无参旗标不误吞后继命令词
+      "timeout -k 5 10 ls",
+      "timeout -s 9 10 ls",
+      "sudo -r sysadm git log",
+      "sudo -h host git status",
+      "stdbuf -o L ls",
+      "stdbuf -e L cat file.txt",
+      "env -i ls",
+      "nice -n 5 git log",
+      "sudo -n git log",
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
@@ -121,6 +148,14 @@ describe("只读 agent 写拦截判定", () => {
     // awk/python -c 引号内是会被执行的真实代码，但与字面文本无法区分——
     // 轻量守卫不解析脚本，注释边界如实钉住当前行为
     expect(readOnlyWrite("awk '{print $1 > \"out.txt\"}' f")).toBeUndefined();
+  });
+
+  it("已知边界：取值旗标的引号参数被剔除后真命令词被吞（记录口径，非期望行为）", () => {
+    // 引号段先于剥包装剔除（「echo "rm" 不误拦」所需），旗标参数随之消失，
+    // 剥包装把真命令词当该旗标的参数吞掉；与「引号包住的取值」同源，见文件头边界
+    expect(readOnlyWrite('stdbuf -o "L" rm x')).toBeUndefined();
+    expect(readOnlyWrite('sudo -r "x" rm y')).toBeUndefined();
+    expect(readOnlyWrite('sudo -u "root" rm x')).toBeUndefined();
   });
 });
 

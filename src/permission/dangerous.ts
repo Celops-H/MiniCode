@@ -103,14 +103,28 @@ function commandHeadWord(command: string): string | undefined {
   return normalizeCommandWord(rest[0]!);
 }
 
-/** 前缀命令的取值选项：其后一个 token 是该选项的参数，随选项一并跳过 */
-const PREFIX_VALUE_FLAGS = new Set([
-  "-u", "-g", "-C", "-p", "-T", "-D", "-R", "-S", "-w", "-f", "-n",
-  "--user", "--group", "--unset", "--split-string",
-]);
-
 /** 包装命令：不改写后续命令词，剥开按真实命令词判定（sudo/env/nohup 等，跨 shell 归并） */
 const WRAPPER_COMMANDS = new Set(["sudo", "env", "nohup", "nice", "stdbuf", "timeout", "call"]);
+
+/**
+ * 包装命令的取值选项：其后一个 token 是该选项的参数，随选项一并跳过。
+ * 按包装命令分设，不并成一张全局表：同名旗标在不同命令下语义不同，
+ * env -i 清空环境、sudo -e 编辑文件都是无参旗标，只有 stdbuf 的 -i/-e 带参数，
+ * 合表会把无参旗标的后继命令词当参数吞掉，漏判写命令。
+ * 表项收短旗标与长旗标的分写形态（--signal 9）；长旗标的等号粘连形态（--signal=9）
+ * 本身是一个 token，随选项一并剥掉，不入表。
+ */
+const WRAPPER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
+  sudo: new Set([
+    "-u", "--user", "-g", "--group", "-p", "--prompt", "-C", "--close-from",
+    "-T", "--command-timeout", "-D", "--chdir", "-R", "--chroot",
+    "-h", "--host", "-r", "--role", "-t", "--type", "-U", "--other-user",
+  ]),
+  env: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]),
+  nice: new Set(["-n", "--adjustment"]),
+  timeout: new Set(["-k", "--kill-after", "-s", "--signal"]),
+  stdbuf: new Set(["-i", "--input", "-o", "--output", "-e", "--error"]),
+};
 
 /**
  * 命令词归一：取路径基名、剥首尾分组符号与 cmd 的 @ 静默前缀、剥 Windows 可执行后缀、转小写。
@@ -158,8 +172,7 @@ export function stripCommandPrefix(words: string[]): { rest: string[]; queried: 
       /^[A-Za-z_][A-Za-z0-9_]*=/.test(head) || WRAPPER_COMMANDS.has(head);
     if (!isWrapper) break;
     rest.shift();
-    // timeout 的首参数是时长（timeout 10 rm x），随包装一并剥掉
-    if (head === "timeout" && /^\d+[smhd]?$/.test(rest[0] ?? "")) rest.shift();
+    const valueFlags = WRAPPER_VALUE_FLAGS[head];
     // 剥包装后继续吞选项与赋值；取值选项连参数一起吞
     while (rest.length > 0) {
       const word = rest[0]!;
@@ -167,11 +180,13 @@ export function stripCommandPrefix(words: string[]): { rest: string[]; queried: 
         rest.shift();
       } else if (word.startsWith("-")) {
         rest.shift();
-        if (PREFIX_VALUE_FLAGS.has(word)) rest.shift();
+        if (valueFlags?.has(word)) rest.shift();
       } else {
         break;
       }
     }
+    // timeout 的时长排在选项之后（timeout 10 rm x、timeout -k 5 10 rm x），吞完选项再剥一次
+    if (head === "timeout" && /^\d+[smhd]?$/.test(rest[0] ?? "")) rest.shift();
   }
   return { rest, queried: false };
 }
