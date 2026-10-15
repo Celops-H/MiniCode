@@ -52,17 +52,13 @@ export const readTool: Tool = {
       ].join("\n");
     }
     const content = await readFile(file, "utf8");
-    // 记录版本令牌：完整读时记内容 hash 供抖动兜底；部分读只记 mtime+size。
+    // 记录版本令牌：内容已完整取出，部分读也照记 hash，写前据此比对内容。
     // 记版本的 stat 在读与 stat 之间文件被删时同样会抛裸 ENOENT，失败即跳过记版本
     const fileState = currentFileState();
     if (fileState) {
       try {
         const disk = await stat(file);
-        fileState.setVersion(file, {
-          mtimeMs: disk.mtimeMs,
-          size: disk.size,
-          contentHash: limit === undefined ? hashContent(content) : undefined,
-        });
+        fileState.setVersion(file, { size: disk.size, contentHash: hashContent(content) });
       } catch {
         // 文件在读取后立即被删：内容已拿到，正常返回，不记版本
       }

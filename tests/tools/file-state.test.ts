@@ -60,11 +60,10 @@ describe("文件写冲突防护（per-agent 快照）", () => {
 
       // read 用小写路径登记快照
       await withFileState(state, () => readTool.execute({ path: file }));
-      // 外部用大写路径修改（Windows 大小写不敏感，同一文件）。
-      // 等过 mtime 毫秒刻度：两次写入同刻度时检测按「未变化」放行，属口径内盲区而非本用例目标
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // 外部用大写路径改写成等长内容（Windows 大小写不敏感，同一文件）。
+      // 不比 mtime 刻度：等长内容在同刻度改写也须命中内容比对
       writeFileSync(path.join(dir, "A.TXT"), "v2");
-      // 用小写路径 write：快照键已统一，命中 v1 快照 → 拒绝
+      // 用小写路径 write：快照键已统一，命中 v1 快照，内容已变 → 拒绝
       const out = await withFileState(state, () => writeTool.execute({ path: file, content: "v3" }));
       expect(out).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
       expect(await readFile(file, "utf8")).toBe("v2");
@@ -91,31 +90,35 @@ describe("文件写冲突防护（per-agent 快照）", () => {
     const state = new FileState();
     await withFileState(state, () => readTool.execute({ path: file }));
 
-    // 模拟抖动：内容不变但重写文件（mtime 变化）
+    // 模拟抖动：内容不变但重写文件
     writeFileSync(file, "same content");
     const out = await withFileState(state, () => editTool.execute({ path: file, oldString: "same", newString: "same" }));
     expect(out).toContain("已替换 1 处");
 
-    // 内容真的变了 → 拒绝（等过 mtime 毫秒刻度，理由同上）
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    writeFileSync(file, "changed content");
+    // 等长内容真的变了 → 比对 hash 拒绝，不依赖 mtime 刻度
+    writeFileSync(file, "diff content");
     const out2 = await withFileState(state, () => writeTool.execute({ path: file, content: "x" }));
-    expect(out2).toContain("文件已被外部或其他 Agent 修改");
+    expect(out2).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
+    expect(await readFile(file, "utf8")).toBe("diff content");
   });
 
-  it("部分读不记录 hash，mtime 变化且无法兜底时拒绝", async () => {
+  it("部分读也记内容 hash：磁盘未变可写，等长外部改写拒绝", async () => {
     const dir = setup();
     const file = path.join(dir, "a.txt");
     writeFileSync(file, "line1\nline2\nline3");
     const state = new FileState();
 
-    // 部分读（limit）→ 无 hash，只有 mtime+size
+    // 部分读（limit）→ 内容已完整取出，hash 照记，磁盘未变即可写
     await withFileState(state, () => readTool.execute({ path: file, limit: 1 }));
-    // 内容变但长度相同 → 无法 hash 兜底，拒绝（等过 mtime 毫秒刻度，理由同上）
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    writeFileSync(file, "line1\nline9\nline3");
-    const out = await withFileState(state, () => writeTool.execute({ path: file, content: "x" }));
-    expect(out).toContain("文件已被外部或其他 Agent 修改");
+    const out = await withFileState(state, () => writeTool.execute({ path: file, content: "line1" }));
+    expect(out).toBe(`已写入 ${file}`);
+
+    // 再部分读后外部等长改写 → hash 不符拒绝（同刻度改写也命中）
+    await withFileState(state, () => readTool.execute({ path: file, limit: 1 }));
+    writeFileSync(file, "line9");
+    const out2 = await withFileState(state, () => writeTool.execute({ path: file, content: "x" }));
+    expect(out2).toContain("文件已被外部或其他 Agent 修改，请重新 Read 后再写");
+    expect(await readFile(file, "utf8")).toBe("line9");
   });
 
   it("从未读过的文件直接写：新建/覆盖语义，不拒绝", async () => {

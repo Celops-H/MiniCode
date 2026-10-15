@@ -6,14 +6,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * 文件版本令牌：read 记录、write/edit 校验。
- * mtime+size 对齐覆盖「同一毫秒两次写入」盲区；完整读时记录内容 hash，
- * 供「mtime 变但内容未变」的抖动场景兜底放行。
+ * 判定只看内容：size 相同即比对磁盘内容 hash，一致可写（mtime 抖动但内容未变者照常放行），
+ * 不同拒绝。
  */
 export interface FileVersion {
-  mtimeMs: number;
   size: number;
-  /** 仅完整读时可得；部分读为 undefined */
-  contentHash?: string;
+  contentHash: string;
 }
 
 /** 计算文件内容的 sha256 哈希 */
@@ -71,10 +69,9 @@ export class FileState {
   /**
    * 校验磁盘现状 vs 快照，判定是否可写（CAS 语义）。
    * - 无快照（从未读过）：新建/覆盖语义，可写
-   * - mtime+size 未变：可写
-   * - mtime 变但 size 一致且完整读 hash 一致：抖动（编辑器 touched、杀软扫描）兜底放行
+   * - size 相同且内容 hash 一致：可写（mtime 抖动但内容未变者放行）
+   * - size 不同或内容 hash 不一致：文件已被修改，拒绝
    * - 有快照但文件已不存在（被外部删除）：清掉本 agent 该路径快照，按新建放行
-   * - 其余：文件已被修改，拒绝
    * @param p 文件路径
    * @returns 拒绝原因；null 表示可写
    */
@@ -93,8 +90,9 @@ export class FileState {
       }
       throw err;
     }
-    if (disk.mtimeMs === version.mtimeMs && disk.size === version.size) return null;
-    if (disk.size === version.size && version.contentHash !== undefined) {
+    // mtime+size 相同不等于内容未变：等长内容可在同一 mtime 刻度内被外部改写，
+    // 故不看 mtime，一律比对磁盘内容
+    if (disk.size === version.size) {
       const content = await readFile(this.normalize(p), "utf8");
       if (hashContent(content) === version.contentHash) return null;
     }
@@ -104,11 +102,7 @@ export class FileState {
   /** 写入成功后刷新版本（在锁内调用），只刷自己这份快照 */
   async refreshVersion(p: string, content: string): Promise<void> {
     const disk = await stat(this.normalize(p));
-    this.setVersion(p, {
-      mtimeMs: disk.mtimeMs,
-      size: disk.size,
-      contentHash: hashContent(content),
-    });
+    this.setVersion(p, { size: disk.size, contentHash: hashContent(content) });
   }
 }
 
