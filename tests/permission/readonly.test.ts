@@ -729,8 +729,26 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
       "conda install numpy",
       "conda create -n x python",
       "conda env remove -n x",
-      // 多级子命令只认首词，读形态（conda env list、rustup toolchain list）同属边界、按写拒绝
-      "conda env list",
+      // 多级子命令只认首词，非只读的二级形态（conda env remove、rustup toolchain install）按写拒绝
+      "rustup toolchain install stable",
+      // uv 同为非 JS 包管理器：多级形态只认首词，安装与依赖变更按写拒绝
+      "uv pip install requests",
+      "uv add requests",
+      "uv sync",
+      "uv run pytest",
+      // apk 是子命令词形态：add/del/update 都写本地包库
+      "apk add nginx",
+      "apk del nginx",
+      "apk update",
+      // 旗标式包管理器：安装、移除与刷新库的旗标都写本地包库
+      "pacman -S nginx",
+      "pacman -Syu",
+      "pacman -Rns nginx",
+      "dpkg -i pkg.deb",
+      "dpkg -P nginx",
+      "rpm -i pkg.rpm",
+      "rpm -U pkg.rpm",
+      "rpm -e nginx",
       "cargo build",
       "cargo build --release",
       "cargo check",
@@ -748,7 +766,7 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
       "rustup update",
       "rustup install nightly",
       "rustup component add clippy",
-      "rustup toolchain list",
+      "rustup override set nightly",
       "gem install rails",
       "gem uninstall rails",
       "gem update",
@@ -806,6 +824,12 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
     expect(readOnlyWrite("cargo build")).toMatch(/构建写产物/);
     expect(readOnlyWrite("poetry run pytest")).toMatch(/脚本执行无法核验/);
     expect(readOnlyWrite("pip frobnicate")).toMatch(/子命令无法核验/);
+    expect(readOnlyWrite("uv pip install requests")).toMatch(/子命令无法核验/);
+    expect(readOnlyWrite("uv add requests")).toMatch(/写本地包与缓存/);
+    // 旗标式包管理器的拒绝理由指出命中的操作旗标
+    expect(readOnlyWrite("pacman -S nginx")).toMatch(/pacman -S（写本地包库）/);
+    expect(readOnlyWrite("dpkg -i pkg.deb")).toMatch(/dpkg -i（写本地包库）/);
+    expect(readOnlyWrite("rpm -e nginx")).toMatch(/rpm -e（写本地包库）/);
     // 段首 time 关键字只在非 cmd 语义剥除（cmd 无此关键字），剥后照常按族判定
     expect(readOnlyWriteShell("time pip install requests", "bash")).toMatch(/写本地包与缓存/);
     expect(readOnlyWriteShell("time pip list", "bash")).toBeUndefined();
@@ -894,18 +918,50 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
       "winget list",
       "winget search git",
       "winget show Git.Git",
+      // uv 的裸用与纯查询形态
+      "uv --version",
+      "uv help",
+      // apk 的查询子命令
+      "apk info",
+      "apk search nginx",
+      "apk version",
+      "apk list --installed",
+      // 旗标式包管理器：只读操作旗标放行（含旗标簇只看首字母）
+      "pacman -Q",
+      "pacman -Qi nginx",
+      "pacman -T",
+      "pacman --version",
+      "dpkg -l",
+      "dpkg -l nginx",
+      "dpkg -L nginx",
+      "dpkg -s nginx",
+      "dpkg --list",
+      "dpkg -I pkg.deb",
+      "rpm -qa",
+      "rpm -q nginx",
+      "rpm -V nginx",
+      "rpm --query nginx",
+      "rpm --version",
+      // 二级只读形态：名空间 + 查询子命令
+      "rustup toolchain list",
+      "rustup target list",
+      "rustup component list",
+      "rustup override list",
+      "conda env list",
+      // go env 打印环境变量是纯读
+      "go env",
+      "go env GOFLAGS",
     ]) {
       expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });
 
-  it("构建器整体拒绝（查询旗标形态一并拒绝），包装前缀剥开后照常命中", () => {
-    const builderReason = /^写命令 (make|gmake|bmake|nmake|ninja|cmake|msbuild|gradle|gradlew|mvn|mvnw|ant|bazel|bazelisk|dotnet)（构建写产物）$/;
+  it("构建器写形态整体拒绝，包装前缀剥开后照常命中", () => {
+    const builderReason = /^写命令 (make|gmake|bmake|nmake|ninja|cmake|msbuild|gradle|gradlew|mvn|mvnw|ant|bazel|bazelisk|dotnet|tsc|vite|webpack|esbuild)（构建写产物）$/;
     for (const command of [
       "make",
       "make all",
       "make -n",
-      "make --version",
       "make -C src",
       "gmake all",
       "nmake",
@@ -913,7 +969,6 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
       "cmake -B build",
       "cmake --build build",
       "cmake -L .",
-      "cmake --version",
       "msbuild app.sln",
       "gradle build",
       "gradlew assemble",
@@ -925,11 +980,47 @@ describe("只读 agent 写拦截判定（非 JS 包管理器与构建器）", ()
       "bazelisk test //...",
       "dotnet build",
       "dotnet run",
-      "dotnet --version",
+      // JS 侧构建器直接调用同样写产物
+      "tsc",
+      "tsc --noEmit",
+      "tsc -p tsconfig.json",
+      "vite build",
+      "vite",
+      "webpack",
+      "webpack --mode production",
+      "esbuild src/a.ts --bundle --outfile=out.js",
       "sudo make all",
       "timeout 10 make all",
     ]) {
       expect(readOnlyWrite(command), command).toMatch(builderReason);
+    }
+    // cmake -L 触发 configure，写 CMakeCache.txt，不属纯读，维持拒绝
+    expect(readOnlyWrite("cmake -L .")).toMatch(/cmake（构建写产物）/);
+  });
+
+  it("构建器只带版本或帮助旗标时放行（只打印信息，不写产物）", () => {
+    for (const command of [
+      "make --version",
+      "make --help",
+      "gmake --version",
+      "ninja --version",
+      "cmake --version",
+      "msbuild -version",
+      "gradle --version",
+      "mvn --version",
+      "ant -version",
+      "bazel --version",
+      "dotnet --version",
+      "dotnet --help",
+      "tsc --version",
+      "vite --version",
+      "webpack --version",
+      "esbuild --version",
+      // 剥包装后仍是纯查询形态
+      "sudo make --version",
+      "timeout 10 make --version",
+    ]) {
+      expect(readOnlyWrite(command), command).toBeUndefined();
     }
   });
 });

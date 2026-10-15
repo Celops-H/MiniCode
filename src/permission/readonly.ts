@@ -24,14 +24,17 @@
  * - 写命令黑名单按命令词枚举守卫，跨 shell 语义归并（见 WRITE_COMMAND_WORDS 注释）；
  *   脚本执行（shell 家族、cscript/wscript、解释器脚本文件与 awk/sed -f）整体拒绝，
  *   包管理器（npm/pnpm/yarn/bun/corepack）按子命令判定、npx 家族（npx/pnpx/bunx）
- *   整体拒绝，非 JS 包管理器（pip/cargo/apt/brew/gem/go/composer/snap/winget 等）按族
- *   枚举只读子命令判定，其余子命令按写拒绝（pip config set、go env -w、poetry version <v>
- *   一类带写形态的同名子命令不入只读集，cargo tree 补写 Cargo.lock 同属写形态，
- *   多级子命令 rustup toolchain list、conda env list 只认首词、按写拒绝），
+ *   整体拒绝，非 JS 包管理器（pip/uv/cargo/apt/brew/gem/go/composer/snap/winget/apk 等）按族
+ *   枚举只读子命令判定，其余子命令按写拒绝（pip config set、poetry version <v>
+ *   一类带写形态的同名子命令不入只读集，cargo tree 补写 Cargo.lock 同属写形态），
+ *   旗标式系统包管理器（pacman/dpkg/rpm）的操作写在段首旗标里，按只读操作字母判定，
+ *   二级形态只放行明确为纯读的（rustup toolchain list、conda env list），
+ *   go env 打印环境变量放行、带 -w/-u 按写拒绝，
  *   裸用与纯查询旗标形态只打印帮助、照常放行；只读子命令取远端元数据时写本工具链缓存
  *   （pip index、cargo search），属放行侧固有行为，与 npm view 同口径，
- *   构建器（make/ninja/cmake/msbuild/gradle/mvn/dotnet 等）无查询豁免、
- *   整体拒绝（make --version 与 cmake -L 一并拒绝），
+ *   构建器（make/ninja/cmake/msbuild/gradle/mvn/dotnet/tsc/vite/webpack/esbuild 等）
+ *   整体拒绝，只带版本或帮助旗标时放行（make --version、dotnet --version；
+ *   cmake -L 触发 configure 写 CMakeCache.txt，仍拒绝），
  *   落盘出口（下载、sort/uniq 的输出文件、certutil 编解码、tar 归档写模式、
  *   压缩族非 -c/-t/-l 与纯查询旗标簇的形态）与持久化写（注册表、setx、计划任务、服务控制）按形态判定，
  *   白名单命令的写旗标（date/history/tree/file）与 bash.ts 同口径，
@@ -193,6 +196,24 @@ function packageSubcommand(args: string[]): string | undefined {
 }
 
 /**
+ * 旗标式系统包管理器的读判定：段首短旗标的首字母在只读表内时放行，其余按写拒绝
+ * （pacman -S、dpkg -i、rpm -U 都写本地包库）。无可判定的短旗标时看长旗标：
+ * 裸用与只带只读长旗标（--version/--help/--query 等）只打印信息，照常放行。
+ * @param args 包管理器词之后的词
+ * @param readLetters 该族的只读操作首字母
+ * @param first 命令词（拼拒绝理由用）
+ * @returns 违规原因；只读安全返回 undefined
+ */
+function flagPackageVerdict(args: string[], readLetters: ReadonlySet<string>, first: string): string | undefined {
+  const shortFlag = args.find((w) => /^-[^-]/.test(w));
+  if (shortFlag !== undefined) {
+    return readLetters.has(shortFlag[1]!) ? undefined : `写命令 ${first} ${shortFlag}（写本地包库）`;
+  }
+  const writeLong = args.find((w) => w.startsWith("--") && !FLAG_PACKAGE_READ_LONG_OPTIONS.has(w.split("=")[0]!));
+  return writeLong === undefined ? undefined : `写命令 ${first} ${writeLong}（写本地包库）`;
+}
+
+/**
  * 非 JS 包管理器的只读子命令：命令词 → 该族的查询形态。
  * 只读集按族分设，不并成一张全局表：同名子命令跨族语义不同，合表会把写形态按同名
  * 只读词放行（cargo check 编译写 target/、conda env remove 删环境、poetry version 2.0
@@ -201,6 +222,8 @@ function packageSubcommand(args: string[]): string | undefined {
  * cargo tree 与 cargo metadata 解析依赖时会补写项目里的 Cargo.lock，同属写形态；
  * 可编译的族只留取远端元数据的查询（cargo search、go doc），构建与脚本执行形态走
  * EXT_PKG_BUILD_SUBCOMMANDS 与 EXT_PKG_EXEC_SUBCOMMANDS。
+ * 本表只认首个子命令词：二级形态只放行明确为纯读的（rustup toolchain list、
+ * conda env list，见 EXT_PACKAGE_TWO_LEVEL_READ），其余二级形态（conda env remove）按写拒绝。
  */
 const EXT_PACKAGE_MANAGERS: Record<string, ReadonlySet<string>> = {
   // Python：pip 与常用环境工具
@@ -208,6 +231,8 @@ const EXT_PACKAGE_MANAGERS: Record<string, ReadonlySet<string>> = {
   pipx: new Set(["list", "environment", "help", "version"]),
   poetry: new Set(["show", "about", "check", "help"]),
   conda: new Set(["list", "info", "search", "help", "version"]),
+  // uv：多级子命令（uv pip list、uv tool list）只认首词、按写拒绝，单级只留 help
+  uv: new Set(["help"]),
   // Rust：cargo 的 check/build/run/install 写 target/ 或执行代码，只留查询
   cargo: new Set(["search", "locate-project", "help", "version"]),
   rustup: new Set(["show", "check", "help", "version"]),
@@ -230,11 +255,45 @@ const EXT_PACKAGE_MANAGERS: Record<string, ReadonlySet<string>> = {
   zypper: new Set(["search", "info", "list-updates", "repos", "packages", "patches", "patterns",
     "products", "help", "version"]),
   snap: new Set(["list", "info", "find", "connections", "help", "version"]),
+  // apk：Alpine，子命令词形态；查询形态放行，add/del/fix/update 走写表
+  apk: new Set(["info", "list", "search", "policy", "stats", "version", "manifest", "verify", "why", "audit", "dot", "help"]),
   // Homebrew 与 Windows 三家：choco、scoop、winget
   brew: new Set(["list", "info", "search", "deps", "outdated", "doctor", "config", "home", "help", "version"]),
   choco: new Set(["list", "search", "info", "help", "version"]),
   scoop: new Set(["list", "search", "info", "status", "which", "help", "version"]),
   winget: new Set(["list", "search", "show", "help", "version"]),
+};
+
+/** 旗标式系统包管理器：操作写在段首旗标里，没有子命令词（pacman -S 装、dpkg -i 装、rpm -U 升）。
+ *  值为该族的只读操作首字母，大小写敏感（dpkg 的 -p 列可用版本是读、-P 清除是写）。
+ *  短旗标簇只看首个字母（pacman -Qil 查询、-Sy 刷新库），未知形态按写拒绝，
+ *  见 flagPackageVerdict。 */
+const FLAG_PACKAGE_MANAGER_READ_LETTERS: Record<string, ReadonlySet<string>> = {
+  // -Q 查询、-T 依赖测试、-V 打印版本、-h 帮助；-S/-R/-U/-D/-F 都写本地库
+  pacman: new Set(["Q", "T", "V", "h"]),
+  // -l 列表、-s 状态、-L 包内文件、-S 搜所属包、-c 包内容、-p 可用版本、-I 归档信息、
+  // -V 校验、-h 帮助为纯读；-i 装、-r 删、-P 清除、-U 解包装、-x 解包、-b 与 -e 都写
+  dpkg: new Set(["l", "s", "L", "S", "c", "p", "I", "V", "h"]),
+  // -q 查询、-V 校验、-K 校验签名、-h 帮助为纯读；-i 装、-U 升、-e 删、-F 改库都写
+  rpm: new Set(["q", "V", "K", "h"]),
+};
+
+/** 旗标式包管理器的只读长旗标：与上表同义的查询形态（dpkg --list、rpm --query） */
+const FLAG_PACKAGE_READ_LONG_OPTIONS = new Set([
+  "--query", "--version", "--help", "--list", "--status", "--listfiles", "--search",
+  "--contents", "--print-avail", "--info", "--verify", "--checksig", "--deptest",
+]);
+
+/** 非 JS 包管理器的二级只读形态：<族> <名空间> <查询子命令>（rustup toolchain list、
+ *  conda env list）。只放行列出的名空间与子命令组合，其余二级形态按写拒绝 */
+const EXT_PACKAGE_TWO_LEVEL_READ: Record<
+  string,
+  { namespaces: ReadonlySet<string>; subs: ReadonlySet<string> }
+> = {
+  // rustup toolchain/target/component/override list 均为纯查询
+  rustup: { namespaces: new Set(["toolchain", "target", "component", "override"]), subs: new Set(["list"]) },
+  // conda env export 带 -f 落盘、env remove/create 删建环境，只放行 env list
+  conda: { namespaces: new Set(["env"]), subs: new Set(["list"]) },
 };
 
 /** 非 JS 包管理器的安装与依赖变更子命令：安装或移除包、改写依赖清单与缓存 */
@@ -255,10 +314,20 @@ const EXT_PKG_BUILD_SUBCOMMANDS = new Set([
 /** 非 JS 包管理器的脚本执行子命令：跑本地脚本或任意二进制，无法核验 */
 const EXT_PKG_EXEC_SUBCOMMANDS = new Set(["run", "run-script", "exec", "x", "dlx", "test", "bench", "shell"]);
 
-/** 构建器：调用即编译或生成产物（写目标目录、构建缓存与生成文件），无查询豁免、整体拒绝 */
+/** 构建器：调用即编译或生成产物（写目标目录、构建缓存与生成文件），整体拒绝，
+ *  只带版本或帮助旗标时放行（见 BUILD_QUERY_FLAGS）。
+ *  JS 侧构建器（tsc 编译、vite/webpack/esbuild 打包）直接调用同样写产物，一并入表 */
 const BUILD_TOOL_WORDS = new Set([
   "make", "gmake", "bmake", "nmake", "ninja", "cmake", "msbuild", "gradle", "gradlew", "mvn", "mvnw",
   "ant", "bazel", "bazelisk", "dotnet",
+  "tsc", "vite", "webpack", "esbuild",
+]);
+
+/** 构建器的纯查询旗标：只带这些旗标时只打印版本或帮助、不编译（make --version、dotnet --version）。
+ *  只收各工具语义一致的拼写；短旗标 -v 在 ninja 是逐条打印构建命令、在 dotnet 是日志级别，
+ *  不入表。cmake -L 会触发 configure 写 CMakeCache.txt，不属纯读，不在表内。 */
+const BUILD_QUERY_FLAGS = new Set([
+  "--version", "-version", "/version", "--help", "-help", "/help", "-h", "-?", "/?",
 ]);
 
 /** 脚本解释器与各自的一行流旗标判定：旗标含义随解释器不同（python 的 -E 是忽略环境
@@ -494,15 +563,44 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   // 族名按版本化拼写归一（pip3.12 归 pip），与解释器同口径
   const extPackage = EXT_PACKAGE_MANAGERS[first] ?? EXT_PACKAGE_MANAGERS[interpreterBase(first)];
   if (extPackage) {
-    const sub = packageSubcommand(rest.slice(1));
+    const args = rest.slice(1);
+    const sub = packageSubcommand(args);
     // 裸用与纯查询旗标形态只打印帮助（gem/go/brew 的裸形态同为帮助，写形态由子命令拦）
     if (sub === undefined || extPackage.has(sub)) return undefined;
+    // go env 打印环境变量是纯读，-w 改值与 -u 删值都写 go env 配置文件
+    if (interpreterBase(first) === "go" && sub === "env") {
+      return args.some((w) => w === "-w" || w === "-u") ? "写命令 go env（改 go env 配置）" : undefined;
+    }
+    // 二级只读形态（rustup toolchain list、conda env list）按名空间与查询子命令判定
+    const twoLevel = EXT_PACKAGE_TWO_LEVEL_READ[first] ?? EXT_PACKAGE_TWO_LEVEL_READ[interpreterBase(first)];
+    if (
+      twoLevel !== undefined &&
+      args[0] !== undefined &&
+      args[1] !== undefined &&
+      twoLevel.namespaces.has(args[0].toLowerCase()) &&
+      twoLevel.subs.has(args[1].toLowerCase())
+    ) {
+      return undefined;
+    }
     if (EXT_PKG_INSTALL_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（写本地包与缓存）`;
     if (EXT_PKG_BUILD_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（构建写产物）`;
     if (EXT_PKG_EXEC_SUBCOMMANDS.has(sub)) return `写命令 ${first} ${sub}（脚本执行无法核验）`;
     return `写命令 ${first} ${sub}（子命令无法核验）`;
   }
-  if (BUILD_TOOL_WORDS.has(first)) return `写命令 ${first}（构建写产物）`;
+  // 旗标式系统包管理器（pacman/dpkg/rpm）：操作在段首旗标里，按只读操作字母判定
+  const flagPackageReadLetters =
+    FLAG_PACKAGE_MANAGER_READ_LETTERS[first] ?? FLAG_PACKAGE_MANAGER_READ_LETTERS[interpreterBase(first)];
+  if (flagPackageReadLetters) {
+    return flagPackageVerdict(rest.slice(1), flagPackageReadLetters, first);
+  }
+  if (BUILD_TOOL_WORDS.has(first)) {
+    const args = rest.slice(1);
+    // 只带版本或帮助旗标时只打印信息、不写产物（make --version、dotnet --version）；
+    // 其余形态（含裸用、构建目标与 cmake -L 的 -L）整体拒绝
+    return args.length > 0 && args.every((w) => BUILD_QUERY_FLAGS.has(w))
+      ? undefined
+      : `写命令 ${first}（构建写产物）`;
+  }
   // certutil 的编解码把结果写入文件（certutil -decode in.b64 out.bin）；-hashfile 等查询形态放行
   if (first === "certutil" && rest.slice(1).some((w) => /^[-/](encode|decode|decodehex)$/i.test(w))) {
     return "写命令 certutil（落盘写文件）";
