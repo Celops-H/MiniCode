@@ -1387,7 +1387,8 @@ export class Agent {
       // 只读快工具（glob/read/grep 等）另加正常执行超时：本应秒回却挂起不转圈（不依赖打断触发）。
       // 执行超时定时器在 race settle 后清理，残留定时器会拖住 TUI 自然退出
       const execute = tool.isReadOnly ? executeDeadline(this.toolTimeoutMs) : undefined;
-      const deadlines: Promise<never>[] = [interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS)];
+      const interrupt = interruptDeadline(this.interruptController.signal, TOOL_INTERRUPT_TIMEOUT_MS);
+      const deadlines: Promise<never>[] = [interrupt.promise];
       if (execute) deadlines.push(execute.promise);
       try {
         const result = await Promise.race([
@@ -1438,8 +1439,9 @@ export class Agent {
           contextModifier,
         };
       } finally {
-        // 无论结果/异常都清理执行超时定时器
+        // 无论结果/异常都清理执行超时定时器与中断看门狗的 abort 监听
         execute?.cancel();
+        interrupt.cancel();
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -1590,17 +1592,43 @@ const TOOL_READONLY_TIMEOUT_MS = 60_000;
  * 强制转失败结果，宿主输入循环不被卡死。
  * @param signal 中断信号
  * @param timeoutMs 中止后的容忍窗口
- * @returns 永不 resolve 的 promise（中止超时后 reject）
+ * @returns 永不 resolve 的 promise（中止超时后 reject）与取消函数
  */
-function interruptDeadline(signal: AbortSignal, timeoutMs: number): Promise<never> {
+function interruptDeadline(
+  signal: AbortSignal,
+  timeoutMs: number,
+): { promise: Promise<never>; cancel: () => void } {
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   const promise = new Promise<never>((_resolve, reject) => {
     const rejectNow = (): void => reject(new DOMException("Aborted", "AbortError"));
-    if (signal.aborted) rejectNow();
-    else signal.addEventListener("abort", () => setTimeout(rejectNow, timeoutMs).unref(), { once: true });
+    if (signal.aborted) {
+      rejectNow();
+      return;
+    }
+    onAbort = () => {
+      timer = setTimeout(rejectNow, timeoutMs).unref();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
   });
   // 防 unhandled rejection：Promise.race 已 settle 后迟到触发的 reject 不再报未处理
   promise.catch(() => undefined);
-  return promise;
+  return {
+    promise,
+    // race settle（工具返回/中断）后注销 abort 监听并清理定时器：工具正常返回时监听
+    // 不注销会跨轮累积在常驻中断信号上；打断后工具在容忍窗内响应时残留 ref 无关的
+    // unref'd 定时器也一并清掉
+    cancel: () => {
+      if (onAbort) {
+        signal.removeEventListener("abort", onAbort);
+        onAbort = undefined;
+      }
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 /**

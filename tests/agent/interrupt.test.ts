@@ -565,4 +565,79 @@ describe("Agent 主循环：turn 内真打断", () => {
     expect(result?.content).toContain("慢但完成");
     expect(result?.content).not.toContain("执行超时");
   });
+
+  it("工具正常返回：中断看门狗的 abort 监听随之注销，不跨轮累积", async () => {
+    // 跟踪每个信号上存活的 abort 监听：工具正常返回时若看门狗不注销监听，
+    // 监听会累积在常驻的中断信号上（同一对话跨轮不重建信号）
+    type AddArgs = Parameters<AbortSignal["addEventListener"]>;
+    type RemoveArgs = Parameters<AbortSignal["removeEventListener"]>;
+    type Listener = AddArgs[1];
+    const live = new WeakMap<EventTarget, Set<Listener>>();
+    const origAdd = AbortSignal.prototype.addEventListener;
+    const origRemove = AbortSignal.prototype.removeEventListener;
+    AbortSignal.prototype.addEventListener = function (
+      this: AbortSignal,
+      ...args: AddArgs
+    ): void {
+      const [type, listener] = args;
+      if (type === "abort" && listener) {
+        const set = live.get(this) ?? new Set<Listener>();
+        set.add(listener);
+        live.set(this, set);
+      }
+      origAdd.call(this, ...args);
+    };
+    AbortSignal.prototype.removeEventListener = function (
+      this: AbortSignal,
+      ...args: RemoveArgs
+    ): void {
+      const [type, listener] = args;
+      if (type === "abort" && listener) live.get(this)?.delete(listener);
+      origRemove.call(this, ...args);
+    };
+
+    try {
+      let agentSignal: AbortSignal | undefined;
+      const tool: Tool = {
+        name: "glob",
+        description: "只读快工具",
+        inputSchema: z.object({}),
+        isReadOnly: true,
+        maxResultSizeChars: 1000,
+        execute(_input, options) {
+          agentSignal = options?.signal;
+          return "找到文件";
+        },
+      };
+      // 连发两轮工具调用再收尾：每轮各注册一个看门狗监听，用于暴露跨轮累积
+      const client: ModelClient = {
+        async *stream(_modelId, ctx) {
+          const results = ctx.messages.filter((m) => m.role === "tool_result").length;
+          if (results < 2) {
+            yield { type: "toolcall_start", index: 0, id: `call_${results}`, name: "glob" };
+            yield { type: "toolcall_end", index: 0 };
+            yield { type: "done", stopReason: "tool_use" };
+            return;
+          }
+          yield { type: "text_delta", text: "完成" };
+          yield { type: "done", stopReason: "end_turn" };
+        },
+      };
+      const agent = new Agent({
+        modelClient: client,
+        modelId: "mock",
+        systemPrompt: "助手",
+        tools: [tool],
+      });
+      agent.start("正常多轮");
+      await run(agent);
+
+      // 两轮工具调用都正常返回：中断信号上不残留看门狗的 abort 监听
+      expect(agentSignal).toBeDefined();
+      expect(live.get(agentSignal!)?.size ?? 0).toBe(0);
+    } finally {
+      AbortSignal.prototype.addEventListener = origAdd;
+      AbortSignal.prototype.removeEventListener = origRemove;
+    }
+  });
 });
