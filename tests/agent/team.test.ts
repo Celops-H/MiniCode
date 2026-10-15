@@ -59,6 +59,23 @@ describe("Team（注册表与并发限制）", () => {
     expect(typeof team.reserveSpawn(AgentPath.root(), "task_1")).toBe("string");
   });
 
+  it("同名路径释放后复用自动带序号：实例路径唯一（轨迹按 agentPath 分组不串轮）", () => {
+    const team = new Team();
+    team.registerRoot(makeAgent());
+    const first = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    expect(first.toString()).toBe("/root/worker");
+    team.releaseSpawn(first);
+    // 释放后同名复用：序号从 2 起，逐次避开已占用与曾占用路径
+    const second = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    expect(second.toString()).toBe("/root/worker_2");
+    const third = team.reserveSpawn(AgentPath.root(), "worker") as AgentPath;
+    expect(third.toString()).toBe("/root/worker_3");
+    // 曾占用路径不再被分配：首个路径释放后仍不与新实例重名
+    team.releaseSpawn(second);
+    team.releaseSpawn(third);
+    expect((team.reserveSpawn(AgentPath.root(), "worker") as AgentPath).toString()).toBe("/root/worker_4");
+  });
+
   it("spawn 深度上限：maxDepth 1 时深度 2 超限（守卫）", () => {
     const team = new Team({ maxDepth: 1 });
     team.registerRoot(makeAgent());

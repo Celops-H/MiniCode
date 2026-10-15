@@ -59,6 +59,12 @@ export class Team {
   private activeExecutions = 0;
   /** 并发满时积压的待驱动 agent（槽位释放时重试，防丢唤醒） */
   private readonly pendingDrives = new Set<Agent>();
+  /** 曾占用过的子路径（含已释放）：同名路径释放后复用自动带序号，实例路径唯一。
+   *  本记录随 Team 实例存亡，重装配（/connect、/model）与续跑重建 Team 后清空——
+   *  同一会话轨迹里跨装配的同名复用仍可能落在同一路径（恢复类需求的落点） */
+  private readonly usedChildPaths = new Set<string>();
+  /** 已发过 AgentSpawned 的 agent 实例：区分初次派生与 followup 唤醒 */
+  private readonly announcedAgents = new WeakSet<Agent>();
 
   constructor(options: TeamOptions = {}) {
     this.maxDepth = options.maxDepth ?? 2;
@@ -140,6 +146,8 @@ export class Team {
   /**
    * 预留 spawn 槽位：校验父存在、深度上限、路径唯一，并占用路径。
    * 提交用 commitSpawn；不提交时调用方应 releaseSpawn 释放（防路径泄漏）。
+   * 同名路径释放后复用自动带序号（worker → worker_2），实例路径唯一，
+   * 轨迹按 agentPath 分组不再把两轮实例串成一条。
    * @param parentPath 父 agent 路径
    * @param agentName 子 agent 名（路径末段）
    * @returns 子路径（可直接作 spawn 目标）或错误文本
@@ -152,9 +160,25 @@ export class Team {
     const child = parentPath.join(agentName);
     if (typeof child === "string") return child;
     if (this.members.has(child.toString())) return `agent 路径 ${child} 已存在`;
+    const target = this.usedChildPaths.has(child.toString())
+      ? this.nextFreeChildPath(parentPath, agentName)
+      : child;
+    if (typeof target === "string") return target;
+    this.usedChildPaths.add(target.toString());
     // 预留即占路径（防「只预留不提交」绕过唯一性），commit 只填实例，release 释放
-    this.members.set(child.toString(), { agent: undefined, path: child, parentPath, depth });
-    return child;
+    this.members.set(target.toString(), { agent: undefined, path: target, parentPath, depth });
+    return target;
+  }
+
+  /** 依次试 `名_2`、`名_3`… 取首个未占用路径（占用含在册与已释放两种） */
+  private nextFreeChildPath(parentPath: AgentPath, agentName: string): AgentPath | string {
+    for (let seq = 2; ; seq++) {
+      const candidate = parentPath.join(`${agentName}_${seq}`);
+      if (typeof candidate === "string") return candidate;
+      if (this.members.has(candidate.toString())) continue;
+      if (this.usedChildPaths.has(candidate.toString())) continue;
+      return candidate;
+    }
   }
 
   /** 提交已预留的 spawn：填入 agent 实例并记录其路径（路径已在预留时占用）。
@@ -259,14 +283,18 @@ export class Team {
     try {
       // 后台驱动起点发派生观测事件：初次派生与 followup 唤醒都经这里——
       // TUI 树靠该事件把条目置为运行态（唤醒一个已完成/中断的 agent 时树重新亮起）；
-      // root 恒常驻不发（否则每次子完成回灌唤醒 root 都会误发一次「派生」）
+      // root 恒常驻不发（否则每次子完成回灌唤醒 root 都会误发一次「派生」）。
+      // reason 按实例首次驱动与否区分，评测数 spawn 数不被唤醒虚高
       const path = agent.agentPath;
       const parentPath = path ? this.members.get(path.toString())?.parentPath : undefined;
       if (path && !path.isRoot() && parentPath) {
+        const first = !this.announcedAgents.has(agent);
+        this.announcedAgents.add(agent);
         await this.safeEmit({
           type: "AgentSpawned",
           path: path.toString(),
           parentPath: parentPath.toString(),
+          reason: first ? "spawn" : "wake",
           ...(agent.isReadOnly() ? { readOnly: true } : {}),
         });
       }

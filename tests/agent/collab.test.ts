@@ -954,9 +954,11 @@ describe("协作工具集（多 agent 环境）", () => {
 
   it("子 agent 生命周期事件：spawn → 完成（带结论与合并结果），中断发独立事件", async () => {
     const events: string[] = [];
+    const spawnReasons: Array<string | undefined> = [];
     const hooks = new HookBus();
     hooks.on("AgentSpawned", (e) => {
       events.push(`spawn:${e.path}`);
+      spawnReasons.push(e.reason);
     });
     hooks.on("AgentCompleted", (e) => {
       events.push(`complete:${e.path}`);
@@ -997,6 +999,8 @@ describe("协作工具集（多 agent 环境）", () => {
     await team.sendMessage(path, { type: "NEW_TASK", from: AgentPath.root(), content: "再干一次", triggerTurn: true });
     await sleep(200);
     expect(events.filter((e) => e === "spawn:/root/worker")).toHaveLength(2);
+    // 两次事件按 reason 区分：初次派生 spawn、followup 唤醒 wake（按事件数计派生数不虚高）
+    expect(spawnReasons).toEqual(["spawn", "wake"]);
     // 唤醒后完成结论再回灌父（同一 worker 二次生命周期完整走通）
     expect(events.filter((e) => e === "complete:/root/worker").length).toBeGreaterThanOrEqual(2);
     // root 被唤醒（子完成回灌）不发 AgentSpawned（负向：root 常驻、无派生语义）
