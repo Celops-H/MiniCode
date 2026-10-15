@@ -32,8 +32,11 @@
  */
 import {
   normalizeCommandWord,
-  resolveCommandShell,
   stripCommandPrefix,
+  uniqWritesToFile,
+} from "../core/index.js";
+import {
+  resolveCommandShell,
   stripQuotedSpans,
   type CommandShellKind,
 } from "./dangerous.js";
@@ -256,8 +259,8 @@ function cmdInlineCommand(words: string[]): string[] {
 }
 
 /**
- * 单个命令段的写判定：剥开段首包装与分组符号（与危险命令检查同口径，
- * 见 dangerous.ts stripCommandPrefix），按真实命令词查黑名单。
+ * 单个命令段的写判定：剥开段首包装与分组符号（见 core/shell-words.ts stripCommandPrefix），
+ * 按真实命令词查黑名单。
  * @param words 命令段分词（非空）
  * @param shell 命令实际执行方的 shell 语义（sc 的别名二义判定用）
  * @returns 违规原因；只读安全返回 undefined
@@ -403,8 +406,10 @@ function segmentWriteVerdict(words: string[], shell: CommandShellKind): string |
   if (first === "file" && rest.slice(1).some((w) => /^-[A-Za-z]*C|^--compile(=|$)/.test(w))) {
     return "写命令 file（编译魔数库落盘）";
   }
-  // uniq 的输出位有文件操作数即落盘（uniq in.txt out.txt），见 uniqWriteVerdict
-  if (first === "uniq") return uniqWriteVerdict(rest.slice(1));
+  // uniq 的输出位有文件操作数即落盘（uniq in.txt out.txt），见 core/shell-words.ts uniqWritesToFile
+  if (first === "uniq") {
+    return uniqWritesToFile(rest.slice(1)) ? "写命令 uniq（第二操作数落盘）" : undefined;
+  }
   // tar 按模式判定：-t/--list 列表与 -d 比较放行，写模式拒绝，见 tarWriteVerdict
   if (first === "tar") return tarWriteVerdict(rest.slice(1));
   // 压缩族默认就地改写文件，只有 -c/-t/-l 组成的旗标簇放行，见 compressWriteVerdict
@@ -543,35 +548,6 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
   // update-ref 改写引用、gc 与 reflog 重写仓库数据
   "config", "init", "remote", "fetch", "submodule", "update-ref", "gc", "reflog",
 ]);
-
-/** uniq 的取值旗标：其后一个词是旗标参数，不是文件操作数 */
-const UNIQ_VALUE_FLAGS = new Set(["-f", "--skip-fields", "-s", "--skip-chars", "-w", "--check-chars"]);
-
-/**
- * uniq 的写判定：uniq [输入 [输出]] 的输出位有文件操作数即落盘。
- * 「-」作输入是 stdin、作输出是 stdout，输出位是「-」不判写。
- * 取值旗标连其参数一并跳过；-- 之后的词全按操作数算。
- * 边界：取值旗标的参数被引号包住时随引号段剔除消失，其后的真操作数被当参数吞掉
- * （uniq -f "1" in.txt out.txt 判只读），与包装命令同一根因，见文件头边界说明。
- * @param words uniq 之后的词
- * @returns 违规原因；只读安全返回 undefined
- */
-function uniqWriteVerdict(words: string[]): string | undefined {
-  const operands: string[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i]!;
-    if (w === "--") {
-      operands.push(...words.slice(i + 1));
-      break;
-    }
-    if (w.startsWith("-") && w !== "-") {
-      if (UNIQ_VALUE_FLAGS.has(w)) i++;
-      continue;
-    }
-    operands.push(w);
-  }
-  return operands.length > 1 && operands[1] !== "-" ? "写命令 uniq（第二操作数落盘）" : undefined;
-}
 
 /** tar 的写模式字母：创建、解包、追加、更新、拼接，命中即写（-t 列表与 -d 比较不写） */
 const TAR_WRITE_LETTERS = new Set(["c", "x", "r", "u", "A"]);
