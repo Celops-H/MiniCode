@@ -1,8 +1,8 @@
 /**
  * bash 同命令熔断：模型反复重跑同一条失败命令时，harness 必须自己停下来逼它改道，
  * 不能无限重试。这里用假 bash 工具喂预设结果，驱动 Agent 主循环钉住计数口径：
- * 带原因的失败累加、成功清零、用户打断既不计入也不清零、换参数算另一条命令；
- * 熔断判定先于权限审批。
+ * 带原因的失败累加、成功清零、用户打断既不计入也不清零、换参数算另一条命令
+ * （参数含 timeoutMs，见 commandFailureKey）；熔断判定先于权限审批。
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -41,15 +41,16 @@ function makeBashTool(results: Step[]): { tool: Tool; executed: () => number } {
   return { tool, executed: () => calls };
 }
 
-/** 逐轮发工具调用的模型：前 commands.length 轮各发一次，之后文本收尾 */
-function scriptedModel(commands: string[]): ModelClient {
+/** 逐轮发工具调用的模型：前 inputs.length 轮各发一次（字符串按 {command} 展开），之后文本收尾 */
+function scriptedModel(inputs: Array<string | Record<string, unknown>>): ModelClient {
   return {
     async *stream(_modelId, context) {
       const done = context.messages.filter((m) => m.role === "tool_result").length;
-      const command = commands[done];
-      if (command !== undefined) {
+      const entry = inputs[done];
+      if (entry !== undefined) {
+        const input = typeof entry === "string" ? { command: entry } : entry;
         yield { type: "toolcall_start", index: 0, id: `call_${done + 1}`, name: "bash" };
-        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ command }) };
+        yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify(input) };
         yield { type: "toolcall_end", index: 0 };
         yield { type: "done", stopReason: "tool_calls" };
       } else {
@@ -62,7 +63,7 @@ function scriptedModel(commands: string[]): ModelClient {
 
 async function runAgent(
   results: Step[],
-  commands: string[],
+  inputs: Array<string | Record<string, unknown>>,
   permission?: PermissionPipeline,
 ): Promise<{
   contents: string[];
@@ -78,7 +79,7 @@ async function runAgent(
     eventOutputs.push(event.output);
   });
   const agent = new Agent({
-    modelClient: scriptedModel(commands),
+    modelClient: scriptedModel(inputs),
     modelId: "mock",
     systemPrompt: "助手",
     hooks,
@@ -153,6 +154,37 @@ describe("Agent 同命令熔断", () => {
       ["a", "b", "a", "b"],
     );
     // 共用一个计数器的话第 4 次已熔断（executed 为 3），按命令分别计数才照常执行
+    expect(executed).toBe(4);
+    expect(contents.every((c) => !c.includes("[熔断]"))).toBe(true);
+  });
+
+  it("换 timeoutMs 视为另一条命令：原命令熔断后加大 timeoutMs 照常执行", async () => {
+    const { contents, executed } = await runAgent(
+      ["fail"],
+      [
+        { command: "x", timeoutMs: 1000 },
+        { command: "x", timeoutMs: 1000 },
+        { command: "x", timeoutMs: 1000 },
+        { command: "x", timeoutMs: 60000 },
+      ],
+    );
+    // 前三次同为 x+1000，第三次达阈值；第四次只换了 timeoutMs，键不同，不被熔断挡
+    expect(executed).toBe(4);
+    expect(contents[2]).toContain("[熔断]");
+    expect(contents[3]).toContain("命令失败：退出码 1");
+    expect(contents[3]).not.toContain("命令未执行");
+  });
+
+  it("timeoutMs 不同各记各的：两条键交替各失败 2 次，都不触发熔断", async () => {
+    const { contents, executed } = await runAgent(
+      ["fail"],
+      [
+        { command: "x", timeoutMs: 1000 },
+        { command: "x", timeoutMs: 2000 },
+        { command: "x", timeoutMs: 1000 },
+        { command: "x", timeoutMs: 2000 },
+      ],
+    );
     expect(executed).toBe(4);
     expect(contents.every((c) => !c.includes("[熔断]"))).toBe(true);
   });

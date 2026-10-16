@@ -51,7 +51,7 @@ import { resolveOutputsDir } from "../config/paths.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 import { AgentPath } from "./agent-path.js";
-import { CommandFailureGuard, commandBreakerNotice, commandBreakerRefusal } from "./command-guard.js";
+import { CommandFailureGuard, commandFailureKey, commandBreakerNotice, commandBreakerRefusal } from "./command-guard.js";
 import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT, READONLY_SUBAGENT_PROMPT } from "../tools/index.js";
 import type { Team } from "./team.js";
 
@@ -1267,6 +1267,8 @@ export class Agent {
     // PreToolUse 在每次工具调用前无条件触发——未知工具/参数校验失败也先发，
     // 配对闭合（调用开始后必有成功/失败事件）；hook 裁决对任何工具名生效
     const command = typeof call.input.command === "string" ? call.input.command : undefined;
+    // 熔断计数键（仅 bash）：命令原文 + timeoutMs，换 timeoutMs 即换命令（见 commandFailureKey）
+    const breakerKey = call.name === "bash" ? commandFailureKey(command, call.input.timeoutMs) : undefined;
     const request: PermissionRequest = {
       toolName: call.name,
       content: command,
@@ -1347,8 +1349,8 @@ export class Agent {
     // 同命令熔断：同一 bash 命令连续失败达阈值后不再执行，直接回灌改道提示，
     // 并清零该命令计数（熔断只挡这一次，修好根因后仍可重跑）。
     // 置于权限审批之前：该命令本就不执行，先弹一次审批再拒会让用户白批一次
-    if (call.name === "bash" && command !== undefined && this.commandFailures.isTripped(command)) {
-      this.commandFailures.reset(command);
+    if (breakerKey !== undefined && this.commandFailures.isTripped(breakerKey)) {
+      this.commandFailures.reset(breakerKey);
       const error = commandBreakerRefusal();
       await this.safeEmit({
         type: "PostToolUseFailure",
@@ -1433,9 +1435,9 @@ export class Agent {
         // 刚达阈值时在该次失败结果后附熔断提示，事件与回灌共用同一文本，
         // 界面卡片与轨迹都看得到（拒绝路径的提示同样进事件）
         let resultText = finalOutput;
-        if (call.name === "bash" && command !== undefined) {
+        if (breakerKey !== undefined) {
           const outcome = failureReason !== undefined ? "failed" : isError ? "ignored" : "succeeded";
-          if (this.commandFailures.record(command, outcome)) {
+          if (this.commandFailures.record(breakerKey, outcome)) {
             resultText = `${finalOutput}\n${commandBreakerNotice()}`;
           }
         }
