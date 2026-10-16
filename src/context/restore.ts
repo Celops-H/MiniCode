@@ -3,9 +3,20 @@
  * 重复读回灌的字符是重复读的大头。这里把读状态里最近读过的文件按当前磁盘内容
  * 重新载入上下文，模型直接引用即可。条数与预算由压缩配置给出，见 Agent.doCompact。
  */
+import type { Message } from "../core/index.js";
 
 /** 回注消息的标记前缀（压缩/修剪后由系统注入，source: "system"） */
 export const RESTORE_MARKER = "【已读文件回注】";
+
+/** 判断一条消息是否为已读文件回注（系统注入）：内容源自压缩前的读结果，不是新的对话增量 */
+export function isRestoreMessage(message: Message): boolean {
+  return (
+    message.role === "user" &&
+    message.source === "system" &&
+    typeof message.content === "string" &&
+    message.content.startsWith(RESTORE_MARKER)
+  );
+}
 
 /** 回注前言：说明来路，避免模型当成新的用户指令或再读一遍 */
 const RESTORE_PREAMBLE = "以下文件压缩前读过，内容已按磁盘当前状态重新载入，可直接引用，不必重读：";

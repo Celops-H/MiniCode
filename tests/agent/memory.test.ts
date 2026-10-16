@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Agent, type ModelClient } from "../../src/agent/index.js";
-import { errorMessage, toolResultMessage, userMessage } from "../../src/core/index.js";
-import { MEMORY_REQUEST_MARKER, buildMemoryUpdateRequest } from "../../src/context/index.js";
+import { errorMessage, toolResultMessage, userMessage, type UserMessage } from "../../src/core/index.js";
+import { MEMORY_REQUEST_MARKER, RESTORE_MARKER, buildMemoryUpdateRequest } from "../../src/context/index.js";
+import { readTool } from "../../src/tools/index.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -244,6 +248,128 @@ describe("buildMemoryUpdateRequest", () => {
     expect(text).toContain("正常输入");
     expect(text).not.toContain("认证错误");
     expect(text).not.toContain("error:");
+  });
+
+  it("回注消息跳过：文件正文不拼进记忆请求文本", () => {
+    const request = buildMemoryUpdateRequest({
+      currentMemory: "",
+      recentMessages: [
+        userMessage("正常输入"),
+        userMessage(`${RESTORE_MARKER}\n文件：a.txt\n1\t机密回注正文`, "system"),
+      ],
+    });
+    const text = String(request[0]!.content);
+    expect(text).toContain("正常输入");
+    expect(text).not.toContain("机密回注正文");
+  });
+});
+
+describe("记忆与回注消息", () => {
+  /** 上下文里的回注消息正文（按消息顺序） */
+  function restoreTexts(agent: Agent): string[] {
+    return agent
+      .getMessages()
+      .filter(
+        (m): m is UserMessage =>
+          m.role === "user" && typeof m.content === "string" && m.content.startsWith(RESTORE_MARKER),
+      )
+      .map((m) => m.content);
+  }
+
+  it("回注正文不进记忆请求：只发真实对话", async () => {
+    const memoryRequests: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          memoryRequests.push(
+            context.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
+          );
+          yield { type: "text_delta", text: "记忆：用户想读文件" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      memory: true,
+      // 压缩后留在上下文里的旧回注消息落在未覆盖区
+      initialMessages: [
+        userMessage("旧对话"),
+        userMessage(`${RESTORE_MARKER}\n文件：a.txt\n1\t机密回注正文`, "system"),
+      ],
+    });
+    agent.start("本轮输入");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+
+    expect(memoryRequests).toHaveLength(1);
+    expect(memoryRequests[0]).toContain("旧对话");
+    expect(memoryRequests[0]).toContain("本轮输入");
+    expect(memoryRequests[0]).not.toContain("机密回注正文");
+  });
+
+  it("记忆分支压缩不保留旧回注消息：按磁盘现状重新回注", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "mem-restore-"));
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "旧正文");
+    let call = 0;
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        if (isMemoryRequest(context)) {
+          yield { type: "text_delta", text: "记忆：读过文件" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        call++;
+        if (call === 1) {
+          yield { type: "toolcall_start", index: 0, id: "r1", name: "read" };
+          yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ path: file }) };
+          yield { type: "toolcall_end", index: 0 };
+          yield { type: "done", stopReason: "tool_calls" };
+          return;
+        }
+        yield { type: "text_delta", text: "回复" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      memory: true,
+      compactConfig: {
+        contextWindow: 1_000_000,
+        maxOutputTokens: 100,
+        safetyMargin: 100,
+        keepRecentToolResults: 1,
+        restoreMaxFiles: 5,
+        restoreMaxCharsPerFile: 5000,
+        restoreMaxTotalChars: 50000,
+      },
+    });
+    agent.start("读文件");
+    for await (const _ of agent.run()) {
+      // 消费
+    }
+    await agent.whenMemorySettled();
+    // 记忆分支压缩：读结果被记忆替换，其后回注载入旧正文
+    await agent.compactNow();
+    expect(restoreTexts(agent).at(-1)).toContain("旧正文");
+
+    writeFileSync(file, "新正文");
+    // 再压一次：旧回注不留在途，回注按磁盘现状（新正文）重新载入
+    await agent.compactNow();
+    expect(restoreTexts(agent).at(-1)).toContain("新正文");
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 describe("记忆更新后台化", () => {

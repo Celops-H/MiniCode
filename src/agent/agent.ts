@@ -28,6 +28,7 @@ import {
   extractRecoveryContext,
   generateSummary,
   isContextTooLongError,
+  isRestoreMessage,
   needsCompact,
   parseContextTooLongGap,
   peelToolGroups,
@@ -973,7 +974,9 @@ export class Agent {
         // 其后的在途消息（本次输入与工具回合）保留原文，不能静默丢弃
         usedMemory = true;
         summary = this.memory;
-        inFlight = this.messages.slice(this.memoryCovered);
+        // 旧回注消息不留在途：回注正文源自压缩前的读结果，已由记忆覆盖，留下会与新回注重注
+        // 重复；带 RESTORE_MARKER 的剔除，压缩末尾的 applyFileRestore 按磁盘现状重新回注
+        inFlight = this.messages.slice(this.memoryCovered).filter((m) => !isRestoreMessage(m));
       } else {
         // 增量合并：已有旧摘要时只总结摘要后的增量（附旧摘要供合并），
         // 模型不必重读全量历史，省 token 且多次压缩信息不丢

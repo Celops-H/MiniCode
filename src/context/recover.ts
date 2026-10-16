@@ -6,6 +6,16 @@ const FILE_TOOLS = new Set(["read", "write", "edit"]);
 /** 恢复上下文消息的标记前缀（压缩后由系统注入，source: "system"；增量合并时据此排除在增量之外） */
 export const RECOVERY_MARKER = "【恢复上下文】";
 
+/** 判断一条消息是否为压缩后的恢复上下文（系统注入）：内容源自压缩前的历史，不是新的对话增量 */
+export function isRecoveryMessage(message: Message): boolean {
+  return (
+    message.role === "user" &&
+    message.source === "system" &&
+    typeof message.content === "string" &&
+    message.content.startsWith(RECOVERY_MARKER)
+  );
+}
+
 /** 恢复上下文里单条用户请求的最大长度（防大输入被完整拷回导致连续压缩自我放大） */
 const MAX_REQUEST_CHARS = 200;
 

@@ -6,6 +6,7 @@ import {
   type Message,
   type StreamEvent,
 } from "../core/index.js";
+import { isRestoreMessage } from "./restore.js";
 
 /** 会话记忆：平时持续维护的关键信息条目，压缩时替代现场摘要省模型调用 */
 export const MEMORY_SYSTEM_PROMPT =
@@ -33,12 +34,15 @@ export interface MemoryUpdateRequest {
  * 单条消息内容截断到 MAX_MESSAGE_CHARS（工具结果可能巨大，防调用体积失控）。
  * 错误记录（role:"error"）跳过：它是界面留痕不是对话消息，不该发给模型。
  * 拼进记忆后压缩用记忆替代现场摘要，会把错误文本回灌模型。
+ * 已读文件回注跳过：回注正文是压缩前读到的文件内容，写进记忆会挤占记忆并把文件正文当会话事实。
  * @param options 请求参数
  * @returns 消息数组（供模型调用）
  */
 export function buildMemoryUpdateRequest(options: MemoryUpdateRequest): Message[] {
   const { currentMemory, recentMessages, maxRecentMessages = 8 } = options;
-  const recent = recentMessages.filter((m) => m.role !== "error").slice(-maxRecentMessages);
+  const recent = recentMessages
+    .filter((m) => m.role !== "error" && !isRestoreMessage(m))
+    .slice(-maxRecentMessages);
   const formatMessage = (m: Message): string => {
     const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
     return `${m.role}: ${text.length > MAX_MESSAGE_CHARS ? `${text.slice(0, MAX_MESSAGE_CHARS)}…` : text}`;
