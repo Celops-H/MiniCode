@@ -119,6 +119,7 @@ export const bashTool: Tool = {
     "不要运行等待输入或确认的交互式命令，这类命令会读到 EOF 或挂到超时。" +
     "默认 30 秒超时，到点终止并返回失败；预计更久的命令传更大的 timeoutMs（毫秒），长时命令改用 background。" +
     "失败结果带错误输出摘要与可重试标记，按标记判断是重跑还是先修正命令。" +
+    "同一命令连续失败 3 次后不再执行，须换命令或换做法。" +
     "background 为 true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止。" +
     outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,

@@ -51,6 +51,7 @@ import { resolveOutputsDir } from "../config/paths.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
 import { AgentPath } from "./agent-path.js";
+import { CommandFailureGuard, commandBreakerNotice, commandBreakerRefusal } from "./command-guard.js";
 import { createCollaborationTools, COLLAB_TOOL_NAMES, COLLAB_SUBAGENT_PROMPT, READONLY_SUBAGENT_PROMPT } from "../tools/index.js";
 import type { Team } from "./team.js";
 
@@ -151,6 +152,8 @@ export class Agent {
   private readonly hooks?: HookBus;
   /** 本 agent 的文件状态快照：read 记录版本、write/edit 校验，多 agent 并行写冲突由它兜底 */
   private readonly fileState = new FileState();
+  /** bash 同命令连续失败计数：达阈值后拒绝重跑同一命令（见 CommandFailureGuard） */
+  private readonly commandFailures = new CommandFailureGuard();
   /** 归属的团队（多 Agent 协作）；不传则本 agent 独立运行、不展示协作工具 */
   private readonly team?: Team;
   /** 只读 agent：写类工具与 bash 写命令在执行前拦截（readOnlyToolViolation） */
@@ -1263,9 +1266,10 @@ export class Agent {
   private async executeToolInner(call: ToolCall): Promise<ExecuteOutcome & { message: ToolResultMessage }> {
     // PreToolUse 在每次工具调用前无条件触发——未知工具/参数校验失败也先发，
     // 配对闭合（调用开始后必有成功/失败事件）；hook 裁决对任何工具名生效
+    const command = typeof call.input.command === "string" ? call.input.command : undefined;
     const request: PermissionRequest = {
       toolName: call.name,
-      content: typeof call.input.command === "string" ? call.input.command : undefined,
+      content: command,
       input: call.input,
     };
     const hookVerdict = await this.preToolUseVerdict(call.id, request);
@@ -1378,6 +1382,22 @@ export class Agent {
       });
       return { message: toolResultMessage(call.id, call.name, error, true) };
     }
+    // 同命令熔断：同一 bash 命令连续失败达阈值后不再执行，直接回灌改道提示，
+    // 并清零该命令计数（熔断只挡这一次，修好根因后仍可重跑）。
+    // 与中断检查同形：PreToolUse 已发，这里补失败结果保持观测闭合
+    if (call.name === "bash" && command !== undefined && this.commandFailures.isTripped(command)) {
+      this.commandFailures.reset(command);
+      const error = commandBreakerRefusal();
+      await this.safeEmit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error,
+        agentPath,
+      });
+      return { message: toolResultMessage(call.id, call.name, error, true) };
+    }
     // 执行耗时起点（durationMs）：从真正开始执行起测——前置（权限/参数）等待不算，
     // 与界面「耗时 x.xs」的展示口径一致；执行前被拒绝的调用没有执行窗口、不带 durationMs
     const executionStartedAt = Date.now();
@@ -1409,6 +1429,16 @@ export class Agent {
           toolName: call.name,
         }, tool.truncationNote);
         const finalOutput = truncated.content;
+        // bash 同命令熔断计数：带原因的失败累加、成功清零、用户打断不计入；
+        // 刚达阈值时在该次失败结果后附熔断提示，事件与回灌共用同一文本，
+        // 界面卡片与轨迹都看得到（拒绝路径的提示同样进事件）
+        let resultText = finalOutput;
+        if (call.name === "bash" && command !== undefined) {
+          const outcome = failureReason !== undefined ? "failed" : isError ? "ignored" : "succeeded";
+          if (this.commandFailures.record(command, outcome)) {
+            resultText = `${finalOutput}\n${commandBreakerNotice()}`;
+          }
+        }
         // PostToolUseFailure：执行完成但结果标记失败且带失败原因（如命令失败带退出码）时
         // 补发失败事件供观测。先于 PostToolUse 发出：界面按事件序写卡片，完成事件的输出
         // 落在最后，失败卡片保留完整输出（简短原因只进轨迹）
@@ -1429,13 +1459,13 @@ export class Agent {
           toolCallId: call.id,
           toolName: call.name,
           input: call.input,
-          output: finalOutput,
+          output: resultText,
           isError: Boolean(isError),
           durationMs: Date.now() - executionStartedAt,
           agentPath,
         });
         return {
-          message: toolResultMessage(call.id, call.name, finalOutput, isError),
+          message: toolResultMessage(call.id, call.name, resultText, isError),
           contextModifier,
         };
       } finally {
