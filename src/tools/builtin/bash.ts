@@ -7,13 +7,30 @@ import type { ExecuteResult, Tool } from "../base.js";
 import { currentCwd } from "../file-state.js";
 import { killProcessTree, startBackgroundTask } from "./bash-background.js";
 
-/** 输出累积上限，与 exec 的 maxBuffer 对齐：超过即丢弃后续输出，防内存膨胀 */
+/** 输出累积上限，与 exec 的 maxBuffer 对齐：每条流超过即丢弃后续输出，防内存膨胀 */
 const MAX_BASH_OUTPUT_CHARS = 4 * 1024 * 1024;
 
 /** 排水窗口：进程退出后等管道关闭的宽限时长；到点销毁流强制收尾（窗口内未吐完的尾部输出会丢） */
 const DRAIN_WINDOW_MS = 1000;
 
 const MAX_RESULT_CHARS = 30000;
+
+/** 失败回灌里 stderr 摘要的字符上限：只取尾部，错误信息通常在末尾 */
+const MAX_STDERR_SUMMARY_CHARS = 2000;
+
+/** 失败类型：决定失败回灌末尾的可重试标记 */
+type FailureKind = "timeout" | "exit" | "spawn";
+
+/**
+ * 可重试标记：告诉模型重跑同一命令是否有意义，避免失败后盲目重试或直接停摆。
+ * 超时与启动失败重跑有意义（换更大的 timeoutMs、瞬态故障），非零退出是命令本身的问题，
+ * 同一命令重跑结果不变，须先修正命令。
+ */
+const RETRY_MARKER: Record<FailureKind, string> = {
+  timeout: "[可重试] 加大 timeoutMs 或缩小命令范围后重跑",
+  exit: "[不可重试] 同一命令重跑结果不变，请先修正命令",
+  spawn: "[可重试] 可能是瞬态失败，可重跑一次",
+};
 
 const schema = z.object({
   command: z.string().describe("要执行的 shell 命令"),
@@ -101,6 +118,7 @@ export const bashTool: Tool = {
     "命令非交互执行，标准输入已关闭。" +
     "不要运行等待输入或确认的交互式命令，这类命令会读到 EOF 或挂到超时。" +
     "默认 30 秒超时，到点终止并返回失败；预计更久的命令传更大的 timeoutMs（毫秒），长时命令改用 background。" +
+    "失败结果带错误输出摘要与可重试标记，按标记判断是重跑还是先修正命令。" +
     "background 为 true 时命令转后台执行，立即返回任务 id，用 bash_task 查询与终止。" +
     outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
@@ -130,10 +148,37 @@ export const bashTool: Tool = {
 };
 
 /**
- * 前台执行命令：spawn 起 shell，累积 stdout/stderr，维护 cwd 与工具上下文一致。
+ * 失败回灌文本：失败原因 + stderr 节 + 可重试标记 + stdout。
+ * stderr 单独成节，避免与 stdout 混在一起看不清错误来源；过长只取尾部并标注。
+ * 诊断信息（原因、stderr、标记）排在 stdout 之前：执行器按上限截断时留的是头部，
+ * 大 stdout 的失败命令若把标记排在尾部，恰在该出现时被截掉。
+ * @param reason 失败原因行（与结构化结果的 error 同源）
+ * @param stdoutText 标准输出（已去首尾空白）
+ * @param stderrText 标准错误（已去首尾空白）
+ * @param kind 失败类型，决定可重试标记
+ * @returns 回灌模型的失败文本
+ */
+function failureOutput(reason: string, stdoutText: string, stderrText: string, kind: FailureKind): string {
+  const lines = [reason];
+  if (stderrText.length > 0) lines.push(`[stderr]\n${stderrSummary(stderrText)}`);
+  lines.push(RETRY_MARKER[kind]);
+  if (stdoutText.length > 0) lines.push(stdoutText);
+  return lines.join("\n");
+}
+
+/** stderr 摘要：不超上限原样返回，超出只留尾部并标注（错误信息通常在末尾） */
+function stderrSummary(text: string): string {
+  if (text.length <= MAX_STDERR_SUMMARY_CHARS) return text;
+  return `（仅末尾 ${MAX_STDERR_SUMMARY_CHARS} 字符）\n${text.slice(-MAX_STDERR_SUMMARY_CHARS)}`;
+}
+
+/**
+ * 前台执行命令：spawn 起 shell，分别累积 stdout/stderr，维护 cwd 与工具上下文一致。
  * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
  * 兼容旧 exec 语义：非零退出、超时、启动失败、中断都标记 isError。
  * 超时、非零退出、启动失败另带失败原因，由执行器转发 PostToolUseFailure；
+ * 成功结果返回 stdout 与 stderr 依次拼接的正文；失败结果按「原因、stderr 节、
+ * 可重试标记、stdout」排列，诊断信息在前，供模型判断改道还是重跑。
  * 用户打断只标 isError 不带原因（主动行为不算失败）。
  * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
  * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
@@ -155,7 +200,8 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
     // 而不是挂着直到超时被杀
     child.stdin?.on("error", () => {});
     child.stdin?.end();
-    let output = "";
+    let stdout = "";
+    let stderr = "";
     let timedOut = false;
     let aborted = false;
     let settled = false;
@@ -190,31 +236,34 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
     // 按段解码会把恰在 chunk 边界被劈开的多字节字符（中文输出常见）解成 U+FFFD 乱码
     const stdoutDecoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
-    const appendText = (text: string): void => {
-      if (output.length >= MAX_BASH_OUTPUT_CHARS) {
-        if (!output.endsWith("[输出已截断]")) output += "\n[输出已截断]";
-        return;
-      }
-      output += text;
+    const appendText = (which: "stdout" | "stderr", text: string): void => {
+      const current = which === "stdout" ? stdout : stderr;
+      const next =
+        current.length >= MAX_BASH_OUTPUT_CHARS
+          ? current.endsWith("[输出已截断]")
+            ? current
+            : `${current}\n[输出已截断]`
+          : current + text;
+      if (which === "stdout") stdout = next;
+      else stderr = next;
     };
 
-    const collect = (chunk: Buffer, decoder: StringDecoder): void => {
-      appendText(decoder.write(chunk));
-    };
+    /** 成功或打断的回灌正文：stdout、stderr 各去首尾空白，非空才拼，无内容返回空串 */
+    const body = (): string => [stdout.trim(), stderr.trim()].filter((s) => s.length > 0).join("\n");
 
     const settle = (): void => {
       if (settled) return;
       settled = true;
       cleanup();
-      const details = output.trim();
+      const text = body();
       if (aborted) {
-        resolve({ output: `${details ? `${details}\n` : ""}(命令已被用户打断)`, isError: true });
+        resolve({ output: `${text ? `${text}\n` : ""}(命令已被用户打断)`, isError: true });
         return;
       }
       if (timedOut) {
         const reason = `命令执行超时：${timeoutMs}ms 未退出`;
         resolve({
-          output: `${details ? `${details}\n` : ""}（命令执行超时，已终止；长命令可传更大的 timeoutMs 参数重试）`,
+          output: failureOutput(reason, stdout.trim(), stderr.trim(), "timeout"),
           isError: true,
           error: reason,
         });
@@ -222,25 +271,29 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       }
       if (exitCode !== 0) {
         const reason = `命令失败：退出码 ${exitCode ?? "未知"}`;
-        resolve({ output: details ? `${reason}\n${details}` : reason, isError: true, error: reason });
+        resolve({
+          output: failureOutput(reason, stdout.trim(), stderr.trim(), "exit"),
+          isError: true,
+          error: reason,
+        });
         return;
       }
-      resolve(details.length > 0 ? details : "(命令无输出)");
+      resolve(text.length > 0 ? text : "(命令无输出)");
     };
     const maybeSettle = (): void => {
       if (exited && openStreams === 0) settle();
     };
 
-    const streams: Array<[NonNullable<typeof child.stdout>, StringDecoder]> = [
-      [child.stdout!, stdoutDecoder],
-      [child.stderr!, stderrDecoder],
+    const streams: Array<[NonNullable<typeof child.stdout>, StringDecoder, "stdout" | "stderr"]> = [
+      [child.stdout!, stdoutDecoder, "stdout"],
+      [child.stderr!, stderrDecoder, "stderr"],
     ];
-    for (const [stream, decoder] of streams) {
+    for (const [stream, decoder, which] of streams) {
       openStreams++;
-      stream.on("data", (chunk: Buffer) => collect(chunk, decoder));
+      stream.on("data", (chunk: Buffer) => appendText(which, decoder.write(chunk)));
       stream.on("close", () => {
         // 流关闭 flush 解码器残料：完整字符不丢、状态不跨流污染；真不完整的尾字节按 U+FFFD 产出
-        appendText(decoder.end());
+        appendText(which, decoder.end());
         openStreams--;
         maybeSettle();
       });
@@ -255,7 +308,7 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       settled = true;
       cleanup();
       const reason = `命令启动失败：${err.message}`;
-      resolve({ output: reason, isError: true, error: reason });
+      resolve({ output: failureOutput(reason, "", "", "spawn"), isError: true, error: reason });
     });
 
     child.on("exit", (code) => {

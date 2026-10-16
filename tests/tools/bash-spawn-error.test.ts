@@ -56,6 +56,7 @@ describe("bash 工具：spawn 失败（shell 不可用等）", () => {
     mockSpawnFailure("spawn ENOENT");
     const out = await bashTool.execute({ command: "echo hi" });
     expect(out).toMatchObject({ isError: true, error: "命令启动失败：spawn ENOENT" });
-    expect((out as { output: string }).output).toContain("命令启动失败：spawn ENOENT");
+    // 无 stdout/stderr，只有原因行与可重试标记（启动失败多为瞬态，重跑有意义）
+    expect((out as { output: string }).output).toBe("命令启动失败：spawn ENOENT\n[可重试] 可能是瞬态失败，可重跑一次");
   });
 });

@@ -11,6 +11,7 @@ import { assistantMessage, toolResultMessage, userMessage, type Message, type Us
 import { PermissionPipeline, parseRuleString } from "../../src/permission/index.js";
 import { executeDeadline } from "../../src/agent/agent.js";
 import type { StreamEvent } from "../../src/core/index.js";
+import { bashTool } from "../../src/tools/index.js";
 import type { Tool } from "../../src/tools/index.js";
 
 function mockTextClient(...texts: string[]): ModelClient {
@@ -549,6 +550,52 @@ describe("Agent 主循环：模型对话闭环", () => {
       const lines = content.split("\n");
       expect(lines.at(-1)).toBe("[结果不完整，建议缩小范围]");
       expect(lines.at(-2)).toContain("完整内容已保存到");
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("失败回灌超限落盘时诊断信息仍在：大 stdout 截断丢的是尾部，stderr 与可重试标记排在前面", async () => {
+    const outDir = mkdtempSync(path.join(tmpdir(), "minicode-out-"));
+    try {
+      const agent = new Agent({
+        modelClient: {
+          async *stream(_modelId, context) {
+            const hasResult = context.messages.some((m) => m.role === "tool_result");
+            if (!hasResult) {
+              yield { type: "toolcall_start", index: 0, id: "c1", name: "bash" };
+              yield {
+                type: "toolcall_delta",
+                index: 0,
+                partialJson: JSON.stringify({
+                  command: `node -e "console.log('x'.repeat(40000)); console.error('BOOMERR'); process.exit(1)"`,
+                }),
+              };
+              yield { type: "toolcall_end", index: 0 };
+              yield { type: "done", stopReason: "tool_calls" };
+            } else {
+              yield { type: "text_delta", text: "完成" };
+              yield { type: "done", stopReason: "end_turn" };
+            }
+          },
+        },
+        modelId: "mock",
+        systemPrompt: "助手",
+        tools: [bashTool],
+        outputDir: outDir,
+      });
+      agent.start("跑大输出命令");
+      for await (const _ of agent.run()) {
+        // 消费事件流
+      }
+
+      const result = agent.getMessages().find((m) => m.role === "tool_result");
+      const content = typeof result?.content === "string" ? result.content : "";
+      expect(content).toContain("命令失败：退出码 1");
+      expect(content).toContain("[stderr]");
+      expect(content).toContain("BOOMERR");
+      expect(content).toContain("[不可重试]");
+      expect(content).toContain("[输出已截断");
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
