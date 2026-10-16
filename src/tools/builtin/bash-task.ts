@@ -8,7 +8,7 @@ import { getBackgroundTask, killBackgroundTask } from "./bash-background.js";
 const MAX_RESULT_CHARS = 10000;
 
 const schema = z.object({
-  task_id: z.string().describe("bash 后台启动（background 参数）时返回的任务 id"),
+  taskId: z.string().describe("bash 后台启动（background 参数）时返回的任务 id"),
   action: z.enum(["status", "kill"]).describe("status 查询状态与自上次查询的新增输出；kill 终止后台进程"),
 });
 
@@ -48,22 +48,22 @@ export const bashTaskTool: Tool = {
   isReadOnly: false,
   maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input, options: ExecuteContext | undefined) {
-    const { task_id, action } = validateInput<{ task_id: string; action: "status" | "kill" }>(
+    const { taskId, action } = validateInput<{ taskId: string; action: "status" | "kill" }>(
       bashTaskTool,
       input,
     );
-    const task = getBackgroundTask(task_id);
+    const task = getBackgroundTask(taskId);
     if (!task) {
-      return `任务 ${task_id} 不存在`;
+      return `任务 ${taskId} 不存在`;
     }
     if (action === "kill") {
-      const killed = killBackgroundTask(task_id)!;
+      const killed = killBackgroundTask(taskId)!;
       // 守卫后对已完成/失败任务是无操作：按实际终态反馈，不再无条件宣称
       // 「已终止」与后续 status 查询自相矛盾（上方 getBackgroundTask 已确认任务存在）
       if (killed.status !== "killed") {
-        return `任务 ${task_id} 已于先前结束：${taskStateText(killed)}，无需终止`;
+        return `任务 ${taskId} 已于先前结束：${taskStateText(killed)}，无需终止`;
       }
-      return `任务 ${task_id} 已终止`;
+      return `任务 ${taskId} 已终止`;
     }
     // status：状态行 + 自该消费者上次查询以来的新增输出（游标按 agentPath 各记一份，
     // 子 agent 查询不推进父的游标；无上下文时视作 root）

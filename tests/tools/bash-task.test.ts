@@ -49,7 +49,7 @@ describe("bash_task 工具", () => {
       { timeout: 5000 },
     );
 
-    const res = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const res = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(res).toContain("已完成");
     expect(res).toContain("bg-done");
     expect(res).toContain("新增输出");
@@ -69,12 +69,12 @@ describe("bash_task 工具", () => {
     );
 
     // 首查：拿到已有输出
-    const first = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const first = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(first).toContain("first");
     expect(first).toContain("运行中");
 
     // 二查（尚无新输出）：明确标注无新增，模型不再把旧输出当进展反复轮询
-    const second = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const second = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(second).toContain("运行中");
     expect(second).toContain("无新增输出");
     expect(second).not.toContain("first");
@@ -87,12 +87,12 @@ describe("bash_task 工具", () => {
       },
       { timeout: 5000 },
     );
-    const third = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const third = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(third).toContain("second");
     expect(third).toContain("新增输出");
 
     // 四查（终态后再查）：明确告知任务已结束，无需再查询
-    const fourth = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const fourth = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(fourth).toContain("已完成");
     expect(fourth).toContain("无需再查询");
     expect(fourth).not.toContain("second");
@@ -115,20 +115,20 @@ describe("bash_task 工具", () => {
     const child: ExecuteContext = { agentPath: "/root/task_1" };
 
     // 父首查：拿到已有输出，父自己的游标推进到末尾
-    const parentFirst = await bashTaskTool.execute({ task_id: id, action: "status" }, parent);
+    const parentFirst = await bashTaskTool.execute({ taskId: id, action: "status" }, parent);
     expect(parentFirst).toContain("shared-out");
 
     // 子首查：游标独立，仍拿到同一份输出（父的查询未推进子的游标）
-    const childFirst = await bashTaskTool.execute({ task_id: id, action: "status" }, child);
+    const childFirst = await bashTaskTool.execute({ taskId: id, action: "status" }, child);
     expect(childFirst).toContain("shared-out");
 
     // 父再查：自己的游标已到末尾，无新增，不重复返回旧输出
-    const parentSecond = await bashTaskTool.execute({ task_id: id, action: "status" }, parent);
+    const parentSecond = await bashTaskTool.execute({ taskId: id, action: "status" }, parent);
     expect(parentSecond).toContain("无新增输出");
     expect(parentSecond).not.toContain("shared-out");
 
     // 子再查：独立游标同样已到末尾
-    const childSecond = await bashTaskTool.execute({ task_id: id, action: "status" }, child);
+    const childSecond = await bashTaskTool.execute({ taskId: id, action: "status" }, child);
     expect(childSecond).toContain("无新增输出");
     expect(childSecond).not.toContain("shared-out");
   });
@@ -147,14 +147,14 @@ describe("bash_task 工具", () => {
     );
 
     // kill 前未查询过：终止后首查仍能拿到 kill 前的输出
-    await bashTaskTool.execute({ task_id: id!, action: "kill" });
+    await bashTaskTool.execute({ taskId: id!, action: "kill" });
     await vi.waitFor(
       () => {
         expect(getBackgroundTask(id!)?.status).toBe("killed");
       },
       { timeout: 5000 },
     );
-    const res = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const res = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(res).toContain("已终止");
     expect(res).toContain("before-kill");
     expect(res).toContain("新增输出");
@@ -167,7 +167,7 @@ describe("bash_task 工具", () => {
     });
     const id = /任务 (b\d+)/.exec(out as string)?.[1];
 
-    const res = await bashTaskTool.execute({ task_id: id!, action: "status" });
+    const res = await bashTaskTool.execute({ taskId: id!, action: "status" });
     expect(res).toContain("运行中");
   });
 
@@ -178,7 +178,7 @@ describe("bash_task 工具", () => {
     });
     const id = /任务 (b\d+)/.exec(out as string)?.[1];
 
-    const res = await bashTaskTool.execute({ task_id: id!, action: "kill" });
+    const res = await bashTaskTool.execute({ taskId: id!, action: "kill" });
     expect(res).toContain("已终止");
     await vi.waitFor(
       () => {
@@ -189,7 +189,7 @@ describe("bash_task 工具", () => {
   });
 
   it("查询不存在的任务返回提示", async () => {
-    const res = await bashTaskTool.execute({ task_id: "b999", action: "status" });
+    const res = await bashTaskTool.execute({ taskId: "b999", action: "status" });
     expect(res).toContain("任务 b999 不存在");
   });
 
@@ -206,7 +206,7 @@ describe("bash_task 工具", () => {
       { timeout: 5000 },
     );
 
-    const res = await bashTaskTool.execute({ task_id: id, action: "status" });
+    const res = await bashTaskTool.execute({ taskId: id, action: "status" });
     expect(res).toContain("失败（退出码 3）");
     expect(res).not.toContain("启动错误");
   });
@@ -227,13 +227,13 @@ describe("bash_task 工具", () => {
       );
       const error = getBackgroundTask(task.id)!.error!;
 
-      const status = await bashTaskTool.execute({ task_id: task.id, action: "status" });
+      const status = await bashTaskTool.execute({ taskId: task.id, action: "status" });
       expect(status).toContain("失败");
       expect(status).toContain("启动错误");
       expect(status).toContain(error);
 
       // kill 对已失败任务按实际终态反馈：同样带出原因，模型少一次往返
-      const killed = await bashTaskTool.execute({ task_id: task.id, action: "kill" });
+      const killed = await bashTaskTool.execute({ taskId: task.id, action: "kill" });
       expect(killed).toContain("已于先前结束");
       expect(killed).toContain("失败");
       expect(killed).toContain(error);

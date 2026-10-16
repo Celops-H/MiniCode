@@ -41,6 +41,14 @@ describe("内置工具入参字段说明与输出上限提示", () => {
       expect(tool.description, tool.name).toContain(String(tool.maxResultSizeChars));
     }
   });
+
+  it("内置工具入参字段名一律 camelCase（不出现下划线分隔）", () => {
+    for (const tool of tools) {
+      for (const name of Object.keys(schemaFields(tool))) {
+        expect(name, `${tool.name}.${name} 非 camelCase`).not.toContain("_");
+      }
+    }
+  });
 });
 
 describe("协作工具与 skill 工具的入参字段说明与输出上限提示", () => {
@@ -76,6 +84,14 @@ describe("协作工具与 skill 工具的入参字段说明与输出上限提示
     for (const tool of tools) {
       for (const [name, field] of Object.entries(schemaFields(tool))) {
         expect(field.description, `${tool.name}.${name} 缺字段说明`).toBeTruthy();
+      }
+    }
+  });
+
+  it("协作工具与 skill 工具的入参字段名一律 camelCase", () => {
+    for (const tool of tools) {
+      for (const name of Object.keys(schemaFields(tool))) {
+        expect(name, `${tool.name}.${name} 非 camelCase`).not.toContain("_");
       }
     }
   });
