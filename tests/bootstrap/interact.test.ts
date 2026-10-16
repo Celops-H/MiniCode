@@ -119,8 +119,11 @@ describe("多 Agent 组装", () => {
     // 挂起式等待已移除：派生后继续本地工作或结束本轮，子完成唤醒回灌
     expect(toolsSeen).not.toContain("wait_agent");
     expect(systemPrompt).toContain("团队协调者");
-    // 证据要求文案单一出处：协调者提示指向 spawn_agent 工具描述，正文不再重复
-    expect(systemPrompt).toContain("spawn_agent");
+    // 派活细节单一出处：协调者提示只指路 spawn_agent 工具描述，正文不再重复
+    expect(systemPrompt).toContain("spawn_agent 工具描述");
+    expect(systemPrompt).not.toContain("自动唤醒");
+    expect(systemPrompt).not.toContain("已派发");
+    expect(systemPrompt).not.toContain("证据要求");
   });
 
   it("省略 agents：默认启用多 Agent 协作（与显式 true 一致，防默认值被误改回 off）", async () => {

@@ -33,8 +33,14 @@ it("系统提示词给出待办清单使用时机", () => {
   expect(SYSTEM_PROMPT).toContain("待办清单");
 });
 
-it("多 Agent 协作口径：派活后结束本轮，等子 agent 完成唤醒再汇总（无挂起等待）", () => {
-  expect(SYSTEM_PROMPT).toContain("自动唤醒你");
+it("多 Agent 协作口径：只留一句指路，派活细节归协作工具描述", () => {
+  expect(SYSTEM_PROMPT).toContain("协作工具描述");
+  // 派活后继续、自动唤醒、证据要求等细节只在工具描述里讲一次，提示词不重述
+  expect(SYSTEM_PROMPT).not.toContain("自动唤醒你");
+  expect(SYSTEM_PROMPT).not.toContain("已派发");
+  expect(SYSTEM_PROMPT).not.toContain("证据要求");
+  // 提示词随会话无条件下发，单 agent 会话没有 spawn_agent，故不点名任何协作工具
+  expect(SYSTEM_PROMPT).not.toContain("spawn_agent");
   // 已无等待工具：不写「等结论齐全」这类挂起等待口径
   expect(SYSTEM_PROMPT).not.toContain("等结论齐全");
 });
