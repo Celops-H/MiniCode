@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import { normalizeCommandWord, stripCommandPrefix, uniqWritesToFile } from "../../core/index.js";
+import { resolveCommandShell, type CommandShellKind } from "../../permission/dangerous.js";
 import { validateInput, outputLimitNote, type ExecuteContext } from "../base.js";
 import type { ExecuteResult, Tool } from "../base.js";
 import { currentCwd } from "../file-state.js";
@@ -31,6 +32,33 @@ const RETRY_MARKER: Record<FailureKind, string> = {
   exit: "[不可重试] 同一命令重跑结果不变，请先修正命令",
   spawn: "[可重试] 可能是瞬态失败，可重跑一次",
 };
+
+/** shell 语义的显示名：描述与失败回灌共用，模型据 shell 名判断该写哪种语法 */
+const SHELL_LABEL: Record<CommandShellKind, string> = {
+  bash: "bash",
+  cmd: "cmd.exe",
+  powershell: "PowerShell",
+};
+
+/**
+ * bash 工具描述里的平台与语法提示：写明命令由哪个 shell 执行、哪些语法可用。
+ * Windows 下 spawn(shell:true) 走 COMSPEC，Git Bash 里 SHELL 指向 bash 会诱导模型写
+ * Unix 风格命令，实际由 cmd.exe 执行，命令当场失败。描述先讲执行方与替代方案，
+ * 模型才不会派 ls/cat/grep 一类命令。
+ * @param kind shell 语义；缺省读当前平台与环境
+ * @returns 提示文案
+ */
+export function bashShellNote(kind: CommandShellKind = resolveCommandShell()): string {
+  if (kind === "cmd") {
+    return `当前平台 Windows，命令由 ${SHELL_LABEL.cmd} 执行。管道 |、重定向 >、&& 可用；$() 替换与单引号不生效。` +
+      "ls/cat/grep/rm 等 Unix 命令不保证可用，列目录用 dir、看文件用 type，搜索与读文件用内置 grep、read。";
+  }
+  if (kind === "powershell") {
+    return `当前平台 Windows，命令由 ${SHELL_LABEL.powershell} 执行。用 PowerShell 语法：Get-ChildItem、Get-Content、Select-String。` +
+      "ls/cat/rm 等 Unix 名是内置别名可用，grep 改用 Select-String 或内置 grep。";
+  }
+  return "命令由 POSIX shell 执行，Unix 命令、管道、重定向、$() 替换与单引号均可用。";
+}
 
 const schema = z.object({
   command: z.string().describe("要执行的 shell 命令"),
@@ -115,6 +143,7 @@ export const bashTool: Tool = {
   name: "bash",
   description:
     "在系统 shell 中执行命令，返回标准输出与错误输出。" +
+    bashShellNote() +
     "命令非交互执行，标准输入已关闭。" +
     "不要运行等待输入或确认的交互式命令，这类命令会读到 EOF 或挂到超时。" +
     "默认 30 秒超时，到点终止并返回失败；预计更久的命令传更大的 timeoutMs（毫秒），长时命令改用 background。" +
