@@ -27,6 +27,15 @@ describe("bash_task 工具", () => {
     expect(bashTool.description).toContain("background");
   });
 
+  it("bash 描述写明非交互语义与长时命令的后台出口", () => {
+    // 实现立即关闭 stdin（runCommand），等待输入的命令读到 EOF 即退出、交互式命令挂到超时：
+    // 描述必须先说清非交互，模型才不会派发交互式命令
+    expect(bashTool.description).toContain("非交互");
+    expect(bashTool.description).toContain("标准输入已关闭");
+    expect(bashTool.description).toContain("交互式命令");
+    expect(bashTool.description).toContain("长时命令");
+  });
+
   it("status 查询已完成任务，返回状态与新增输出", async () => {
     const out = await bashTool.execute({
       command: "node -e \"console.log('bg-done')\"",
