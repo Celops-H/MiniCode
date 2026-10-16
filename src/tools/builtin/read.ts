@@ -74,6 +74,7 @@ export const readTool: Tool = {
       // 模型得不到反馈可能反复调 offset 空转
       return `起始行超出文件行数（共 ${lines.length} 行，offset 从 1 起）`;
     }
+    const rendered = selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
     // 读去重：同路径同区间、内容未变、且旧结果仍在上下文时回 stub，不重复回灌全文。
     // 「旧结果仍在上下文」由 Agent 保证——修剪/压缩/剥组摘除旧结果时同步摘除读记录
     // （FileState.retainReads），记录在即结果在。内容 hash 变了（文件被外部或本次
@@ -84,9 +85,18 @@ export const readTool: Tool = {
       if (record && record.contentHash === contentHash) {
         return readUnchangedStub(offset, limit);
       }
-      fileState.setRead(file, offset, limit, toolCallId, contentHash);
+      // 登记经 contextModifier 延后到结果交付：只有交付出去的确实是这段完整内容才登记。
+      // 结果超上限时上文只留截断预览，直接不产修饰器；本次执行被中断/超时抢先结束时
+      // 执行器丢弃结果、连带丢弃修饰器（见 Agent.executeToolInner）。否则同区间重读
+      // 会回 stub，指向错误文本或截断预览。
+      if (rendered.length <= MAX_RESULT_CHARS) {
+        return {
+          output: rendered,
+          contextModifier: () => fileState.setRead(file, offset, limit, toolCallId, contentHash),
+        };
+      }
     }
-    return selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
+    return rendered;
   },
 };
 
