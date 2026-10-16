@@ -3,7 +3,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Agent, type CompactConfig, type ModelClient } from "../../src/agent/index.js";
-import { PRUNED_MARKER, RESTORE_MARKER, SUMMARY_MARKER } from "../../src/context/index.js";
+import {
+  PRUNED_MARKER,
+  RESTORE_MARKER,
+  SUMMARY_MARKER,
+  estimateTextTokens,
+  estimateTokens,
+  needsCompact,
+} from "../../src/context/index.js";
 import type { Message, ToolResultMessage, UserMessage } from "../../src/core/index.js";
 import { readTool } from "../../src/tools/index.js";
 
@@ -183,6 +190,58 @@ describe("压缩后回注最近读过的文件（Agent 链路）", () => {
 
     expect(agent.getMessages().some((m) => m.role === "tool_result" && m.content === PRUNED_MARKER)).toBe(true);
     expect(restoreMessage(agent)).toBeUndefined();
+  });
+
+  it("回注预算按剩余空间保守折算：回注后真实水位不越压缩阈值，下一轮不再压缩", async () => {
+    // 回注正文按单文件上限截断到 600 字符：旧口径下占满剩余空间（约 740 字符），
+    // 保守折算到一半（约 370）后装不下本条，故不再回注——宁可少回注也不顶线
+    const file = write("大.txt", "内容内容内容\n".repeat(200));
+    const config = compactConfig(0, {
+      contextWindow: 1000,
+      maxOutputTokens: 100,
+      safetyMargin: 100,
+      restoreMaxCharsPerFile: 600,
+      restoreMaxTotalChars: 100000,
+    });
+    let summaryCalls = 0;
+    let call = 0;
+    // 估算口径不含工具定义等请求开销：模拟真实用量比估算高 OVERHEAD
+    const OVERHEAD = 500;
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          summaryCalls++;
+          yield { type: "text_delta", text: "摘要正文" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        call++;
+        const usage = {
+          promptTokens:
+            estimateTokens(context.messages) + estimateTextTokens(context.systemPrompt) + OVERHEAD,
+        };
+        if (call === 1) {
+          yield { type: "toolcall_start", index: 0, id: "r1", name: "read" };
+          yield { type: "toolcall_delta", index: 0, partialJson: JSON.stringify({ path: file }) };
+          yield { type: "toolcall_end", index: 0 };
+          yield { type: "done", stopReason: "tool_calls", usage };
+          return;
+        }
+        yield { type: "text_delta", text: "完成" };
+        yield { type: "done", stopReason: "end_turn", usage };
+      },
+    };
+    const agent = makeAgent(modelClient, config);
+    agent.start("读文件");
+    await turn(agent); // 第 1 轮：读文件
+    await agent.compactNow(); // 裁剪 + 回注
+    agent.start("继续");
+    await turn(agent); // 第 2 轮：带回注的真实用量回填
+    agent.start("再继续");
+    await turn(agent); // 第 3 轮：水位不越线则不再压缩
+
+    expect(summaryCalls).toBe(0);
+    expect(needsCompact(agent.contextTokens(), config)).toBe(false);
   });
 
   it("摘要压缩后同样回注，增量摘要的增量不含回注正文", async () => {

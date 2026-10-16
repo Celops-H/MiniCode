@@ -94,6 +94,13 @@ const MAX_MEMORY_CHARS = 4000;
 /** 单次记忆更新的批大小（条）：按未覆盖区取最旧一批，覆盖点精确推进 */
 const MEMORY_UPDATE_BATCH = 16;
 
+/**
+ * 回注至多占用的剩余空间比例：剩一半余量。剩余 token 折算成字符上限时按最坏情形
+ * 中文 1 字符 1 token 取等值，再留余量——估算口径不含工具定义与请求框架，真实水位
+ * 高于估算，不留余量会让回注顶到阈值，下一轮又压一遍。
+ */
+const RESTORE_FREE_RATIO = 0.5;
+
 export interface AgentOptions {
   modelClient: ModelClient;
   modelId: string;
@@ -1150,12 +1157,16 @@ export class Agent {
     }
     const restored = buildRestore(files, {
       maxCharsPerFile: config.restoreMaxCharsPerFile,
-      // 总预算按当前剩余空间收紧（可用窗口口径同 needsCompact）：回注正文若把上下文顶回
-      // 阈值之上，下一轮立刻再压缩、回注又被摘要吞掉，小窗口下反复。token 剩余量直接当
-      // 字符预算用，中文一字符约一 token、偏保守；空间不足则一个文件也装不下，即不回注
+      // 预算按当前剩余空间折算（可用窗口口径同 needsCompact）：回注正文若把上下文顶回
+      // 阈值之上，下一轮立刻再压缩、回注又被摘要吞掉，小窗口下反复。剩余 token 按最坏
+      // 情形（中文 1 字符 1 token）折算成字符上限，再取 RESTORE_FREE_RATIO 留余量；
+      // 空间不足则一个文件也装不下，即不回注
       maxTotalChars: Math.min(
         config.restoreMaxTotalChars,
-        Math.max(0, config.contextWindow - config.maxOutputTokens - config.safetyMargin - this.contextTokens()),
+        Math.floor(
+          Math.max(0, config.contextWindow - config.maxOutputTokens - config.safetyMargin - this.contextTokens()) *
+            RESTORE_FREE_RATIO,
+        ),
       ),
     });
     if (restored.text.length === 0) return;
