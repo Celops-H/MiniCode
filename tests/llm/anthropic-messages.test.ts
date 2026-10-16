@@ -127,6 +127,19 @@ describe("buildRequest：消息与工具转换", () => {
     ]);
   });
 
+  it("有工具时显式声明 tool_choice（auto + 允许并行）；无工具时不带", () => {
+    const withTools = protocol.buildRequest(
+      createContext("s", [], [
+        { name: "read", description: "读文件", inputSchema: { type: "object", properties: {} } },
+      ]),
+    ) as { tool_choice?: unknown };
+    expect(withTools.tool_choice).toEqual({ type: "auto", disable_parallel_tool_use: false });
+
+    // tool_choice 无 tools 时被厂商拒收：与 tools 同条件携带
+    const noTools = protocol.buildRequest(createContext("s")) as Record<string, unknown>;
+    expect("tool_choice" in noTools).toBe(false);
+  });
+
   it("systemPrompt 放顶层 system 字段；为空时不带", () => {
     const req = protocol.buildRequest(
       createContext("你是助手", [userMessage("hi")]),

@@ -99,6 +99,9 @@ export class OpenAICompletionsProtocol implements Protocol {
         ? [{ role: "system", content: context.systemPrompt }, ...converted]
         : converted,
       ...(context.tools.length > 0 ? { tools: context.tools.map(toOpenAITool) } : {}),
+      // 并行工具调用显式声明：同轮多个并发安全调用在本端按并发批并行执行（tools/partition.ts），
+      // 显式声明与厂商默认（允许并行）对齐，不随厂商默认漂移；无工具时该参数无意义，不发
+      ...(context.tools.length > 0 ? { parallel_tool_calls: true } : {}),
       // 思考等级：支持该参数的厂商对推理系列模型按用户设定透传 reasoning_effort（/model 左右调整）
       ...(this.emitReasoningEffort && reasoning && context.thinkingLevel
         ? { reasoning_effort: context.thinkingLevel }

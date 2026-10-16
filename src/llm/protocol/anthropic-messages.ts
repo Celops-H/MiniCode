@@ -54,6 +54,12 @@ export class AnthropicMessagesProtocol implements Protocol {
       ...(context.systemPrompt ? { system: context.systemPrompt } : {}),
       messages: toAnthropicMessages(context.messages, model?.id),
       ...(context.tools.length > 0 ? { tools: context.tools.map(toAnthropicTool) } : {}),
+      // 并行工具调用显式声明：tool_choice 显式 auto 且允许并行（与 openai 侧 parallel_tool_calls
+      // 对齐），同轮多个并发安全调用在本端按并发批并行执行（tools/partition.ts）；
+      // tool_choice 无 tools 时被厂商拒收，与 tools 同条件携带
+      ...(context.tools.length > 0
+        ? { tool_choice: { type: "auto", disable_parallel_tool_use: false } }
+        : {}),
     };
   }
 

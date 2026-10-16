@@ -224,6 +224,19 @@ describe("buildRequest：消息与工具转换", () => {
     const req = protocol.buildRequest(createContext("s")) as Record<string, unknown>;
     expect("tools" in req).toBe(false);
   });
+
+  it("有工具时显式声明并行工具调用（parallel_tool_calls: true）；无工具时不带", () => {
+    const withTools = protocol.buildRequest(
+      createContext("s", [], [
+        { name: "read", description: "读文件", inputSchema: { type: "object", properties: {} } },
+      ]),
+    ) as { parallel_tool_calls?: boolean };
+    expect(withTools.parallel_tool_calls).toBe(true);
+
+    // 无工具时该参数无意义：不带
+    const noTools = protocol.buildRequest(createContext("s")) as Record<string, unknown>;
+    expect("parallel_tool_calls" in noTools).toBe(false);
+  });
 });
 
 describe("parseStream：SSE → 统一事件", () => {
