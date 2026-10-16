@@ -114,23 +114,40 @@ describe("文件类内置工具", () => {
     expect(out).not.toContain("b.txt");
   });
 
-  it("grep 支持 glob 过滤", async () => {
+  it("grep 支持 include 过滤文件名", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "a.ts"), "匹配行 xyz");
     writeFileSync(path.join(dir, "b.txt"), "匹配行 xyz");
-    const out = await tool("grep").execute({ pattern: "xyz", path: dir, glob: "*.ts" });
+    const out = await tool("grep").execute({ pattern: "xyz", path: dir, include: "*.ts" });
     expect(out).toContain("a.ts");
     expect(out).not.toContain("b.txt");
   });
 
-  it("grep glob 带目录段时归一为文件名匹配（不再对所有文件永不命中）", async () => {
+  it("grep include 支持 {a,b} 任选其一", async () => {
     const dir = setup();
-    writeFileSync(path.join(dir, "a.tsx"), "匹配行 xyz");
-    writeFileSync(path.join(dir, "b.txt"), "匹配行 xyz");
-    // 旧实现按 basename 匹配带目录的模式，**/*.tsx 永不命中，与真空结果不可区分
-    const out = await tool("grep").execute({ pattern: "xyz", path: dir, glob: "**/*.tsx" });
-    expect(out).toContain("a.tsx");
-    expect(out).not.toContain("b.txt");
+    writeFileSync(path.join(dir, "a.ts"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "b.tsx"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "c.txt"), "匹配行 xyz");
+    const out = await tool("grep").execute({ pattern: "xyz", path: dir, include: "*.{ts,tsx}" });
+    expect(out).toContain("a.ts");
+    expect(out).toContain("b.tsx");
+    expect(out).not.toContain("c.txt");
+  });
+
+  it("grep include 带目录段时按相对路径匹配（目录段不再被静默忽略）", async () => {
+    const dir = setup();
+    mkdirSync(path.join(dir, "src", "sub"), { recursive: true });
+    writeFileSync(path.join(dir, "src", "a.ts"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "src", "sub", "deep.ts"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "root.ts"), "匹配行 xyz");
+    // src/*.ts 只命中 src 直下一层；**/*.ts 命中任意层级
+    const shallow = await tool("grep").execute({ pattern: "xyz", path: dir, include: "src/*.ts" });
+    expect(shallow).toContain(path.join("src", "a.ts"));
+    expect(shallow).not.toContain("deep.ts");
+    expect(shallow).not.toContain("root.ts");
+    const deep = await tool("grep").execute({ pattern: "xyz", path: dir, include: "**/*.ts" });
+    expect(deep).toContain(path.join("src", "sub", "deep.ts"));
+    expect(deep).toContain("root.ts");
   });
 
   it("grep path 指向单个文件时直接搜该文件（不再当目录抛 ENOTDIR）", async () => {
@@ -148,11 +165,21 @@ describe("文件类内置工具", () => {
     expect(out).toContain("搜索路径不存在");
   });
 
-  it("grep 单文件路径同样应用 glob 过滤（显式路径 + glob 不匹配时静默为空，rg 同款语义）", async () => {
+  it("grep include 把反斜杠当路径分隔符（Windows 风格 src\\*.ts 不再静默不匹配）", async () => {
+    const dir = setup();
+    mkdirSync(path.join(dir, "src"), { recursive: true });
+    writeFileSync(path.join(dir, "src", "a.ts"), "匹配行 xyz");
+    writeFileSync(path.join(dir, "root.ts"), "匹配行 xyz");
+    const out = await tool("grep").execute({ pattern: "xyz", path: dir, include: "src\\*.ts" });
+    expect(out).toContain(path.join("src", "a.ts"));
+    expect(out).not.toContain("root.ts");
+  });
+
+  it("grep 单文件路径同样应用 include 过滤（显式路径 + 不匹配时静默为空，rg 同款语义）", async () => {
     const dir = setup();
     const file = path.join(dir, "a.txt");
     writeFileSync(file, "目标行 here");
-    const out = await tool("grep").execute({ pattern: "目标行", path: file, glob: "*.ts" });
+    const out = await tool("grep").execute({ pattern: "目标行", path: file, include: "*.ts" });
     expect(out).toContain("未找到匹配内容");
   });
 

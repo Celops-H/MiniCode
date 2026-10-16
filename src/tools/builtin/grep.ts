@@ -14,7 +14,10 @@ const MAX_RESULT_CHARS = 30000;
 const schema = z.object({
   pattern: z.string().describe("JavaScript 正则（不支持 (?i) 等内联标志）"),
   path: z.string().optional().describe("搜索起始目录或单个文件，缺省当前工作目录"),
-  glob: z.string().optional().describe("文件名过滤，支持 * 通配符；模式中的目录部分被忽略"),
+  include: z
+    .string()
+    .optional()
+    .describe('只搜文件名匹配的文件，如 "*.{ts,tsx}"；含 / 时按相对搜索根的路径匹配'),
 });
 
 /** 按正则搜索文件内容，返回 文件:行号:内容 的匹配列表 */
@@ -22,7 +25,7 @@ export const grepTool: Tool = {
   name: "grep",
   description:
     "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表。" +
-    "glob 参数只按文件名过滤（支持 * 通配符），模式里的目录部分（如 **/*.tsx 的目录段）会被忽略；" +
+    "include 过滤文件名，如 *.{ts,tsx}，含 / 时按路径匹配；" +
     "path 可传目录或单个文件。" +
     outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
@@ -30,10 +33,10 @@ export const grepTool: Tool = {
   isConcurrencySafe: () => true,
   maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input) {
-    const { pattern, path: dir, glob: fileGlob } = validateInput<{
+    const { pattern, path: dir, include } = validateInput<{
       pattern: string;
       path?: string;
-      glob?: string;
+      include?: string;
     }>(grepTool, input);
     let regex: RegExp;
     try {
@@ -64,11 +67,12 @@ export const grepTool: Tool = {
     } else {
       ({ files, truncated } = await listTextFiles(cwd));
     }
-    // glob 只按文件名匹配：带目录段的模式（如 **/*.tsx）归一为末段（*.tsx），
-    // 原实现带目录的模式对所有文件永不匹配，返回「未找到匹配内容」与真空结果不可区分
-    const nameGlob = fileGlob ? fileGlob.split(/[\\/]/).pop() : undefined;
+    // include 按搜索根下的相对路径匹配：不含 / 的模式按文件名匹配任意层级，
+    // 含 / 的按相对路径匹配，目录段不再被静默忽略
+    const root = statResult.isFile() ? path.dirname(cwd) : cwd;
     for (const file of files) {
-      if (nameGlob && !matchesGlob(path.basename(file), nameGlob)) continue;
+      const rel = path.relative(root, file).split(path.sep).join("/");
+      if (include && !matchesInclude(rel, include)) continue;
       let content: string;
       try {
         // 二进制文件嗅探跳过：readFile("utf8") 对二进制不抛错，整读大体积二进制
@@ -135,10 +139,49 @@ async function listTextFiles(
   return result;
 }
 
-/** 简单 glob 匹配：* 匹配任意片段 */
-function matchesGlob(file: string, pattern: string): boolean {
-  const regex = new RegExp("^" + pattern.split("*").map(escapeRegExp).join(".*") + "$");
-  return regex.test(file);
+/**
+ * include 模式匹配：模式不含 / 时按文件名匹配任意层级，含 / 时按相对搜索根的路径匹配。
+ * @param rel 文件相对搜索根的路径，以 / 分隔
+ * @param pattern include 模式
+ * @returns 是否匹配
+ */
+function matchesInclude(rel: string, rawPattern: string): boolean {
+  // 反斜杠按路径分隔符处理，避免 Windows 风格的 src\*.ts 静默不匹配
+  const pattern = rawPattern.replace(/\\/g, "/");
+  const target = pattern.includes("/") ? rel : rel.slice(rel.lastIndexOf("/") + 1);
+  return new RegExp(`^${globToRegExp(pattern)}$`).test(target);
+}
+
+/** include 模式转正则片段：* 不跨层级，** 跨层级，{a,b} 任选其一 */
+function globToRegExp(pattern: string): string {
+  let out = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!;
+    if (ch === "*") {
+      if (pattern[i + 1] === "*") {
+        i++;
+        if (pattern[i + 1] === "/") {
+          i++;
+          out += "(?:[^/]*/)*"; // **/ 匹配零或多级目录
+        } else {
+          out += ".*";
+        }
+      } else {
+        out += "[^/]*";
+      }
+    } else if (ch === "{") {
+      const close = pattern.indexOf("}", i + 1);
+      if (close === -1) {
+        out += "\\{";
+        continue;
+      }
+      out += `(?:${pattern.slice(i + 1, close).split(",").map(globToRegExp).join("|")})`;
+      i = close;
+    } else {
+      out += escapeRegExp(ch);
+    }
+  }
+  return out;
 }
 
 function escapeRegExp(s: string): string {
