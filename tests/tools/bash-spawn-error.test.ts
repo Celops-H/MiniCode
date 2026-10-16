@@ -12,6 +12,11 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { bashTool } from "../../src/tools/index.js";
+import { resolveCommandShell, type CommandShellKind } from "../../src/permission/index.js";
+
+const SHELL_LABEL: Record<CommandShellKind, string> = { bash: "bash", cmd: "cmd.exe", powershell: "PowerShell" };
+/** 当前平台实际执行方的 shell 行（测试机可能是 cmd 或 bash，按归类取期望） */
+const shellLine = (): string => `[shell] ${SHELL_LABEL[resolveCommandShell()]}`;
 
 /** 假的 child：error 处理器注册后抛启动错误；stdio 流挂事件即触发 close（settled 后无副作用） */
 function mockSpawnFailure(message: string): void {
@@ -56,7 +61,7 @@ describe("bash 工具：spawn 失败（shell 不可用等）", () => {
     mockSpawnFailure("spawn ENOENT");
     const out = await bashTool.execute({ command: "echo hi" });
     expect(out).toMatchObject({ isError: true, error: "命令启动失败：spawn ENOENT" });
-    // 无 stdout/stderr，只有原因行与可重试标记（启动失败多为瞬态，重跑有意义）
-    expect((out as { output: string }).output).toBe("命令启动失败：spawn ENOENT\n[可重试] 可能是瞬态失败，可重跑一次");
+    // 无 stdout/stderr，只有原因行、shell 行与可重试标记（启动失败多为瞬态，重跑有意义）
+    expect((out as { output: string }).output).toBe(`命令启动失败：spawn ENOENT\n${shellLine()}\n[可重试] 可能是瞬态失败，可重跑一次`);
   });
 });

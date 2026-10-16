@@ -178,9 +178,11 @@ export const bashTool: Tool = {
 };
 
 /**
- * 失败回灌文本：失败原因 + stderr 节 + 可重试标记 + stdout。
+ * 失败回灌文本：失败原因 + shell 行 + stderr 节 + 可重试标记 + stdout。
+ * shell 行写明实际执行方：模型写 Unix 命令在 cmd 下失败时，配合 stderr 里的报错
+ * 即可判断是语法不对路，不必重跑。
  * stderr 单独成节，避免与 stdout 混在一起看不清错误来源；过长只取尾部并标注。
- * 诊断信息（原因、stderr、标记）排在 stdout 之前：执行器按上限截断时留的是头部，
+ * 诊断信息（原因、shell、stderr、标记）排在 stdout 之前：执行器按上限截断时留的是头部，
  * 大 stdout 的失败命令若把标记排在尾部，恰在该出现时被截掉。
  * @param reason 失败原因行（与结构化结果的 error 同源）
  * @param stdoutText 标准输出（已去首尾空白）
@@ -189,7 +191,7 @@ export const bashTool: Tool = {
  * @returns 回灌模型的失败文本
  */
 function failureOutput(reason: string, stdoutText: string, stderrText: string, kind: FailureKind): string {
-  const lines = [reason];
+  const lines = [reason, `[shell] ${SHELL_LABEL[resolveCommandShell()]}`];
   if (stderrText.length > 0) lines.push(`[stderr]\n${stderrSummary(stderrText)}`);
   lines.push(RETRY_MARKER[kind]);
   if (stdoutText.length > 0) lines.push(stdoutText);
@@ -208,7 +210,7 @@ function stderrSummary(text: string): string {
  * 兼容旧 exec 语义：非零退出、超时、启动失败、中断都标记 isError。
  * 超时、非零退出、启动失败另带失败原因，由执行器转发 PostToolUseFailure；
  * 成功结果返回 stdout 与 stderr 分节的正文（stderr 带 [stderr] 节标签），失败结果按
- * 「原因、stderr 节、可重试标记、stdout」排列，诊断信息在前，供模型判断改道还是重跑。
+ * 「原因、shell 行、stderr 节、可重试标记、stdout」排列，诊断信息在前，供模型判断改道还是重跑。
  * 用户打断只标 isError 不带原因（主动行为不算失败）。
  * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
  * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
