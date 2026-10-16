@@ -44,6 +44,8 @@ export class Recorder {
   private readonly tracesDir: string;
   private readonly sessionId: string;
   private readonly sessionsRoot: string;
+  /** header 内容：首行落盘前可改（setPromptHash 注入装配层后置算出的提示词 hash） */
+  private readonly header: TraceHeader;
   private readonly subscriptions: Array<() => void> = [];
   /** 已落过全文的 systemPrompt hash（文件级去重，见 dedupeSystemPrompt；构造时从既有轨迹文件回填） */
   private readonly seenSystemPromptHashes: Set<string>;
@@ -56,7 +58,7 @@ export class Recorder {
     this.tracesDir = options.dir ?? resolveTracesDir();
     this.sessionId = options.sessionId;
     this.sessionsRoot = options.sessionsRoot;
-    const header: TraceHeader = {
+    this.header = {
       format: TRACE_FORMAT,
       formatVersion: TRACE_FORMAT_VERSION,
       sessionId: options.sessionId,
@@ -66,7 +68,7 @@ export class Recorder {
       ...(options.metadata ? { metadata: options.metadata } : {}),
     };
     const filePath = path.join(this.tracesDir, `${options.sessionId}.jsonl`);
-    this.writer = new TraceWriter(filePath, buildHeaderLine(header), options.batchSize);
+    this.writer = new TraceWriter(filePath, () => buildHeaderLine(this.header), options.batchSize);
     // 续跑回填：TUI 的 /connect、/model 等 reconfigure 每轮重建 Recorder，去重表随实例清空
     // 会把同一 hash 的全文重复落进同会话轨迹；从既有文件回填后文件级去重跨装配保持
     this.seenSystemPromptHashes = loadRecordedSystemPromptHashes(filePath);
@@ -83,6 +85,16 @@ export class Recorder {
   /** 轨迹文件所在目录（测试断言用） */
   get dir(): string {
     return this.tracesDir;
+  }
+
+  /**
+   * 注入首轮根 agent 完整系统提示词的 hash（装配层拼完提示词、交给 Agent 之后调用）：
+   * 并入 header.metadata.promptHash，与 LlmCallEnd.systemPrompt.hash 同算法，评测据此
+   * 确认两次运行用的是不是同一份提示词。首行 header 在首条轨迹行入队时定稿，
+   * 故须在那之前调用；之后调用不再生效（轨迹只追加、不改写既有首行）。
+   */
+  setPromptHash(hash: string): void {
+    this.header.metadata = { ...this.header.metadata, promptHash: hash };
   }
 
   /**

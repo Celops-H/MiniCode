@@ -332,6 +332,59 @@ describe("Recorder：轨迹格式与落盘", () => {
     }
   });
 
+  it("setPromptHash 并入 header.metadata（首行落盘前注入，任务身份字段保留）", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const recorder = new Recorder(bus, {
+        sessionId: "s-prompt-hash",
+        cwd: os.tmpdir(),
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+        metadata: { dataset: "swe-bench" },
+      });
+      // 装配层在首条轨迹行（SessionStart）之前拼完提示词并注入
+      recorder.setPromptHash("abc123");
+      bus.emit({ type: "SessionStart", reason: "cold" });
+      await recorder.flush();
+      recorder.dispose();
+
+      const lines = await readLines(path.join(dir, "traces", "s-prompt-hash.jsonl"));
+      expect(lines[0]).toMatchObject({ metadata: { dataset: "swe-bench", promptHash: "abc123" } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("setPromptHash 在首条轨迹行入队后调用不生效（首行 header 已定稿）", async () => {
+    const dir = await tmpDir();
+    try {
+      const bus = new HookBus();
+      const recorder = new Recorder(bus, {
+        sessionId: "s-late-hash",
+        cwd: os.tmpdir(),
+        minicodeVersion: "0.0.1",
+        sessionsRoot: path.join(dir, "sessions"),
+        dir: path.join(dir, "traces"),
+        batchSize: 1000,
+        metadata: { dataset: "swe-bench" },
+      });
+      // 首条行（SessionStart）先入队，header 随即定稿；此后的注入只改内存、不改首行
+      bus.emit({ type: "SessionStart", reason: "cold" });
+      recorder.setPromptHash("late");
+      await recorder.flush();
+      recorder.dispose();
+
+      const lines = await readLines(path.join(dir, "traces", "s-late-hash.jsonl"));
+      expect(lines[0]).toMatchObject({ metadata: { dataset: "swe-bench" } });
+      expect((lines[0]!.metadata as Record<string, unknown>).promptHash).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("完整 agent 回合：消息与调用事件全部入轨迹（轨迹自足，恢复重建的数据源）", async () => {
     const dir = await tmpDir();
     try {
@@ -512,7 +565,7 @@ describe("TraceWriter：flushSync 与 header 去重", () => {
     try {
       const tracesDir = path.join(dir, "traces");
       const file = path.join(tracesDir, "sync.jsonl");
-      const writer = new TraceWriter(file, JSON.stringify({ format: TRACE_FORMAT, formatVersion: 1, sessionId: "sync", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" }), 1000);
+      const writer = new TraceWriter(file, () => JSON.stringify({ format: TRACE_FORMAT, formatVersion: TRACE_FORMAT_VERSION, sessionId: "sync", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" }), 1000);
       writer.appendLine(JSON.stringify({ kind: "event", event: "Stop", agentPath: "/root", timestamp: "t", data: {} }));
       expect(existsSync(file)).toBe(false);
       writer.flushSync();
@@ -533,10 +586,10 @@ describe("TraceWriter：flushSync 与 header 去重", () => {
       const tracesDir = path.join(dir, "traces");
       await mkdir(tracesDir, { recursive: true });
       const file = path.join(tracesDir, "resume.jsonl");
-      const headerLine = JSON.stringify({ format: TRACE_FORMAT, formatVersion: 1, sessionId: "resume", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" });
+      const headerLine = JSON.stringify({ format: TRACE_FORMAT, formatVersion: TRACE_FORMAT_VERSION, sessionId: "resume", cwd: "x", minicodeVersion: "0.0.1", startedAt: "t" });
       await writeFile(file, `${headerLine}\n${JSON.stringify({ kind: "event", event: "SessionStart", timestamp: "t", data: {} })}\n`, "utf8");
       // 新 writer（模拟会话恢复重新装配）：文件已存在则不写 header
-      const writer = new TraceWriter(file, headerLine, 1000);
+      const writer = new TraceWriter(file, () => headerLine, 1000);
       writer.appendLine(JSON.stringify({ kind: "event", event: "Stop", agentPath: "/root", timestamp: "t2", data: {} }));
       await writer.flush();
       const lines = await readLines(file);
@@ -556,7 +609,7 @@ describe("TraceWriter：进程收尾登记摘除", () => {
       const file = path.join(tracesDir, "registry.jsonl");
       const headerLine = JSON.stringify({
         format: TRACE_FORMAT,
-        formatVersion: 1,
+        formatVersion: TRACE_FORMAT_VERSION,
         sessionId: "registry",
         cwd: "x",
         minicodeVersion: "0.0.1",
@@ -566,7 +619,7 @@ describe("TraceWriter：进程收尾登记摘除", () => {
       const event = (name: string): string =>
         JSON.stringify({ kind: "event", event: name, agentPath: "/root", timestamp: "t", data: {} });
 
-      const writer = new TraceWriter(file, headerLine, 1000);
+      const writer = new TraceWriter(file, () => headerLine, 1000);
       // 空缓冲不占登记：reconfigure 每轮新建 writer 不因构造而累积
       expect(liveWriterCount()).toBe(base);
 
@@ -637,7 +690,7 @@ describe("TraceWriter：进程收尾登记摘除", () => {
       const blocked = path.join(dir, "blocked");
       await writeFile(blocked, "x", "utf8");
       const file = path.join(blocked, "fail.jsonl");
-      const writer = new TraceWriter(file, "header", 1000);
+      const writer = new TraceWriter(file, () => "header", 1000);
       const base = liveWriterCount();
       writer.appendLine(JSON.stringify({ kind: "event", event: "Stop", agentPath: "/root", timestamp: "t", data: {} }));
       expect(liveWriterCount()).toBe(base + 1);

@@ -14,7 +14,7 @@ import { HookBus } from "../../src/hooks/index.js";
 import { SessionStore } from "../../src/storage/index.js";
 import type { Tool } from "../../src/tools/index.js";
 import type { Models } from "../../src/llm/index.js";
-import type { StreamEvent } from "../../src/core/index.js";
+import { hashText, type StreamEvent } from "../../src/core/index.js";
 
 /** 用给定 hooks 配置解析配置（写临时项目配置文件，绕开用户级配置） */
 async function loadConfigWith(hooks: Record<string, string[]>): Promise<Awaited<ReturnType<typeof loadConfig>>> {
@@ -124,6 +124,39 @@ describe("多 Agent 组装", () => {
     expect(systemPrompt).not.toContain("自动唤醒");
     expect(systemPrompt).not.toContain("已派发");
     expect(systemPrompt).not.toContain("证据要求");
+  });
+
+  it("promptHash 对应模型实际看到的那份完整系统提示词（含协调者段与环境段）", async () => {
+    const seen: string[] = [];
+    const client: ModelClient = {
+      async *stream(_modelId, context) {
+        seen.push(context.systemPrompt);
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const multi = createSessionAgent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [] });
+    multi.agent.start("hi");
+    for await (const _ of multi.agent.run()) {
+      // 消费
+    }
+    expect(multi.promptHash).toBe(hashText(seen[0]!));
+
+    // 单 agent 会话：提示词不含协调者段，hash 同样对应模型所见
+    seen.length = 0;
+    const single = createSessionAgent({
+      modelClient: client,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [],
+      agents: false,
+    });
+    single.agent.start("hi");
+    for await (const _ of single.agent.run()) {
+      // 消费
+    }
+    expect(seen[0]).not.toContain("团队协调者");
+    expect(single.promptHash).toBe(hashText(seen[0]!));
   });
 
   it("省略 agents：默认启用多 Agent 协作（与显式 true 一致，防默认值被误改回 off）", async () => {

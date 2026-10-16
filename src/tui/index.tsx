@@ -352,7 +352,7 @@ async function runTuiSession(opts: {
   // 可观测性装配（与 CLI 同套）：Recorder 订阅总线写轨迹；
   // enabled=false 时不装配。轨迹目录同时供 /session 删除联动（先轨迹后会话）使用
   const tracesDir = config.observability?.dir ?? resolveTracesDir();
-  attachRecorder(hooks, {
+  const recorder = attachRecorder(hooks, {
     sessionId: session.meta.id,
     cwd: process.cwd(),
     minicodeVersion: MINICODE_VERSION,
@@ -457,7 +457,7 @@ async function runTuiSession(opts: {
             return false;
           },
         };
-        const { agent, team } = createSessionAgent({
+        const { agent, team, promptHash } = createSessionAgent({
           modelClient: models,
           modelId,
           systemPrompt,
@@ -489,6 +489,9 @@ async function runTuiSession(opts: {
             await store.flush();
           },
         });
+        // 首轮根 agent 提示词 hash 进轨迹 header：装配层拼完（含协调者段与环境段）才拿得到，
+        // 此时首行 header 尚未落盘（首条轨迹行是 SessionStart，在装配之后）
+        recorder?.setPromptHash(promptHash);
         return { agent, team, initPolicyBox };
       },
     });

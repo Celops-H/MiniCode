@@ -13,7 +13,7 @@ import { Logger } from "../logger/index.js";
 import { McpManager } from "../mcp/index.js";
 import { buildSkillsPromptSection, createSkillTool, scanSkills } from "../skills/index.js";
 import type { Tool } from "../tools/index.js";
-import type { Message, ThinkingLevel, StreamEvent } from "../core/index.js";
+import { hashText, type Message, type ThinkingLevel, type StreamEvent } from "../core/index.js";
 import type { PermissionPipeline } from "../permission/index.js";
 import type { SessionStore } from "../storage/index.js";
 import { DEFAULT_CONTEXT_WINDOW, type Models } from "../llm/index.js";
@@ -173,6 +173,8 @@ export function resolveAgentsEnabled(flag: boolean | undefined, configAgents: bo
  * 开启时创建 Team 并注册 root、传入 agent（协作工具随 team 注册，模型可自主 spawn）；
  * 显式传 false 时保持单 agent 会话（协作工具对模型不可见）。
  * 子 agent 由模型 spawn_agent 派生，继承运行时；团队不持久化，随会话结束消失。
+ * @returns promptHash 为 root agent 实际收到的完整系统提示词（含协调者段与环境段）的
+ *   hash，宿主拿去注入轨迹 header metadata.promptHash
  */
 export function createSessionAgent(options: {
   modelClient: ModelClient;
@@ -205,17 +207,15 @@ export function createSessionAgent(options: {
   subagentPromptSections?: string[];
   /** 子 agent 会话落盘的 store（派生出的子 agent 各建独立会话文件并随轮落盘） */
   subagentStore?: SessionStore;
-}): { agent: Agent; team?: Team } {
+}): { agent: Agent; team?: Team; promptHash: string } {
   const envPrompt = environmentPrompt();
   if (options.agents === false) {
-    return { agent: new Agent({ ...options, systemPrompt: `${options.systemPrompt}\n${envPrompt}` }) };
+    const systemPrompt = `${options.systemPrompt}\n${envPrompt}`;
+    return { agent: new Agent({ ...options, systemPrompt }), promptHash: hashText(systemPrompt) };
   }
   const team = new Team({ onRootEvent: options.onRootEvent, hooks: options.hooks, worktrees: options.worktrees });
-  const agent = new Agent({
-    ...options,
-    systemPrompt: `${options.systemPrompt}\n${COORDINATOR_PROMPT}\n${envPrompt}`,
-    team,
-  });
+  const systemPrompt = `${options.systemPrompt}\n${COORDINATOR_PROMPT}\n${envPrompt}`;
+  const agent = new Agent({ ...options, systemPrompt, team });
   team.registerRoot(agent);
-  return { agent, team };
+  return { agent, team, promptHash: hashText(systemPrompt) };
 }

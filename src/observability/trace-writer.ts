@@ -71,12 +71,13 @@ export class TraceWriter {
 
   /**
    * @param filePath 轨迹文件路径（<tracesDir>/<sessionId>.jsonl）
-   * @param headerLine 首行 header（Recorder 构建）
+   * @param headerLine 首行 header 的构建函数：延迟到首条记录时求值——装配层可能在构造 Recorder
+   *   之后、首条行落盘之前才注入 header metadata（如 promptHash）
    * @param batchSize 攒批条数阈值（测试可注入小值观察落盘时机）
    */
   constructor(
     private readonly filePath: string,
-    private readonly headerLine: string,
+    private readonly headerLine: () => string,
     private readonly batchSize: number = DEFAULT_BATCH_SIZE,
   ) {
     installProcessFlushHooks();
@@ -91,7 +92,7 @@ export class TraceWriter {
   appendLine(line: string): void {
     if (!this.headerQueued) {
       // 续跑的会话轨迹文件已存在（首行已有 header）：只追加、不重复插 header
-      if (!existsSync(this.filePath)) this.buffer.push(this.headerLine);
+      if (!existsSync(this.filePath)) this.buffer.push(this.headerLine());
       this.headerQueued = true;
     }
     this.buffer.push(line);
