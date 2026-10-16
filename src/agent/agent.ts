@@ -3,6 +3,7 @@ import {
   COMMAND_MARKER,
   createContext,
   errorMessage,
+  hashText,
   modelErrorText,
   ROOT_AGENT_PATH,
   type ThinkingLevel,
@@ -1530,19 +1531,6 @@ export class Agent {
  */
 function hookDenyReason(hookVerdict: PermissionBehavior | undefined): string {
   return hookVerdict === "deny" ? "Hook 拒绝" : "需要审批但未配置审批处理";
-}
-
-/**
- * 短文本指纹（FNV-1a base36，非安全场景）：LlmCallEnd 的 systemPrompt.hash 用，
- * 标识系统提示词版本（hash 每次必带，全文仅首次或变更时附带）
- */
-function hashText(text: string): string {
-  let hash = 0xcbf29ce4;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x1000193);
-  }
-  return (hash >>> 0).toString(36);
 }
 
 /**
