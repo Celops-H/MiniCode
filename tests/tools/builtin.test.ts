@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBuiltinTools } from "../../src/tools/index.js";
+import { spillOutput } from "../../src/tools/overflow.js";
 import type { Tool } from "../../src/tools/index.js";
 
 describe("文件类内置工具", () => {
@@ -100,6 +101,23 @@ describe("文件类内置工具", () => {
     expect(description).toContain("grep");
     expect(description).toContain("read");
     expect(description).toContain("不保证排序");
+  });
+
+  it("read 与 glob 声明截断建议：超限回灌在落盘提示后附缩小范围一行", () => {
+    const dir = setup();
+    for (const name of ["read", "glob"]) {
+      const t = tool(name);
+      expect(t.truncationNote, name).toBeTruthy();
+      expect(t.truncationNote, name).toContain("不完整");
+      const result = spillOutput("x".repeat(500), 100, path.join(dir, "outputs"), {}, t.truncationNote);
+      expect(result.truncated).toBe(true);
+      // 落盘提示与截断建议并列两行，各讲一件事
+      expect(result.content).toContain("完整内容已保存到");
+      expect(result.content).toContain(`[${t.truncationNote}]`);
+    }
+    // read 有文件与目录两条返回路径，截断建议要分别给出可用手段
+    expect(tool("read").truncationNote).toContain("offset");
+    expect(tool("read").truncationNote).toContain("glob");
   });
 
   it("grep 跳过二进制文件：NUL 嗅探，乱码不再喂给模型", async () => {

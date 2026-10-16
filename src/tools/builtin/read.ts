@@ -24,6 +24,7 @@ export const readTool: Tool = {
   isReadOnly: true,
   isConcurrencySafe: () => true,
   maxResultSizeChars: MAX_RESULT_CHARS,
+  truncationNote: "结果不完整，建议缩小范围：文件用 offset 与 limit 分段读，目录用 glob 按模式过滤",
   async execute(input) {
     const { path, offset = 0, limit } = validateInput<{
       path: string;

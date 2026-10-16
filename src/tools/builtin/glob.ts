@@ -22,6 +22,7 @@ export const globTool: Tool = {
   isReadOnly: true,
   isConcurrencySafe: () => true,
   maxResultSizeChars: MAX_RESULT_CHARS,
+  truncationNote: "结果不完整，建议缩小搜索范围或用更精确的模式",
   async execute(input) {
     const { pattern, path: cwd } = validateInput<{ pattern: string; path?: string }>(globTool, input);
     const matches: string[] = [];
