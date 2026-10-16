@@ -40,14 +40,22 @@ describe("文件类内置工具", () => {
     const out = await tool("read").execute({ path: file, offset: 10 });
     expect(out).toContain("超出文件行数");
     expect(out).toContain("3 行");
+    expect(out).toContain("从 1 起");
   });
 
-  it("read 支持行范围", async () => {
+  it("read 支持行范围，offset 与输出行号同为 1 基", async () => {
     const dir = setup();
     const file = path.join(dir, "a.txt");
     writeFileSync(file, "一\n二\n三\n四");
-    const out = await tool("read").execute({ path: file, offset: 1, limit: 2 });
+    const out = await tool("read").execute({ path: file, offset: 2, limit: 2 });
     expect(out).toBe("2\t二\n3\t三");
+  });
+
+  it("read 的 offset 从 1 起：传 0 校验失败，不静默按文件头处理", async () => {
+    const dir = setup();
+    const file = path.join(dir, "a.txt");
+    writeFileSync(file, "一\n二");
+    await expect(tool("read").execute({ path: file, offset: 0 })).rejects.toThrow();
   });
 
   it("read 打在目录上时列出条目并给指路提示，不抛 EISDIR 裸错误", async () => {

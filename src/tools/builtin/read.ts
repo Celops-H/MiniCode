@@ -9,7 +9,7 @@ const MAX_RESULT_CHARS = 30000;
 
 const schema = z.object({
   path: z.string().describe("要读取的路径；传目录时改为列出目录条目"),
-  offset: z.number().int().nonnegative().optional().describe("起始行号，从 0 起，缺省从头读"),
+  offset: z.number().int().positive().optional().describe("起始行号，从 1 起，与输出行号一致，缺省从头读"),
   limit: z.number().int().positive().optional().describe("读取行数，缺省读到文件末尾"),
 });
 
@@ -26,7 +26,7 @@ export const readTool: Tool = {
   maxResultSizeChars: MAX_RESULT_CHARS,
   truncationNote: "结果不完整，建议缩小范围：文件用 offset 与 limit 分段读，目录用 glob 按模式过滤",
   async execute(input) {
-    const { path, offset = 0, limit } = validateInput<{
+    const { path, offset = 1, limit } = validateInput<{
       path: string;
       offset?: number;
       limit?: number;
@@ -65,13 +65,14 @@ export const readTool: Tool = {
       }
     }
     const lines = content.split("\n");
-    const end = limit !== undefined ? offset + limit : lines.length;
-    const selected = lines.slice(offset, end);
+    const start = offset - 1;
+    const end = limit !== undefined ? start + limit : lines.length;
+    const selected = lines.slice(start, end);
     if (selected.length === 0) {
       // 越界反馈：offset 超出行数时返回空串与「读到空文件」不可区分，
       // 模型得不到反馈可能反复调 offset 空转
-      return `起始行超出文件行数（共 ${lines.length} 行，offset 从 0 起）`;
+      return `起始行超出文件行数（共 ${lines.length} 行，offset 从 1 起）`;
     }
-    return selected.map((line, i) => `${offset + i + 1}\t${line}`).join("\n");
+    return selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
   },
 };
