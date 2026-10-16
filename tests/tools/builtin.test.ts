@@ -183,6 +183,25 @@ describe("文件类内置工具", () => {
     expect(out).toContain("未找到匹配内容");
   });
 
+  it("grep limit 限制返回的匹配行数并在末尾标注截断", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "a.txt"), "x1\nx2\nx3\nx4");
+    const out = await tool("grep").execute({ pattern: "x", path: dir, limit: 2 });
+    expect(out).toContain("a.txt:1");
+    expect(out).toContain("a.txt:2");
+    expect(out).toContain("已达 limit 2");
+    expect(out).not.toContain("a.txt:3");
+  });
+
+  it("grep limit 不小于匹配数时不截断、不加标注", async () => {
+    const dir = setup();
+    writeFileSync(path.join(dir, "a.txt"), "x1\nx2");
+    const out = await tool("grep").execute({ pattern: "x", path: dir, limit: 10 });
+    expect(out).toContain("a.txt:1");
+    expect(out).toContain("a.txt:2");
+    expect(out).not.toContain("limit");
+  });
+
   it("grep 正则无效时返回可读错误不崩溃", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "a.txt"), "Hello world");

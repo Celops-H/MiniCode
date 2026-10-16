@@ -18,6 +18,7 @@ const schema = z.object({
     .string()
     .optional()
     .describe('只搜文件名匹配的文件，如 "*.{ts,tsx}"；含 / 时按相对搜索根的路径匹配'),
+  limit: z.number().int().positive().optional().describe("最多返回的匹配行数，缺省不限制"),
 });
 
 /** 按正则搜索文件内容，返回 文件:行号:内容 的匹配列表 */
@@ -26,6 +27,7 @@ export const grepTool: Tool = {
   description:
     "按正则搜索文件内容，返回 文件:行号:内容 的匹配列表。" +
     "include 过滤文件名，如 *.{ts,tsx}，含 / 时按路径匹配；" +
+    "limit 限制返回的匹配行数；" +
     "path 可传目录或单个文件。" +
     outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
@@ -33,10 +35,11 @@ export const grepTool: Tool = {
   isConcurrencySafe: () => true,
   maxResultSizeChars: MAX_RESULT_CHARS,
   async execute(input) {
-    const { pattern, path: dir, include } = validateInput<{
+    const { pattern, path: dir, include, limit } = validateInput<{
       pattern: string;
       path?: string;
       include?: string;
+      limit?: number;
     }>(grepTool, input);
     let regex: RegExp;
     try {
@@ -70,6 +73,7 @@ export const grepTool: Tool = {
     // include 按搜索根下的相对路径匹配：不含 / 的模式按文件名匹配任意层级，
     // 含 / 的按相对路径匹配，目录段不再被静默忽略
     const root = statResult.isFile() ? path.dirname(cwd) : cwd;
+    let limitReached = false;
     for (const file of files) {
       const rel = path.relative(root, file).split(path.sep).join("/");
       if (include && !matchesInclude(rel, include)) continue;
@@ -86,18 +90,23 @@ export const grepTool: Tool = {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? "";
         regex.lastIndex = 0; // 防带 g/y 标志的正则跨行推进 lastIndex 漏匹配
-        if (regex.test(line)) {
-          results.push(`${file}:${i + 1}:${line}`);
+        if (!regex.test(line)) continue;
+        if (limit !== undefined && results.length >= limit) {
+          limitReached = true;
+          break;
         }
+        results.push(`${file}:${i + 1}:${line}`);
       }
+      if (limitReached) break;
     }
-    // 深度超限时明确标记结果不完整，避免模型误判「搜索完整、无匹配」
-    const suffix = truncated ? "\n[深度超限，结果不完整]" : "";
+    // 深度超限或达 limit 时明确标记结果不完整，避免模型误判「搜索完整、无匹配」
+    const notes: string[] = [];
+    if (truncated) notes.push("深度超限，结果不完整");
+    if (limitReached) notes.push(`已达 limit ${limit}，结果被截断`);
+    const note = notes.join("；");
     return results.length > 0
-      ? results.join("\n") + suffix
-      : truncated
-        ? "未找到匹配内容（深度超限，结果不完整）"
-        : "未找到匹配内容";
+      ? results.join("\n") + (note ? `\n[${note}]` : "")
+      : `未找到匹配内容${note ? `（${note}）` : ""}`;
   },
 };
 
