@@ -95,6 +95,13 @@ describe("文件类内置工具", () => {
     expect(out).not.toContain("b.js");
   });
 
+  it("glob 描述与 grep/read 划分工并声明结果不保证排序", () => {
+    const description = tool("glob").description;
+    expect(description).toContain("grep");
+    expect(description).toContain("read");
+    expect(description).toContain("不保证排序");
+  });
+
   it("grep 跳过二进制文件：NUL 嗅探，乱码不再喂给模型", async () => {
     const dir = setup();
     writeFileSync(path.join(dir, "real.txt"), "has match here");

@@ -14,7 +14,10 @@ const schema = z.object({
 /** 按 glob 模式查找文件，返回匹配路径列表 */
 export const globTool: Tool = {
   name: "glob",
-  description: "按 glob 模式查找文件，返回匹配路径列表。" + outputLimitNote(MAX_RESULT_CHARS),
+  description:
+    "按 glob 模式查找文件，返回匹配路径列表。" +
+    "结果不保证排序；按内容搜索用 grep 工具，读文件内容用 read 工具。" +
+    outputLimitNote(MAX_RESULT_CHARS),
   inputSchema: schema,
   isReadOnly: true,
   isConcurrencySafe: () => true,
