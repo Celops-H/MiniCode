@@ -1344,6 +1344,22 @@ export class Agent {
         return this.rejectToolCall(call, `只读 agent 不允许写操作：${violation}`, agentPath);
       }
     }
+    // 同命令熔断：同一 bash 命令连续失败达阈值后不再执行，直接回灌改道提示，
+    // 并清零该命令计数（熔断只挡这一次，修好根因后仍可重跑）。
+    // 置于权限审批之前：该命令本就不执行，先弹一次审批再拒会让用户白批一次
+    if (call.name === "bash" && command !== undefined && this.commandFailures.isTripped(command)) {
+      this.commandFailures.reset(command);
+      const error = commandBreakerRefusal();
+      await this.safeEmit({
+        type: "PostToolUseFailure",
+        toolCallId: call.id,
+        toolName: call.name,
+        input: call.input,
+        error,
+        agentPath,
+      });
+      return { message: toolResultMessage(call.id, call.name, error, true) };
+    }
     // 权限审批：被拒则回灌错误消息、不执行工具，模型据此调整方案
     // 有权限管线时裁决并入 ask 决策链（规则层 deny 优先，Hook 只在 ask 时介入）；
     // 无权限管线时 hookVerdict 直接生效（上面工具逻辑已按 hookRejects 处理未知工具/参数失败，
@@ -1372,22 +1388,6 @@ export class Agent {
     // 补失败结果保持观测闭合（PreToolUse 已发，后有 PostToolUseFailure）
     if (this.interruptController.signal.aborted) {
       const error = "执行中断：用户打断，工具未执行";
-      await this.safeEmit({
-        type: "PostToolUseFailure",
-        toolCallId: call.id,
-        toolName: call.name,
-        input: call.input,
-        error,
-        agentPath,
-      });
-      return { message: toolResultMessage(call.id, call.name, error, true) };
-    }
-    // 同命令熔断：同一 bash 命令连续失败达阈值后不再执行，直接回灌改道提示，
-    // 并清零该命令计数（熔断只挡这一次，修好根因后仍可重跑）。
-    // 与中断检查同形：PreToolUse 已发，这里补失败结果保持观测闭合
-    if (call.name === "bash" && command !== undefined && this.commandFailures.isTripped(command)) {
-      this.commandFailures.reset(command);
-      const error = commandBreakerRefusal();
       await this.safeEmit({
         type: "PostToolUseFailure",
         toolCallId: call.id,

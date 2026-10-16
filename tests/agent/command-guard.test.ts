@@ -1,13 +1,15 @@
 /**
  * bash 同命令熔断：模型反复重跑同一条失败命令时，harness 必须自己停下来逼它改道，
  * 不能无限重试。这里用假 bash 工具喂预设结果，驱动 Agent 主循环钉住计数口径：
- * 带原因的失败累加、成功清零、用户打断既不计入也不清零、换参数算另一条命令。
+ * 带原因的失败累加、成功清零、用户打断既不计入也不清零、换参数算另一条命令；
+ * 熔断判定先于权限审批。
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Agent } from "../../src/agent/index.js";
 import type { ModelClient } from "../../src/agent/index.js";
 import { HookBus } from "../../src/hooks/index.js";
+import { PermissionPipeline } from "../../src/permission/index.js";
 import type { ExecuteResult, Tool } from "../../src/tools/index.js";
 
 /** 一次执行结果：失败带原因、失败不带原因（用户打断）、成功 */
@@ -58,7 +60,11 @@ function scriptedModel(commands: string[]): ModelClient {
   };
 }
 
-async function runAgent(results: Step[], commands: string[]): Promise<{
+async function runAgent(
+  results: Step[],
+  commands: string[],
+  permission?: PermissionPipeline,
+): Promise<{
   contents: string[];
   errors: boolean[];
   eventOutputs: string[];
@@ -77,6 +83,7 @@ async function runAgent(results: Step[], commands: string[]): Promise<{
     systemPrompt: "助手",
     hooks,
     tools: [tool],
+    permission,
   });
   agent.start("跑命令");
   for await (const _ of agent.run()) {
@@ -148,5 +155,21 @@ describe("Agent 同命令熔断", () => {
     // 共用一个计数器的话第 4 次已熔断（executed 为 3），按命令分别计数才照常执行
     expect(executed).toBe(4);
     expect(contents.every((c) => !c.includes("[熔断]"))).toBe(true);
+  });
+
+  it("熔断判定先于权限审批：被熔断的命令不再进入审批", async () => {
+    let approvals = 0;
+    const permission = new PermissionPipeline({
+      rules: [],
+      approver: async () => {
+        approvals += 1;
+        return { action: "allow" };
+      },
+    });
+    const { contents, executed } = await runAgent(["fail"], ["x", "x", "x", "x"], permission);
+    // 前三次失败各审批一次；第四次已达阈值，熔断拒绝发生在审批之前，用户不再被弹窗
+    expect(approvals).toBe(3);
+    expect(executed).toBe(3);
+    expect(contents[3]).toContain("命令未执行");
   });
 });
