@@ -19,10 +19,17 @@ export interface FileVersion {
  * read 重复读同一文件时据此判定能否回 stub（见 read 工具与 FileState.retainReads）。
  */
 export interface ReadRecord {
-  /** 产出该结果的工具调用 id：修剪/压缩把结果摘除后据此一并摘除本记录 */
+  /** 读取用路径（解析后的原拼写）：压缩后回注按它从磁盘取内容 */
+  path: string;
+  /** 该次读取的起始行与行数：回注后按原区间重新登记去重记录 */
+  offset: number;
+  limit: number | undefined;
+  /** 产出该结果的工具调用 id（回注时为回注消息 id）：修剪/压缩把结果摘除后据此一并摘除本记录 */
   toolCallId: string;
   /** 该次读到的文件内容 hash：与磁盘现内容比对，判定文件是否被改动 */
   contentHash: string;
+  /** 记录序号：每次记录自增，越大越新；压缩后回注按它挑最近读过的文件 */
+  seq: number;
 }
 
 /** 计算文件内容的 sha256 哈希 */
@@ -38,6 +45,8 @@ export class FileState {
   private readonly versions = new Map<string, FileVersion>();
   /** 读去重记录：键为「路径 + 区间」，值绑定产出结果的工具调用 id 与内容 hash */
   private readonly reads = new Map<string, ReadRecord>();
+  /** 读记录序号（每次记录自增）：压缩后回注按它判定读取先后 */
+  private readSeq = 0;
 
   private normalize(p: string): string {
     // Windows 文件系统大小写不敏感：统一小写，避免 C:\a.txt 与 c:\A.TXT 各占锁/快照条目绕过 CAS
@@ -64,8 +73,29 @@ export class FileState {
   }
 
   /** 记一次读结果：同键覆盖旧值，只留最近一次产出该区间结果且仍在上下文的调用 */
-  setRead(p: string, offset: number, limit: number | undefined, record: ReadRecord): void {
-    this.reads.set(this.readKey(p, offset, limit), record);
+  setRead(p: string, offset: number, limit: number | undefined, toolCallId: string, contentHash: string): void {
+    this.reads.set(this.readKey(p, offset, limit), {
+      path: resolvePath(p),
+      offset,
+      limit,
+      toolCallId,
+      contentHash,
+      seq: ++this.readSeq,
+    });
+  }
+
+  /**
+   * 列出读记录：同路径只留最近一次读取（Windows 下不同拼写归同一条），按读取先后倒序。
+   * 压缩/修剪据此挑最近读过的文件回注。
+   */
+  recentReads(): ReadRecord[] {
+    const byPath = new Map<string, ReadRecord>();
+    for (const record of this.reads.values()) {
+      const key = this.normalize(record.path);
+      const prev = byPath.get(key);
+      if (!prev || record.seq > prev.seq) byPath.set(key, record);
+    }
+    return [...byPath.values()].sort((a, b) => b.seq - a.seq);
   }
 
   /**

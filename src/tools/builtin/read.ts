@@ -84,7 +84,7 @@ export const readTool: Tool = {
       if (record && record.contentHash === contentHash) {
         return readUnchangedStub(offset, limit);
       }
-      fileState.setRead(file, offset, limit, { toolCallId, contentHash });
+      fileState.setRead(file, offset, limit, toolCallId, contentHash);
     }
     return selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
   },

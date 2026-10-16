@@ -84,4 +84,27 @@ describe("read 读去重（同区间同内容回 stub）", () => {
     expect(keptAgain).toContain("文件未变化");
     expect(droppedAgain).toBe("1\t摘除");
   });
+
+  it("recentReads 按读取先后倒序，同路径只留最近一次", async () => {
+    const dir = tmpDir = mkdtempSync(path.join(os.tmpdir(), "minicode-reads-"));
+    const a = path.join(dir, "a.txt");
+    const b = path.join(dir, "b.txt");
+    writeFileSync(a, "一\n二");
+    writeFileSync(b, "三");
+    const state = new FileState();
+
+    await withFileState(state, () => readTool.execute({ path: a, limit: 1 }, { toolCallId: "c1" }));
+    await withFileState(state, () => readTool.execute({ path: b }, { toolCallId: "c2" }));
+    // 再读 a 的另一区间：新记录排在 b 之后，a 在候选里只出现一次
+    await withFileState(state, () => readTool.execute({ path: a, offset: 2 }, { toolCallId: "c3" }));
+
+    expect(state.recentReads()).toEqual([
+      { path: a, offset: 2, limit: undefined, toolCallId: "c3", contentHash: expect.any(String), seq: 3 },
+      { path: b, offset: 1, limit: undefined, toolCallId: "c2", contentHash: expect.any(String), seq: 2 },
+    ]);
+  });
+
+  it("recentReads 无读记录时为空", () => {
+    expect(new FileState().recentReads()).toEqual([]);
+  });
 });
