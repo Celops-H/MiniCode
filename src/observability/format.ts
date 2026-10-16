@@ -10,8 +10,8 @@
 
 /** header 的 format 标识 */
 export const TRACE_FORMAT = "minicode-trace";
-/** 格式版本：字段只增不改，格式演进升版本号 */
-export const TRACE_FORMAT_VERSION = 1;
+/** 格式版本：字段只增不改，格式演进升版本号（各版本的字段集见 OBSERVABILITY.md §4.5） */
+export const TRACE_FORMAT_VERSION = 2;
 
 /**
  * 轨迹首行 header：定长字段今后不再增加，扩展一律走 metadata

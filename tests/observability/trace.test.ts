@@ -78,6 +78,8 @@ describe("Recorder：轨迹格式与落盘", () => {
         cwd: "C:\\work\\proj",
         minicodeVersion: "0.0.1",
       });
+      // 落盘版本号本身：消费方按 header 判读字段集，值必须与常量一致
+      expect(lines[0]!.formatVersion).toBe(2);
       expect(typeof lines[0]!.startedAt).toBe("string");
       // 事件行（会话级事件归到根 agent：按 agentPath 过滤不丢分段与用户输入）
       expect(lines[1]).toMatchObject({ kind: "event", event: "SessionStart", agentPath: "/root" });
