@@ -458,6 +458,36 @@ export function selectedPromptText(p: PromptState): string {
   return [head, ...mid, tail].join("\n");
 }
 
+/** 消息时间戳 → 毫秒；缺失或非法返回 undefined（该消息不参与轨迹补充层的落点判定） */
+function messageTimeMs(timestamp: string | undefined): number | undefined {
+  if (!timestamp) return undefined;
+  const t = Date.parse(timestamp);
+  return Number.isNaN(t) ? undefined : t;
+}
+
+/**
+ * 轨迹补充层活动行的插入位置：按消息位置取的、时间上不晚于终态时刻的最后一条消息之后
+ * （该消息块序列末尾）；终态时刻早于全部带时间戳的消息时落在消息区最前。
+ * 终态时刻缺失/非法、或整段历史没有可对位的消息时间戳（老会话）时返回 fallback（末尾追加）——
+ * 无锚点可用，退回原有的追加行为。
+ * @param anchors 消息时间锚点（按消息序，见 initState）
+ * @param timestamp 终态事件行的采集时刻（ISO 串）
+ * @param fallback 无锚点时的落点（当前块数，即消息区末尾）
+ */
+function outcomeInsertIndex(
+  anchors: Array<{ t: number; end: number }>,
+  timestamp: string | undefined,
+  fallback: number,
+): number {
+  const t = messageTimeMs(timestamp);
+  if (t === undefined || anchors.length === 0) return fallback;
+  let at = 0;
+  for (const anchor of anchors) {
+    if (anchor.t <= t) at = anchor.end;
+  }
+  return at;
+}
+
 /** 历史消息 → 初始块序列（工具调用配工具结果卡片，缺结果的标 pending）；title 为会话标题（/rename 同步）。
  *  user/assistant 消息带创建时间戳时回填发送时间，切模型等 reconfigure
  *  重建后历史消息的时间不丢（此前只有流式新消息才有 time）；非法/缺失时间戳不显示
@@ -468,7 +498,8 @@ export function selectedPromptText(p: PromptState): string {
  *  最后一次终态注入（先中断后结论 = 完成）
  *  agentOutcomes：注入消息之外的轨迹补充层。注入消息只覆盖回灌过父的层——未消费的
  *  INTERRUPTED 标记随收件箱丢弃、孙 agent 的结论只落在中间父的子会话文件，两层都只
- *  在轨迹里有终态；按轨迹终态补活动行与树条目，已有同态终态注入的路径不重复 */
+ *  在轨迹里有终态；按轨迹终态补活动行与树条目，已有同态终态注入的路径不重复。活动行
+ *  按终态时刻插到对应消息之后（见 outcomeInsertIndex），不再一律追加到消息区末尾 */
 export function initState(
   messages: Message[],
   title = "",
@@ -477,6 +508,11 @@ export function initState(
   agentOutcomes?: AgentOutcome[],
 ): TuiState {
   const blocks: BlockView[] = [];
+  /** 消息时间锚点：一条消息的自身时刻（ms）与其块序列结束位置（该消息最后一块的下一位）。
+   *  轨迹补充层据此把终态活动行插回消息之间的原位 */
+  const anchors: Array<{ t: number; end: number }> = [];
+  /** 上一条消息的时刻，待本轮循环体（各分支都有 continue）走到下一条时落定 */
+  let prevAnchorTime: number | undefined;
   /** 重建的 agent 树条目：路径 → 终态（按注入顺序建，/root 恒在首位） */
   const agentNodes = new Map<string, AgentNode>();
   /** 有终态注入邮件的路径（轨迹补充层据此判「该路径的最后终态是否已由消息给出」） */
@@ -488,6 +524,10 @@ export function initState(
     return formatTime(t);
   };
   for (const message of messages) {
+    // 落定上一条消息的锚点：此刻 blocks 尚未压入本条消息的块，长度即上一条的结束位置
+    if (prevAnchorTime !== undefined) anchors.push({ t: prevAnchorTime, end: blocks.length });
+    const thisTime = messageTimeMs(message.timestamp);
+    prevAnchorTime = thisTime;
     if (message.role === "user") {
       // 多 agent 注入消息重演：树条目按路径建（默认完成态，中断注入改判中断），
       // 结论/中断注入重演为活动行（live 会话同样只有结论/中断有活动行，消息注入不上屏）。
@@ -609,10 +649,14 @@ export function initState(
       });
     }
   }
+  // 落定最后一条消息的锚点
+  if (prevAnchorTime !== undefined) anchors.push({ t: prevAnchorTime, end: blocks.length });
   // 轨迹补充层：注入消息覆盖不到的终态按轨迹补（未消费的 INTERRUPTED 标记、孙 agent
   // 结论只在轨迹里有终态）。已有终态注入且与轨迹同态的路径不重复——注入邮件是该路径
   // 最后终态，保留其结论文本与所在位置；终态邮件只有进度汇报（MESSAGE）或已被后续
-  // 终态取代时，轨迹给出的才是最后终态，补新段
+  // 终态取代时，轨迹给出的才是最后终态，补新段。落点按终态时刻定位（插入位置先算后插，
+  // 避免逐条插入时前面的下标被推移）
+  const supplement: Array<{ at: number; block: AgentActivityBlock }> = [];
   for (const outcome of agentOutcomes ?? []) {
     if (outcome.path === ROOT_AGENT_PATH) continue;
     const node = agentNodes.get(outcome.path);
@@ -627,19 +671,23 @@ export function initState(
         completedAt: null,
       });
     }
-    if (outcome.outcome === "interrupted") {
-      blocks.push({ kind: "agent", event: "interrupted", path: outcome.path, tools: [], collapsed: true });
-      continue;
-    }
-    blocks.push({
-      kind: "agent",
-      event: outcome.outcome,
-      path: outcome.path,
-      tools: [],
-      collapsed: true,
-      ...(outcome.conclusion !== undefined ? { conclusion: outcome.conclusion } : {}),
-      ...(outcome.mergeResult !== undefined ? { mergeResult: outcome.mergeResult } : {}),
-    });
+    const block: AgentActivityBlock =
+      outcome.outcome === "interrupted"
+        ? { kind: "agent", event: "interrupted", path: outcome.path, tools: [], collapsed: true }
+        : {
+            kind: "agent",
+            event: outcome.outcome,
+            path: outcome.path,
+            tools: [],
+            collapsed: true,
+            ...(outcome.conclusion !== undefined ? { conclusion: outcome.conclusion } : {}),
+            ...(outcome.mergeResult !== undefined ? { mergeResult: outcome.mergeResult } : {}),
+          };
+    supplement.push({ at: outcomeInsertIndex(anchors, outcome.timestamp, blocks.length), block });
+  }
+  // 从后往前插入：同落点的一组保持轨迹顺序，前面落点的下标不被后面的插入推移
+  for (const at of [...new Set(supplement.map((s) => s.at))].sort((a, b) => b - a)) {
+    blocks.splice(at, 0, ...supplement.filter((s) => s.at === at).map((s) => s.block));
   }
   return {
     blocks,
