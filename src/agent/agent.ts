@@ -28,6 +28,7 @@ import {
   extractRecoveryContext,
   generateSummary,
   isContextTooLongError,
+  isRecoveryMessage,
   isRestoreMessage,
   needsCompact,
   parseContextTooLongGap,
@@ -989,17 +990,12 @@ export class Agent {
         );
         if (summaryIndex >= 0) {
           const previous = this.messages[summaryIndex]!.content as string;
-          // 跳过紧随摘要的恢复上下文与已读文件回注：两者内容源自压缩前的历史，
-          // 已被旧摘要覆盖，不算增量；其余 source:"system" 消息（如邮箱注入）是真实增量，保留
-          let deltaStart = summaryIndex + 1;
-          while (deltaStart < this.messages.length) {
-            const next = this.messages[deltaStart]!;
-            // 判据是「系统注入 + 标记前缀」：人类输入以同样前缀开头不算，照进增量
-            if (next.role !== "user" || next.source !== "system" || typeof next.content !== "string") break;
-            if (!next.content.startsWith(RECOVERY_MARKER) && !next.content.startsWith(RESTORE_MARKER)) break;
-            deltaStart++;
-          }
-          const delta = this.messages.slice(deltaStart);
+          // 增量 = 摘要之后的真实对话，排除恢复上下文与已读文件回注：两者内容源自压缩前的
+          // 历史，已被旧摘要覆盖，不算增量。按标记识别而非相邻性，恢复与回注之间插入
+          // 别的系统消息也照样排除；其余 source:"system" 消息（如邮箱注入）是真实增量，保留
+          const delta = this.messages
+            .slice(summaryIndex + 1)
+            .filter((m) => !isRecoveryMessage(m) && !isRestoreMessage(m));
           summary = await generateSummary(
             this.guardedModelClient(),
             this.modelId,

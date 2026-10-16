@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Agent, type CompactConfig, type ModelClient } from "../../src/agent/index.js";
 import {
   PRUNED_MARKER,
+  RECOVERY_MARKER,
   RESTORE_MARKER,
   SUMMARY_MARKER,
   estimateTextTokens,
   estimateTokens,
   needsCompact,
 } from "../../src/context/index.js";
-import type { Message, ToolResultMessage, UserMessage } from "../../src/core/index.js";
+import { userMessage, type Message, type ToolResultMessage, type UserMessage } from "../../src/core/index.js";
 import { readTool } from "../../src/tools/index.js";
 
 /** 压缩配置：窗口放大到只走裁剪层，裁剪保留数与回注预算按用例给 */
@@ -291,5 +292,48 @@ describe("压缩后回注最近读过的文件（Agent 链路）", () => {
     const lastSummary = summaryRequests.at(-1)!;
     expect(lastSummary.some((m) => m.role === "user" && m.content.startsWith(RESTORE_MARKER))).toBe(false);
     expect(lastSummary.some((m) => m.role === "user" && m.content.includes("继续做"))).toBe(true);
+  });
+
+  it("增量摘要按标记排除恢复与回注：两者之间插入别的系统消息也照排", async () => {
+    const summaryRequests: Message[][] = [];
+    const modelClient: ModelClient = {
+      async *stream(_modelId, context) {
+        if (context.tools.length === 0) {
+          summaryRequests.push(context.messages);
+          yield { type: "text_delta", text: "更新后的摘要" };
+          yield { type: "done", stopReason: "end_turn" };
+          return;
+        }
+        yield { type: "text_delta", text: "完成" };
+        yield { type: "done", stopReason: "end_turn" };
+      },
+    };
+    const agent = new Agent({
+      modelClient,
+      modelId: "mock",
+      systemPrompt: "助手",
+      tools: [readTool],
+      compactConfig: compactConfig(1),
+      // 摘要之后依次是：恢复上下文、别的系统注入（邮箱）、已读文件回注、真实增量。
+      // 回注不紧邻恢复：按相邻性识别会把它当增量，按标记识别才排除得掉
+      initialMessages: [
+        userMessage(`${SUMMARY_MARKER}\n旧摘要`, "system"),
+        userMessage(`${RECOVERY_MARKER}\n最近操作文件：a.ts`, "system"),
+        userMessage("邮箱注入：有新消息", "system"),
+        userMessage(`${RESTORE_MARKER}\n文件：a.txt\n1\t机密回注正文`, "system"),
+        userMessage("真实增量输入"),
+      ],
+    });
+
+    await agent.compactNow();
+
+    const conversation = summaryRequests.at(-1)!.filter(
+      (m) => typeof m.content !== "string" || !m.content.includes("结构化摘要"),
+    );
+    const texts = conversation.map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(texts.some((t) => t.includes("机密回注正文"))).toBe(false);
+    expect(texts.some((t) => t.includes("真实增量输入"))).toBe(true);
+    // 其余系统注入（邮箱）是真实增量，保留
+    expect(texts.some((t) => t.includes("邮箱注入"))).toBe(true);
   });
 });
