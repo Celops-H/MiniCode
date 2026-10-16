@@ -32,10 +32,14 @@ describe("bash 工具：signal 中止（turn 内打断透传）", () => {
     expect(out).toContain("hello");
   });
 
-  it("stdout 与 stderr 合并返回", async () => {
+  it("成功路径 stdout 与 stderr 分节返回：stderr 带节标签，模型分得清来源", async () => {
     const out = await bashTool.execute({ command: 'node -e "console.log(\'OUT\'); console.error(\'ERR\')"' });
-    expect(String(out)).toContain("OUT");
-    expect(String(out)).toContain("ERR");
+    expect(String(out)).toBe("OUT\n[stderr]\nERR");
+  });
+
+  it("成功路径无 stderr 时不出节标签", async () => {
+    const out = await bashTool.execute({ command: "echo hello" });
+    expect(String(out)).toBe("hello");
   });
 
   it("非零退出：标记失败并携带失败原因（含退出码）", async () => {

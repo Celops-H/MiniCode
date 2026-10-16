@@ -178,8 +178,8 @@ function stderrSummary(text: string): string {
  * 超时或外部信号（turn 内打断）时跨平台杀子进程树（Windows taskkill /T /F）。
  * 兼容旧 exec 语义：非零退出、超时、启动失败、中断都标记 isError。
  * 超时、非零退出、启动失败另带失败原因，由执行器转发 PostToolUseFailure；
- * 成功结果返回 stdout 与 stderr 依次拼接的正文；失败结果按「原因、stderr 节、
- * 可重试标记、stdout」排列，诊断信息在前，供模型判断改道还是重跑。
+ * 成功结果返回 stdout 与 stderr 分节的正文（stderr 带 [stderr] 节标签），失败结果按
+ * 「原因、stderr 节、可重试标记、stdout」排列，诊断信息在前，供模型判断改道还是重跑。
  * 用户打断只标 isError 不带原因（主动行为不算失败）。
  * 结算条件是「进程退出 + stdio 流全部关闭」：管道被别的进程持有时靠排水窗口兜底，
  * 保证调用必然返回（否则命令早退但管道不关，整个调用长时间无返回）。
@@ -249,8 +249,19 @@ function runCommand(command: string, timeoutMs: number, signal?: AbortSignal): P
       else stderr = next;
     };
 
-    /** 成功或打断的回灌正文：stdout、stderr 各去首尾空白，非空才拼，无内容返回空串 */
-    const body = (): string => [stdout.trim(), stderr.trim()].filter((s) => s.length > 0).join("\n");
+    /**
+     * 成功或打断的回灌正文：stdout、stderr 各去首尾空白，非空才拼。
+     * stderr 单独成节并加 [stderr] 标签（与失败回灌同口径），模型据此分清哪段来自 stderr；
+     * 无内容返回空串
+     */
+    const body = (): string => {
+      const parts: string[] = [];
+      const stdoutText = stdout.trim();
+      if (stdoutText.length > 0) parts.push(stdoutText);
+      const stderrText = stderr.trim();
+      if (stderrText.length > 0) parts.push(`[stderr]\n${stderrText}`);
+      return parts.join("\n");
+    };
 
     const settle = (): void => {
       if (settled) return;

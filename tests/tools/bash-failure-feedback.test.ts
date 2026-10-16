@@ -60,7 +60,7 @@ describe("bash 工具：失败回灌带 stderr 摘要与可重试标记", () => 
     expect(text).toContain("timeoutMs");
   });
 
-  it("用户打断：不带 stderr 摘要与可重试标记（主动行为不算失败）", async () => {
+  it("用户打断：不带失败诊断与可重试标记，stderr 仍按节标签回灌", async () => {
     const controller = new AbortController();
     const promise = bashTool.execute(
       { command: `node -e "console.error('BOOM'); setInterval(()=>{},1000)"`, timeoutMs: 30000 },
@@ -72,7 +72,9 @@ describe("bash 工具：失败回灌带 stderr 摘要与可重试标记", () => 
     expect(out).toMatchObject({ isError: true });
     const text = (out as { output: string }).output;
     expect(text).toContain("已被用户打断");
-    expect(text).not.toContain("[stderr]");
+    // 打断不算失败：不带失败原因行与可重试标记；stderr 照常分节（与成功回灌同口径）
+    expect(text).toContain("[stderr]");
+    expect(text).toContain("BOOM");
     expect(text).not.toContain("[可重试]");
     expect(text).not.toContain("[不可重试]");
   });
