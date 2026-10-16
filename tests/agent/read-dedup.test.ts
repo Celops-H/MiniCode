@@ -71,8 +71,18 @@ describe("read 读去重（Agent 链路）", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [readTool],
-      // 窗口放大：裁剪后不再触发摘要，只走裁剪这一层
-      compactConfig: { contextWindow: 1_000_000, maxOutputTokens: 100, safetyMargin: 100, keepRecentToolResults: 0 },
+      // 窗口放大：裁剪后不再触发摘要，只走裁剪这一层；
+      // 关掉压缩后回注（restoreMaxFiles: 0）：本用例钉的是 E248 的口径——
+      // 被摘除的读记录不得让同区间重读回 stub，故不走回注路径
+      compactConfig: {
+        contextWindow: 1_000_000,
+        maxOutputTokens: 100,
+        safetyMargin: 100,
+        keepRecentToolResults: 0,
+        restoreMaxFiles: 0,
+        restoreMaxCharsPerFile: 5000,
+        restoreMaxTotalChars: 50000,
+      },
     });
     agent.start("读文件");
     for await (const _ of agent.runTurn()) {

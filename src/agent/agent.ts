@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   assembleAssistantMessage,
   COMMAND_MARKER,
@@ -20,6 +21,7 @@ import {
 } from "../core/index.js";
 import {
   buildRecoveryText,
+  buildRestore,
   environmentPrompt,
   estimateTextTokens,
   estimateTokens,
@@ -33,8 +35,10 @@ import {
   pruneToolResults,
   RECOVERY_MARKER,
   replaceWithSummary,
+  RESTORE_MARKER,
   SUMMARY_MARKER,
   updateMemory,
+  type RestoreFile,
 } from "../context/index.js";
 import {
   formatInputError,
@@ -48,7 +52,7 @@ import {
 import type { PermissionBehavior, PermissionPipeline, PermissionRequest, PermissionResult } from "../permission/index.js";
 import { readOnlyToolViolation } from "../permission/index.js";
 import type { HookBus, HookEvent } from "../hooks/index.js";
-import { FileState, withCwd, withFileState } from "../tools/file-state.js";
+import { FileState, hashContent, withCwd, withFileState, type ReadRecord } from "../tools/file-state.js";
 import { resolveOutputsDir } from "../config/paths.js";
 import type { Session, SessionStore } from "../storage/index.js";
 import { Mailbox, formatMailMessage, type MailMessage } from "./mailbox.js";
@@ -64,7 +68,7 @@ export interface ModelClient {
   providerOf?(modelId: string): string | undefined;
 }
 
-/** 上下文压缩配置：触发判断的窗口参数与裁剪保留数 */
+/** 上下文压缩配置：触发判断的窗口参数、裁剪保留数与压缩后回注预算 */
 export interface CompactConfig {
   /** 模型上下文窗口（token） */
   contextWindow: number;
@@ -74,6 +78,12 @@ export interface CompactConfig {
   safetyMargin: number;
   /** 历史裁剪保留最近的工具结果条数 */
   keepRecentToolResults: number;
+  /** 压缩/修剪后回注最近读过文件的条数上限；0 关闭回注 */
+  restoreMaxFiles: number;
+  /** 回注单文件的字符上限 */
+  restoreMaxCharsPerFile: number;
+  /** 回注总字符预算 */
+  restoreMaxTotalChars: number;
 }
 
 /** 超窗应急剥组的最大重试次数（剥组与重试有上限，超限报错） */
@@ -895,6 +905,8 @@ export class Agent {
     const agentPath = this.agentPath?.toString() ?? ROOT_AGENT_PATH;
     const tokensBefore = this.contextTokens();
     const messagesBefore = this.messages.length;
+    // 回注候选先取：重写后 syncReadState 摘除已离开上下文的读记录，先快照才挑得出它们
+    const restoreCandidates = this.fileState.recentReads();
     // 分层手段记账：pruned=裁剪真实生效（有旧工具输出被替换为裁剪标记），
     // reachedSummary=进入摘要替换层。method 记录实际经过的分层，失败时表示已执行到的层
     let pruned = false;
@@ -927,6 +939,7 @@ export class Agent {
       // 同区间重读必须回全文而非 stub 指向裁剪标记
       this.syncReadState();
       if (!instructions && !needsCompact(this.contextTokens(), this.compactConfig!)) {
+        await this.applyFileRestore(restoreCandidates);
         await emitCompact(true);
         return true;
       }
@@ -966,14 +979,14 @@ export class Agent {
         );
         if (summaryIndex >= 0) {
           const previous = this.messages[summaryIndex]!.content as string;
-          // 跳过紧随摘要的恢复上下文（内容源自压缩前全量历史，已被旧摘要覆盖，不算增量）；
-          // 其余 source:"system" 消息（如邮箱注入）是真实增量，保留
+          // 跳过紧随摘要的恢复上下文与已读文件回注：两者内容源自压缩前的历史，
+          // 已被旧摘要覆盖，不算增量；其余 source:"system" 消息（如邮箱注入）是真实增量，保留
           let deltaStart = summaryIndex + 1;
-          if (
-            deltaStart < this.messages.length &&
-            typeof this.messages[deltaStart]!.content === "string" &&
-            (this.messages[deltaStart]!.content as string).startsWith(RECOVERY_MARKER)
-          ) {
+          while (deltaStart < this.messages.length) {
+            const next = this.messages[deltaStart]!;
+            // 判据是「系统注入 + 标记前缀」：人类输入以同样前缀开头不算，照进增量
+            if (next.role !== "user" || next.source !== "system" || typeof next.content !== "string") break;
+            if (!next.content.startsWith(RECOVERY_MARKER) && !next.content.startsWith(RESTORE_MARKER)) break;
             deltaStart++;
           }
           const delta = this.messages.slice(deltaStart);
@@ -1025,6 +1038,7 @@ export class Agent {
       // 摘要整段替换后，被替换掉的读结果不再可见：同步摘除读记录，同区间重读回全文
       //（记忆分支保留的在途读结果仍在上下文，其记录照留）
       this.syncReadState();
+      await this.applyFileRestore(restoreCandidates);
       this.historyRewritten = true; // 已落盘历史被摘要替换
       await emitCompact(true);
       return true;
@@ -1090,11 +1104,72 @@ export class Agent {
    * 不能回 stub 指向已消失的结果。清盘后同理（无读结果在上下文，读记录全清）。
    */
   private syncReadState(): void {
+    this.fileState.retainReads(this.liveReadIds());
+  }
+
+  /**
+   * 上下文中仍可见的读结果 id 集合：未裁剪的工具结果调用 id，外加回注消息 id
+   * （回注内容就是读到的文件内容，绑定在回注消息上的读记录同样算结果可见）。
+   */
+  private liveReadIds(): Set<string> {
     const live = new Set<string>();
     for (const message of this.messages) {
-      if (message.role === "tool_result" && message.content !== PRUNED_MARKER) live.add(message.toolCallId);
+      if (message.role === "tool_result") {
+        if (message.content !== PRUNED_MARKER) live.add(message.toolCallId);
+      } else if (
+        message.role === "user" &&
+        message.source === "system" &&
+        message.content.startsWith(RESTORE_MARKER)
+      ) {
+        live.add(message.id);
+      }
     }
-    this.fileState.retainReads(live);
+    return live;
+  }
+
+  /**
+   * 压缩/修剪后回注最近读过的文件：把已清出上下文的读结果按磁盘当前内容重新载入，
+   * 模型不必重读。与读去重共用一份读状态：结果仍在上下文的（记录存活）跳过，
+   * 不重复回注；回注未截断的文件按原区间重新登记并绑定回注消息 id，于是重复读照回
+   * stub、下次压缩按仍存活的回注消息再次纳入候选。
+   * @param candidates 重写前的读记录候选（FileState.recentReads），按最近读取倒序
+   */
+  private async applyFileRestore(candidates: ReadRecord[]): Promise<void> {
+    const config = this.compactConfig;
+    if (!config || config.restoreMaxFiles <= 0) return;
+    const live = this.liveReadIds();
+    const picked = candidates.filter((record) => !live.has(record.toolCallId)).slice(0, config.restoreMaxFiles);
+    if (picked.length === 0) return;
+    const files: RestoreFile[] = [];
+    for (const record of picked) {
+      try {
+        files.push({ path: record.path, content: await readFile(record.path, "utf8") });
+      } catch {
+        // 文件已删除或不可读：跳过回注，模型用到时自行 read 会得到不存在提示
+      }
+    }
+    const restored = buildRestore(files, {
+      maxCharsPerFile: config.restoreMaxCharsPerFile,
+      // 总预算按当前剩余空间收紧（可用窗口口径同 needsCompact）：回注正文若把上下文顶回
+      // 阈值之上，下一轮立刻再压缩、回注又被摘要吞掉，小窗口下反复。token 剩余量直接当
+      // 字符预算用，中文一字符约一 token、偏保守；空间不足则一个文件也装不下，即不回注
+      maxTotalChars: Math.min(
+        config.restoreMaxTotalChars,
+        Math.max(0, config.contextWindow - config.maxOutputTokens - config.safetyMargin - this.contextTokens()),
+      ),
+    });
+    if (restored.text.length === 0) return;
+    const message = userMessage(`${RESTORE_MARKER}\n${restored.text}`, "system");
+    this.messages.push(message);
+    await this.emitMessageAppended(message);
+    // 截断的不登记：上文只有文件头部，登记会让同区间重读误回 stub
+    const byPath = new Map(picked.map((record) => [record.path, record] as const));
+    for (const file of restored.complete) {
+      const record = byPath.get(file.path);
+      if (record) {
+        this.fileState.setRead(record.path, record.offset, record.limit, message.id, hashContent(file.content));
+      }
+    }
   }
 
   /**

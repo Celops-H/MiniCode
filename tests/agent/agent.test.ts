@@ -808,7 +808,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       systemPrompt: "助手",
       initialMessages: longHistory,
       tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
-      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -856,7 +856,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       systemPrompt: "系".repeat(200),
       initialMessages: [userMessage("背景".repeat(10))],
       tools: [echoTool],
-      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -903,7 +903,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       tools: [echoTool], // 注册工具让正常调用 tools 非空，与摘要调用区分
       // 全部裁剪后仅剩裁剪标记，估算低于可用窗口，不触发摘要
       //（窗口按分段计价口径重校准：10 条裁剪标记为 CJK 文本、比旧系数更大）
-      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -942,7 +942,7 @@ describe("Agent 主循环：模型对话闭环", () => {
         execute: () => "回显",
       }],
       // 窗口很大：未撞线，普通 run 不会压缩
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -996,7 +996,7 @@ describe("Agent 主循环：模型对话闭环", () => {
         execute: () => "回显",
       }],
       // 窗口极小必然撞线，但自动压缩关闭
-      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
       autoCompact: false,
     });
     agent.start("继续");
@@ -1057,7 +1057,7 @@ describe("Agent 主循环：模型对话闭环", () => {
         execute: () => "回显",
       }],
       memory: true, // 开启记忆：无指导时压缩会走记忆替代；带指导必须改走现场摘要
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("先跑一轮沉淀记忆");
     for await (const _ of agent.run()) {
@@ -1115,7 +1115,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       systemPrompt: "助手",
       initialMessages: longResults,
       // 裁剪全部旧工具输出后远低于窗口：无指导时短路返回，不再调摘要
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     // 无指导：裁剪即达标，短路（省一次模型调用）
     expect(await agent.compactNow()).toBe(true);
@@ -1127,7 +1127,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       modelId: "mock",
       systemPrompt: "助手",
       initialMessages: longResults,
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     expect(await agent2.compactNow("侧重保留命令输出")).toBe(true);
     expect(summaryCalled).toBe(true);
@@ -1170,7 +1170,7 @@ describe("Agent 主循环：模型对话闭环", () => {
         maxResultSizeChars: 1000,
         execute: () => "回显",
       }],
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
 
     // 第一次主动压缩失败（摘要抛错，置位 compactDisabled）
@@ -1231,7 +1231,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       }],
       // 窗口：首次撞线（10 条历史约 2250 token，分段计价）；摘要后增量（恢复上下文+大输入）
       // 远低于可用窗口不撞线，第二次压缩由 compactNow 显式触发
-      compactConfig: { contextWindow: 2300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 2300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("第一轮");
     for await (const _ of agent.run()) {
@@ -1272,7 +1272,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       modelId: "mock",
       systemPrompt: "助手",
       initialMessages: [userMessage("短消息")],
-      compactConfig: { contextWindow: 10000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 10000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {
@@ -1318,7 +1318,7 @@ describe("Agent 主循环：模型对话闭环", () => {
       systemPrompt: "助手",
       initialMessages: history,
       tools: [echoTool],
-      compactConfig: { contextWindow: 40, maxOutputTokens: 5, safetyMargin: 5, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 40, maxOutputTokens: 5, safetyMargin: 5, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("继续");
     for await (const _ of agent.run()) {

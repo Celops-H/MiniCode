@@ -380,7 +380,7 @@ describe("Agent 主循环：turn 内真打断", () => {
       modelId: "mock",
       systemPrompt: "助手",
       initialMessages: [userMessage("第一问"), assistantMessage([{ type: "text", text: "回答一" }])],
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     const compacting = agent.compactNow();
     await started; // 摘要调用已进入模型流并挂起

@@ -270,7 +270,7 @@ describe("MessageAppended 事件：消息追加路径全覆盖", () => {
       systemPrompt: "助手",
       hooks,
       initialMessages: orphanHistory,
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     const ok = await agent.compactNow();
 
@@ -673,7 +673,7 @@ describe("Compact 事件：压缩动作收口", () => {
       modelId: "mock",
       systemPrompt: "助手",
       hooks,
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     // 一轮完整工具回合：历史含 4 条消息（输入/工具调用/结果/总结）
     agent.start("读文件");
@@ -703,7 +703,7 @@ describe("Compact 事件：压缩动作收口", () => {
       systemPrompt: "助手",
       hooks,
       // 可用窗口 80 token：长中文输入（200+ token）必然撞线
-      compactConfig: { contextWindow: 100, maxOutputTokens: 10, safetyMargin: 10, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100, maxOutputTokens: 10, safetyMargin: 10, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("测".repeat(300));
     await drain(agent);
@@ -726,7 +726,7 @@ describe("Compact 事件：压缩动作收口", () => {
       modelId: "mock",
       systemPrompt: "助手",
       hooks,
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("第一问");
     await drain(agent);
@@ -749,7 +749,7 @@ describe("Compact 事件：压缩动作收口", () => {
       modelId: "mock",
       systemPrompt: "助手",
       hooks,
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("第一问");
     await drain(agent);
@@ -898,7 +898,7 @@ describe("Compact 事件的 method 分层手段", () => {
       hooks,
       initialMessages: longResults,
       // 与「撞线时历史裁剪优先于摘要」同参：10 条裁剪标记的估算低于可用窗口
-      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 150, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     expect(await agent.compactNow()).toBe(true);
     expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "prune" });
@@ -914,7 +914,7 @@ describe("Compact 事件的 method 分层手段", () => {
       hooks,
       initialMessages: longResults,
       // 窗口极小：裁剪只剩标记也超限，继续摘要替换
-      compactConfig: { contextWindow: 60, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 60, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     expect(await agent.compactNow()).toBe(true);
     expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "both" });
@@ -929,7 +929,7 @@ describe("Compact 事件的 method 分层手段", () => {
       systemPrompt: "助手",
       hooks,
       initialMessages: [userMessage("第一问"), { role: "assistant", id: "a1", content: [{ type: "text", text: "回答" }] }],
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     expect(await agent.compactNow()).toBe(true);
     expect(compacts.events[0]).toMatchObject({ ok: true, trigger: "manual", method: "summary" });
@@ -944,7 +944,7 @@ describe("Compact 事件的 method 分层手段", () => {
       systemPrompt: "助手",
       hooks,
       initialMessages: [userMessage("第一问")],
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     expect(await agent.compactNow()).toBe(false);
     expect(compacts.events[0]).toMatchObject({ ok: false, method: "summary", error: "摘要结果为空" });

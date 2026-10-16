@@ -156,10 +156,13 @@ export function buildCompactConfig(
   const model = models?.resolve(modelId)?.model;
   return {
     contextWindow: compact.contextWindow ?? model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    // 其余三项 schema 已 default（8192/4096/5），这里再兜底：非 zod 解析路径（测试/手拼 config）缺省时不 undefined
+    // 其余项 schema 已 default（8192/4096/5/5/5000/50000），这里再兜底：非 zod 解析路径（测试/手拼 config）缺省时不 undefined
     maxOutputTokens: compact.maxOutputTokens ?? 8192,
     safetyMargin: compact.safetyMargin ?? 4096,
     keepRecentToolResults: compact.keepRecentToolResults ?? 5,
+    restoreMaxFiles: compact.restoreMaxFiles ?? 5,
+    restoreMaxCharsPerFile: compact.restoreMaxCharsPerFile ?? 5000,
+    restoreMaxTotalChars: compact.restoreMaxTotalChars ?? 50000,
   };
 }
 

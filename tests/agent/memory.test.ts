@@ -133,7 +133,7 @@ describe("会话记忆", () => {
       systemPrompt: "助手",
       tools: [],
       memory: true,
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     // 第一轮：正常对话，Stop 后后台建立记忆（异步：收尾后等待更新完成）
     agent.start("搭建脚手架");
@@ -181,7 +181,7 @@ describe("会话记忆", () => {
         yield { type: "done", stopReason: "end_turn" };
       },
     };
-    const compactConfig = { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 };
+    const compactConfig = { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 };
     // 重装配前的旧 agent（记忆开启时期）：跑一轮沉淀记忆
     const previous = new Agent({ modelClient: client, modelId: "mock", systemPrompt: "助手", tools: [], memory: true });
     previous.start("搭建脚手架");
@@ -391,7 +391,7 @@ describe("覆盖窗口与在途保留", () => {
       tools: [],
       memory: true,
       initialMessages: pre,
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("触发压缩");
     for await (const _ of agent.run()) {
@@ -432,7 +432,7 @@ describe("覆盖窗口与在途保留", () => {
       tools: [],
       memory: true,
       initialMessages: pre,
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("压缩前输入");
     for await (const _ of agent.run()) {
@@ -484,7 +484,7 @@ describe("覆盖窗口与在途保留", () => {
       tools: [],
       memory: true,
       initialMessages: pre,
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("压缩前输入");
     for await (const _ of agent.run()) {
@@ -533,7 +533,7 @@ describe("覆盖窗口与在途保留", () => {
       systemPrompt: "助手",
       tools: [],
       memory: true,
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("搭脚手架");
     for await (const _ of agent.run()) {

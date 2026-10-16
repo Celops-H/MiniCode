@@ -399,7 +399,7 @@ describe("interact /compact 命令", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [],
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
 
     async function* inputs(): AsyncIterable<string> {
@@ -624,7 +624,7 @@ describe("interact /compact 命令", () => {
       systemPrompt: "助手",
       tools: [],
       // 窗口：第一轮不撞线；第二轮（历史+1200 字大输入）撞线触发压缩；压缩后（摘要+恢复上下文）不再撞线
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
 
     async function* inputs(): AsyncIterable<string> {
@@ -703,7 +703,7 @@ describe("interact /compact 命令", () => {
       tools: [readTool],
       // 窗口：前三轮不撞线；第四轮（历史 + 1200 字大输入）撞线压缩，
       // 压缩把消息数组整体换成摘要（短于压缩前长度）
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
 
     async function* inputs(): AsyncIterable<string> {
@@ -794,7 +794,7 @@ describe("interact /compact 命令", () => {
       tools: [readTool],
       memory: true,
       // 窗口：前三轮不撞线；第四轮（历史约 513 token）撞线，压缩走记忆替代路径
-      compactConfig: { contextWindow: 500, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 500, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
 
     async function* inputs(): AsyncIterable<string> {
@@ -860,24 +860,27 @@ describe("buildCompactConfig 装配", () => {
     // config 显式 contextWindow 优先
     expect(
       buildCompactConfig(configSchema.parse({ compact: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3 } }), "m", modelsWithWindow),
-    ).toEqual({ contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3 });
+    ).toEqual({ contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 100, keepRecentToolResults: 3, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 });
     // 无 contextWindow：取模型定义值
     expect(buildCompactConfig(configSchema.parse({ compact: {} }), "m", modelsWithWindow)?.contextWindow).toBe(64000);
     // 模型也没有：默认 204800（200k 兜底常量），其余字段用 schema 默认值
     const defaults = buildCompactConfig(configSchema.parse({ compact: {} }), "m");
-    expect(defaults).toEqual({ contextWindow: 204800, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5 });
+    expect(defaults).toEqual({ contextWindow: 204800, maxOutputTokens: 8192, safetyMargin: 4096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 });
     // 未配置 compact：不启用
     expect(buildCompactConfig(configSchema.parse({}), "m")).toBeUndefined();
   });
 
   it("手拼 compact 缺字段时兜底默认值（非 zod 解析路径）", () => {
-    // 未经 schema default 的原始对象（测试/直调）：只给 contextWindow，其余三项兜底
+    // 未经 schema default 的原始对象（测试/直调）：只给 contextWindow，其余各项兜底
     const raw = { compact: { contextWindow: 50000 } };
     expect(buildCompactConfig(raw as never, "m")).toEqual({
       contextWindow: 50000,
       maxOutputTokens: 8192,
       safetyMargin: 4096,
       keepRecentToolResults: 5,
+      restoreMaxFiles: 5,
+      restoreMaxCharsPerFile: 5000,
+      restoreMaxTotalChars: 50000,
     });
   });
 });
@@ -1291,7 +1294,7 @@ describe("交互循环", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [],
-      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0 },
+      compactConfig: { contextWindow: 300, maxOutputTokens: 30, safetyMargin: 20, keepRecentToolResults: 0, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     // 后台轮（模拟子 agent 唤醒）：长输入撞线压缩，改写历史且无人消费改写标记
     agent.start("很长的问题".repeat(100));
@@ -1775,7 +1778,7 @@ describe("/init 命令（生成/改进项目根 AGENTS.md）", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [],
-      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1 },
+      compactConfig: { contextWindow: 100000, maxOutputTokens: 1000, safetyMargin: 500, keepRecentToolResults: 1, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     async function* inputs(): AsyncIterable<string> {
       yield "写点什么";

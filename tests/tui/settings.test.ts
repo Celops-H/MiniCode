@@ -108,6 +108,9 @@ describe("setSettingEnabled（写回定义层）", () => {
       maxOutputTokens: 8192,
       safetyMargin: 4096,
       keepRecentToolResults: 5,
+      restoreMaxFiles: 5,
+      restoreMaxCharsPerFile: 5000,
+      restoreMaxTotalChars: 50000,
     });
     // 全局层的 compact 原样保留
     expect(read(paths.globalConfigFile).compact).toEqual({ contextWindow: 64000 });

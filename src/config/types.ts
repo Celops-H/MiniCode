@@ -139,6 +139,12 @@ export const configSchema = z
       safetyMargin: z.number().default(4096),
       /** 历史裁剪保留最近的工具结果条数，默认 5 */
       keepRecentToolResults: z.number().default(5),
+      /** 压缩/修剪后回注最近读过文件的条数上限，默认 5；0 关闭回注 */
+      restoreMaxFiles: z.number().default(5),
+      /** 回注单文件的字符上限，默认 5000 */
+      restoreMaxCharsPerFile: z.number().default(5000),
+      /** 回注总字符预算，默认 50000，装不下的文件整条跳过 */
+      restoreMaxTotalChars: z.number().default(50000),
     })
     .optional(),
   /** MCP 外部工具服务：服务名 → stdio 启动配置；装配时启动并接入工具池，

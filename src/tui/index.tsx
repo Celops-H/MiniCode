@@ -370,6 +370,9 @@ async function runTuiSession(opts: {
     maxOutputTokens: 8192,
     safetyMargin: 4096,
     keepRecentToolResults: 5,
+    restoreMaxFiles: 5,
+    restoreMaxCharsPerFile: 5000,
+    restoreMaxTotalChars: 50000,
   };
   // 撞线自动压缩开关：compactConfig 的有无只管压缩参数供给（手动 /compact 不受限），
   // 自动触发由本开关单独门控（Agent.autoCompact）

@@ -112,7 +112,7 @@ describe("contextTokens（水位口径）", () => {
       modelId: "mock",
       systemPrompt: "助手",
       tools: [echoTool],
-      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8_192, safetyMargin: 4_096, keepRecentToolResults: 5 },
+      compactConfig: { contextWindow: 100_000, maxOutputTokens: 8_192, safetyMargin: 4_096, keepRecentToolResults: 5, restoreMaxFiles: 5, restoreMaxCharsPerFile: 5000, restoreMaxTotalChars: 50000 },
     });
     agent.start("你好");
     for await (const _ of agent.run()) {
