@@ -29,6 +29,7 @@ import {
   needsCompact,
   parseContextTooLongGap,
   peelToolGroups,
+  PRUNED_MARKER,
   pruneToolResults,
   RECOVERY_MARKER,
   replaceWithSummary,
@@ -344,6 +345,8 @@ export class Agent {
    *  防下一轮 start() 把旧历史连同新输入一起回灌模型并重写会话文件 */
   resetHistory(): void {
     this.messages = [];
+    // 历史清空即无读结果留在上下文，读去重记录一并清掉（同区间重读须回全文）
+    this.syncReadState();
     // 清盘即丢弃未发射的待镜像消息：消息已不在上下文，补发只会让轨迹多出不存在的消息
     this.pendingRepairMirrors = [];
     // 历史已清空，真实用量回填随之作废（旧值对应的是清盘前的请求）
@@ -676,6 +679,8 @@ export class Agent {
         this.messages = peeled;
         this.promptTokensAt = undefined; // 历史被剥组，真实用量回填作废
         this.historyRewritten = true; // 已落盘的工具回合被剥除
+        // 剥组删掉了回合，其中的读结果不再可见：同步摘除读记录，同区间重读回全文
+        this.syncReadState();
         // 覆盖点钳制：剥组保留组间游离消息、旧消息下标会前移，极端情况下剩余长度
         // 小于覆盖点即越界——收回到新数组长度内兜底；剩余长度仍覆盖点的场景下
         // 前移导致的「未覆盖消息被当已覆盖」按剥组应急丢弃语义接受（被剥消息本就丢弃）
@@ -918,6 +923,9 @@ export class Agent {
       this.messages = prunedMessages;
       this.promptTokensAt = undefined; // 历史被裁剪，真实用量回填作废
       this.historyRewritten = true; // 已落盘的旧工具输出被替换为裁剪标记
+      // 被裁剪的旧读结果已换成裁剪标记、对模型不可见：同步摘除读记录，
+      // 同区间重读必须回全文而非 stub 指向裁剪标记
+      this.syncReadState();
       if (!instructions && !needsCompact(this.contextTokens(), this.compactConfig!)) {
         await emitCompact(true);
         return true;
@@ -1014,6 +1022,9 @@ export class Agent {
         this.messages.push(recoveryMessage);
         await this.emitMessageAppended(recoveryMessage);
       }
+      // 摘要整段替换后，被替换掉的读结果不再可见：同步摘除读记录，同区间重读回全文
+      //（记忆分支保留的在途读结果仍在上下文，其记录照留）
+      this.syncReadState();
       this.historyRewritten = true; // 已落盘历史被摘要替换
       await emitCompact(true);
       return true;
@@ -1071,6 +1082,19 @@ export class Agent {
     const was = this.historyRewritten;
     this.historyRewritten = false;
     return was;
+  }
+
+  /**
+   * 同步读去重状态：修剪（旧结果换成裁剪标记）、压缩（整段替换）、剥组（删掉回合）后，
+   * 被摘除的读结果对模型不可见，对应读记录一并摘除——同区间重读必须回全文，
+   * 不能回 stub 指向已消失的结果。清盘后同理（无读结果在上下文，读记录全清）。
+   */
+  private syncReadState(): void {
+    const live = new Set<string>();
+    for (const message of this.messages) {
+      if (message.role === "tool_result" && message.content !== PRUNED_MARKER) live.add(message.toolCallId);
+    }
+    this.fileState.retainReads(live);
   }
 
   /**
@@ -1418,7 +1442,12 @@ export class Agent {
           withCwd(this.cwd, () =>
             withFileState(
               this.fileState,
-              () => tool.execute(call.input, { signal: this.interruptController.signal, agentPath }),
+              () =>
+                tool.execute(call.input, {
+                  signal: this.interruptController.signal,
+                  agentPath,
+                  toolCallId: call.id,
+                }),
             ),
           ),
           ...deadlines,

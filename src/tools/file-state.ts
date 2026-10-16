@@ -14,6 +14,17 @@ export interface FileVersion {
   contentHash: string;
 }
 
+/**
+ * 一次读结果的去重记录：把「路径 + 区间」指向产出它的那次工具调用。
+ * read 重复读同一文件时据此判定能否回 stub（见 read 工具与 FileState.retainReads）。
+ */
+export interface ReadRecord {
+  /** 产出该结果的工具调用 id：修剪/压缩把结果摘除后据此一并摘除本记录 */
+  toolCallId: string;
+  /** 该次读到的文件内容 hash：与磁盘现内容比对，判定文件是否被改动 */
+  contentHash: string;
+}
+
 /** 计算文件内容的 sha256 哈希 */
 export function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -25,6 +36,8 @@ const fileLocks = new Map<string, Promise<void>>();
 /** 按 agent 隔离的文件状态：磁盘是共享真相，先到先写天然成立 */
 export class FileState {
   private readonly versions = new Map<string, FileVersion>();
+  /** 读去重记录：键为「路径 + 区间」，值绑定产出结果的工具调用 id 与内容 hash */
+  private readonly reads = new Map<string, ReadRecord>();
 
   private normalize(p: string): string {
     // Windows 文件系统大小写不敏感：统一小写，避免 C:\a.txt 与 c:\A.TXT 各占锁/快照条目绕过 CAS
@@ -38,6 +51,32 @@ export class FileState {
 
   setVersion(p: string, version: FileVersion): void {
     this.versions.set(this.normalize(p), version);
+  }
+
+  /** 读去重键：路径 + 区间（offset 与 limit），区间不同即不同键 */
+  private readKey(p: string, offset: number, limit: number | undefined): string {
+    return `${this.normalize(p)}\n${offset}\n${limit ?? ""}`;
+  }
+
+  /** 取某路径某区间的读记录；无记录表示该区间的结果不可复用 */
+  getRead(p: string, offset: number, limit: number | undefined): ReadRecord | undefined {
+    return this.reads.get(this.readKey(p, offset, limit));
+  }
+
+  /** 记一次读结果：同键覆盖旧值，只留最近一次产出该区间结果且仍在上下文的调用 */
+  setRead(p: string, offset: number, limit: number | undefined, record: ReadRecord): void {
+    this.reads.set(this.readKey(p, offset, limit), record);
+  }
+
+  /**
+   * 摘除已不在上下文的读记录：修剪把结果换成裁剪标记、压缩整段替换、剥组删掉回合后，
+   * 旧结果对模型不可见，同区间重读必须回全文，不能回 stub 指向已消失的结果。
+   * @param liveToolCallIds 仍留在上下文的工具调用 id 集合（含未修剪的工具结果）
+   */
+  retainReads(liveToolCallIds: ReadonlySet<string>): void {
+    for (const [key, record] of this.reads) {
+      if (!liveToolCallIds.has(record.toolCallId)) this.reads.delete(key);
+    }
   }
 
   /**

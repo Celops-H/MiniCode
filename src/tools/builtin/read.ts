@@ -25,7 +25,7 @@ export const readTool: Tool = {
   isConcurrencySafe: () => true,
   maxResultSizeChars: MAX_RESULT_CHARS,
   truncationNote: "结果不完整，建议缩小范围：文件用 offset 与 limit 分段读，目录用 glob 按模式过滤",
-  async execute(input) {
+  async execute(input, options) {
     const { path, offset = 1, limit } = validateInput<{
       path: string;
       offset?: number;
@@ -53,13 +53,14 @@ export const readTool: Tool = {
       ].join("\n");
     }
     const content = await readFile(file, "utf8");
+    const contentHash = hashContent(content);
     // 记录版本令牌：内容已完整取出，部分读也照记 hash，写前据此比对内容。
     // 记版本的 stat 在读与 stat 之间文件被删时同样会抛裸 ENOENT，失败即跳过记版本
     const fileState = currentFileState();
     if (fileState) {
       try {
         const disk = await stat(file);
-        fileState.setVersion(file, { size: disk.size, contentHash: hashContent(content) });
+        fileState.setVersion(file, { size: disk.size, contentHash });
       } catch {
         // 文件在读取后立即被删：内容已拿到，正常返回，不记版本
       }
@@ -73,6 +74,24 @@ export const readTool: Tool = {
       // 模型得不到反馈可能反复调 offset 空转
       return `起始行超出文件行数（共 ${lines.length} 行，offset 从 1 起）`;
     }
+    // 读去重：同路径同区间、内容未变、且旧结果仍在上下文时回 stub，不重复回灌全文。
+    // 「旧结果仍在上下文」由 Agent 保证——修剪/压缩/剥组摘除旧结果时同步摘除读记录
+    // （FileState.retainReads），记录在即结果在。内容 hash 变了（文件被外部或本次
+    // edit 改写）或区间不同则照常回全文。无调用身份（无 toolCallId）时不做去重。
+    const toolCallId = options?.toolCallId;
+    if (fileState && toolCallId) {
+      const record = fileState.getRead(file, offset, limit);
+      if (record && record.contentHash === contentHash) {
+        return readUnchangedStub(offset, limit);
+      }
+      fileState.setRead(file, offset, limit, { toolCallId, contentHash });
+    }
     return selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
   },
 };
+
+/** 读去重命中时的回灌文本：指回上下文里仍在的旧结果，不重复回灌文件内容 */
+function readUnchangedStub(offset: number, limit: number | undefined): string {
+  const range = limit === undefined ? `第 ${offset} 行起` : `第 ${offset} 行起 ${limit} 行`;
+  return `文件未变化：${range}的内容与上次读取一致，不重复回灌；上次结果仍在上文，直接引用即可。`;
+}

@@ -30,6 +30,12 @@ export interface ExecuteContext {
    * （如后台任务查询游标）据此区分。缺省视作 `/root`。
    */
   agentPath?: string;
+  /**
+   * 本次工具调用的 id（与回灌的 ToolResultMessage.toolCallId 配对）。
+   * 需要把一次执行与它留在上下文里的结果关联的工具用它：read 据此判断旧读结果
+   * 是否仍在上下文（被修剪/压缩摘除则不可回 stub）。缺省无调用身份，工具按无上下文处理。
+   */
+  toolCallId?: string;
 }
 
 /**
