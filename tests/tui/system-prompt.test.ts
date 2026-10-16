@@ -33,6 +33,16 @@ it("系统提示词给出待办清单使用时机", () => {
   expect(SYSTEM_PROMPT).toContain("待办清单");
 });
 
+it("系统提示词编号按分节各自从 1 起，不跨节连号", () => {
+  // 分节标题已表达分组，编号跨节递增会让「第 N 条」与所在节脱节
+  const sections = SYSTEM_PROMPT.split("\n【").slice(1);
+  expect(sections.length).toBeGreaterThan(1);
+  for (const section of sections) {
+    expect(section.split("\n")[1], section.slice(0, 12)).toMatch(/^1\. /);
+  }
+  expect(SYSTEM_PROMPT).not.toMatch(/^\d{2,}\. /m);
+});
+
 it("多 Agent 协作口径：只留一句指路，派活细节归协作工具描述", () => {
   expect(SYSTEM_PROMPT).toContain("协作工具描述");
   // 派活后继续、自动唤醒、证据要求等细节只在工具描述里讲一次，提示词不重述
